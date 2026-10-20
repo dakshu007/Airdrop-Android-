@@ -8,25 +8,22 @@ struct DevicesView: View {
     @State private var pendingForget: TrustedDeviceRecord?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: CDSpacing.xl) {
-                ThisDeviceCard()
-                VStack(alignment: .leading, spacing: CDSpacing.m) {
-                    SectionHeader(title: "Paired devices",
-                                  detail: model.trustedDevices.isEmpty ? nil : "\(model.trustedDevices.count)")
-                    if model.trustedDevices.isEmpty {
-                        StateMessage(symbol: "checkmark.shield",
-                                     title: "No paired devices yet",
-                                     message: "A device appears here after you both confirm the same six-digit code. Paired devices can send to you without pairing again; you still approve each transfer unless you allow automatic acceptance.")
-                            .cdGlass(radius: CDRadius.medium)
-                    } else {
-                        ForEach(model.trustedDevices) { device in
-                            TrustedDeviceRow(device: device, onForget: { pendingForget = device })
-                        }
-                    }
+        PageScroll {
+            PageTitle(title: "Devices", subtitle: "Devices you've paired by confirming the same code on both screens.")
+            ThisDeviceCard()
+            SectionHeader(title: "Paired",
+                          detail: model.trustedDevices.isEmpty ? nil : "\(model.trustedDevices.count)")
+                .padding(.top, CDSpacing.s)
+            if model.trustedDevices.isEmpty {
+                StateMessage(symbol: "checkmark.shield",
+                             title: "No paired devices yet",
+                             message: "Send a file to a nearby device, or receive one, and confirm the 6-digit code on both screens. The device shows up here.")
+                    .glassPanel(cornerRadius: CDRadius.card)
+            } else {
+                ForEach(model.trustedDevices) { device in
+                    TrustedDeviceRow(device: device, onForget: { pendingForget = device })
                 }
             }
-            .padding(CDSpacing.xl)
         }
         .confirmationDialog(
             "Forget \(pendingForget?.name ?? "this device")?",
@@ -37,7 +34,7 @@ struct DevicesView: View {
             Button("Forget Device", role: .destructive) { model.forget(device) }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("You'll need to confirm a pairing code again before exchanging files with this device.")
+            Text("You'll confirm a pairing code again before exchanging files with this device.")
         }
     }
 }
@@ -47,13 +44,18 @@ struct ThisDeviceCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: CDSpacing.l) {
-            DeviceAvatar(platform: "macos", size: 48)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("This Mac").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                Text(model.deviceName).font(.system(size: 16, weight: .semibold))
-                Text("Fingerprint").font(.system(size: 11)).foregroundColor(.secondary).padding(.top, 4)
+            DeviceAvatar(platform: "macos", size: 50)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("THIS MAC")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundColor(CDPalette.textTertiary)
+                Text(model.deviceName)
+                    .font(CDFont.title)
+                    .foregroundColor(.white)
                 Text(Format.fingerprint(model.identity.fingerprint))
                     .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(CDPalette.textSecondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel("Fingerprint")
@@ -62,14 +64,15 @@ struct ThisDeviceCard: View {
                     Text(model.identityLocation == .file
                          ? "The identity key is stored in a protected file because the Keychain was unavailable."
                          : "The identity key couldn't be saved. Pairings will be lost when CrossDrop quits.")
-                        .font(.system(size: 11))
+                        .font(CDFont.caption)
                         .foregroundColor(CDPalette.amber)
                 }
             }
-            Spacer()
+            .legibleText()
+            Spacer(minLength: 0)
         }
-        .padding(CDSpacing.l)
-        .cdGlass(radius: CDRadius.medium)
+        .padding(CDSpacing.xl)
+        .glassPanel(cornerRadius: CDRadius.panel)
     }
 }
 
@@ -81,34 +84,41 @@ struct TrustedDeviceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: CDSpacing.m) {
             HStack(spacing: CDSpacing.m) {
-                DeviceAvatar(platform: device.platform, size: 40)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(device.name).font(.system(size: 14, weight: .semibold))
-                    Text(subtitle).font(.system(size: 11)).foregroundColor(.secondary)
+                DeviceAvatar(platform: device.platform, size: 42)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(device.name)
+                        .font(CDFont.headline)
+                        .foregroundColor(.white)
+                    Text(subtitle)
+                        .font(CDFont.caption)
+                        .foregroundColor(CDPalette.textSecondary)
                 }
-                Spacer()
+                Spacer(minLength: CDSpacing.s)
                 Button("Forget…", action: onForget)
                     .buttonStyle(GlassButtonStyle(destructive: true))
                     .accessibilityLabel("Forget \(device.name)")
             }
+            GlassDivider()
             Toggle(isOn: Binding(get: { device.autoAccept }, set: { model.setAutoAccept($0, for: device) })) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Accept files automatically").font(.system(size: 12, weight: .medium))
+                    Text("Accept files automatically")
+                        .font(CDFont.callout.weight(.medium))
+                        .foregroundColor(.white)
                     Text("Files from this device are saved without asking. They're still verified.")
-                        .font(.system(size: 11)).foregroundColor(.secondary)
+                        .font(CDFont.caption)
+                        .foregroundColor(CDPalette.textTertiary)
                 }
             }
-            .toggleStyle(.switch)
-            .controlSize(.small)
+            .toggleStyle(GlassToggleStyle())
             Text(Format.fingerprint(device.fingerprint))
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.secondary)
+                .foregroundColor(CDPalette.textTertiary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel("Fingerprint")
         }
         .padding(CDSpacing.l)
-        .cdGlass(radius: CDRadius.medium)
+        .glassPanel(cornerRadius: CDRadius.card)
     }
 
     private var subtitle: String {

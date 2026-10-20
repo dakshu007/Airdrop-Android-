@@ -148,6 +148,8 @@ jobs:
           codesign --verify --verbose "$APP"
       - name: Package DMG
         run: |
+          brew install create-dmg
+          python3 -m pip install --quiet --user pillow 2>/dev/null || python3 -m pip install --quiet --break-system-packages pillow
           mkdir -p dist
           scripts/build-dmg.sh macos/build/Build/Products/Release/CrossDrop.app dist/CrossDrop.dmg
           ls -la dist

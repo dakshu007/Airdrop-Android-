@@ -7,84 +7,99 @@ import CrossDropCore
 
 struct SendView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: CDSpacing.xl) {
-                DropZone()
-                if !model.selectedFiles.isEmpty {
-                    SelectedFilesCard()
-                }
-                NearbyCard()
-                if !model.activeTransfers.isEmpty {
-                    VStack(alignment: .leading, spacing: CDSpacing.m) {
-                        SectionHeader(title: "In progress")
-                        ForEach(model.activeTransfers) { item in
-                            TransferCard(item: item)
-                        }
-                    }
+        PageScroll {
+            PageTitle(title: "Send", subtitle: "Drop files, pick a nearby device. Straight there, encrypted, no cloud.")
+            DropZone()
+            if !model.selectedFiles.isEmpty {
+                SelectedFilesCard()
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            }
+            NearbyCard()
+            let outgoing = model.outgoingTransfers
+            if !outgoing.isEmpty {
+                SectionHeader(title: "Transfers", detail: "This session")
+                    .padding(.top, CDSpacing.s)
+                ForEach(outgoing) { item in
+                    TransferCard(item: item)
                 }
             }
-            .padding(CDSpacing.xl)
         }
+        .animation(CDMotion.layout(reduceMotion), value: model.selectedFiles)
     }
 }
+
+// MARK: - Drop zone
 
 struct DropZone: View {
     @EnvironmentObject private var model: AppModel
     var compact = false
     @State private var targeted = false
+    @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: CDRadius.large, style: .continuous)
+        let radius = compact ? CDRadius.card : CDRadius.panel
+        let lit = targeted || hovering
         VStack(spacing: compact ? CDSpacing.s : CDSpacing.m) {
             ZStack {
                 Circle()
-                    .fill(CDPalette.brand)
-                    .opacity(targeted ? 1 : 0.9)
+                    .fill(Color.white.opacity(targeted ? 0.3 : 0.16))
                 Circle()
-                    .fill(LinearGradient(colors: [Color.white.opacity(0.35), Color.white.opacity(0)],
-                                         startPoint: .top, endPoint: .center))
-                Image(systemName: targeted ? "arrow.down.circle.fill" : "arrow.down.doc.fill")
-                    .font(.system(size: compact ? 18 : 26, weight: .semibold))
+                    .strokeBorder(Color.white.opacity(0.5), lineWidth: 1)
+                Image(systemName: targeted ? "arrow.down" : "arrow.down.doc")
+                    .font(.system(size: compact ? 17 : 26, weight: .medium))
                     .foregroundColor(.white)
             }
-            .frame(width: compact ? 40 : 64, height: compact ? 40 : 64)
-            .shadow(color: CDPalette.sky.opacity(targeted ? 0.55 : 0.25), radius: targeted ? 18 : 10, x: 0, y: 6)
+            .frame(width: compact ? 40 : 68, height: compact ? 40 : 68)
+            .shadow(color: Color.white.opacity(targeted ? 0.45 : 0.12), radius: targeted ? 22 : 10)
+            .scaleEffect(targeted && !reduceMotion ? 1.08 : 1)
             .accessibilityHidden(true)
 
-            Text(targeted ? "Release to add" : "Drop files here")
-                .font(.system(size: compact ? 14 : 19, weight: .semibold, design: .rounded))
+            Text(targeted ? "Release to add" : "Drop files to send")
+                .font(compact ? Font.system(size: 14, weight: .semibold, design: .rounded) : CDFont.title)
+                .foregroundColor(.white)
+                .legibleText()
+
             if !compact {
-                Text("Drag files from Finder, or choose them. They stay on this Mac until you pick a device.")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                Text("Drag from Finder, or choose them. Folders aren't supported yet.")
+                    .font(CDFont.callout)
+                    .foregroundColor(CDPalette.textSecondary)
                     .multilineTextAlignment(.center)
             }
+
             HStack(spacing: CDSpacing.s) {
-                Button("Choose Files…") { model.chooseFiles() }
-                    .buttonStyle(GlassButtonStyle())
-                    .help("Choose files to send (⌘O)")
-                if !compact {
-                    Text("Folders aren't supported yet")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                Button {
+                    model.chooseFiles()
+                } label: {
+                    Label("Choose Files…", systemImage: "plus")
+                }
+                .buttonStyle(GlassButtonStyle())
+                .help("Choose files to send (⌘O)")
+                if !model.selectedFiles.isEmpty && !compact {
+                    Chip(text: Format.files(model.selectedFiles.count), symbol: "doc.on.doc")
+                    Chip(text: Format.bytes(model.selectedTotalBytes))
                 }
             }
+            .padding(.top, compact ? 0 : 4)
         }
-        .padding(compact ? CDSpacing.l : CDSpacing.xxl)
-        .frame(maxWidth: .infinity, minHeight: compact ? 130 : 230)
-        .cdGlass(radius: CDRadius.large)
+        .padding(compact ? CDSpacing.l : 36)
+        .frame(maxWidth: .infinity, minHeight: compact ? 140 : 250)
+        .glassPanel(cornerRadius: radius)
         .overlay(
-            shape
-                .strokeBorder(style: StrokeStyle(lineWidth: targeted ? 2 : 1.25, dash: targeted ? [] : [7, 6]))
-                .foregroundColor(targeted ? Color.accentColor : Color.secondary.opacity(0.45))
-                .padding(6)
+            RoundedRectangle(cornerRadius: radius - 10, style: .continuous)
+                .strokeBorder(style: StrokeStyle(lineWidth: targeted ? 2 : 1.25, lineCap: .round,
+                                                 dash: targeted ? [] : [6, 7]))
+                .foregroundColor(Color.white.opacity(targeted ? 0.85 : (lit ? 0.5 : 0.3)))
+                .padding(10)
                 .allowsHitTesting(false)
         )
-        .scaleEffect(targeted && !reduceMotion ? 1.012 : 1)
-        .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.75), value: targeted)
+        .scaleEffect(targeted && !reduceMotion ? 1.01 : 1)
+        .animation(reduceMotion ? nil : CDMotion.quick, value: targeted)
+        .animation(.easeOut(duration: 0.2), value: hovering)
+        .onHover { hovering = $0 }
         .onDrop(of: [UTType.fileURL], isTargeted: $targeted) { providers in
             model.addDroppedItems(providers)
             return true
@@ -95,6 +110,8 @@ struct DropZone: View {
     }
 }
 
+// MARK: - Selected files
+
 struct SelectedFilesCard: View {
     @EnvironmentObject private var model: AppModel
 
@@ -103,60 +120,69 @@ struct SelectedFilesCard: View {
             HStack {
                 SectionHeader(title: "Ready to send",
                               detail: "\(Format.files(model.selectedFiles.count)) · \(Format.bytes(model.selectedTotalBytes))")
-                Button("Clear") { model.clearSelection() }
+                Button("Clear All") { model.clearSelection() }
                     .buttonStyle(GlassButtonStyle())
             }
             VStack(spacing: 0) {
                 ForEach(model.selectedFiles) { file in
                     HStack(spacing: CDSpacing.m) {
-                        FileIcon(url: file.url, name: file.name, size: 28)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(file.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
-                            Text(Format.bytes(file.size)).font(.system(size: 11)).foregroundColor(.secondary)
+                        FileIcon(url: file.url, name: file.name, size: 30)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(file.name)
+                                .font(CDFont.body)
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Text(Format.bytes(file.size))
+                                .font(CDFont.caption.monospacedDigit())
+                                .foregroundColor(CDPalette.textTertiary)
                         }
-                        Spacer()
+                        Spacer(minLength: CDSpacing.s)
                         Button {
                             model.removeFile(file)
                         } label: {
                             Image(systemName: "xmark")
                         }
-                        .buttonStyle(IconButtonStyle())
+                        .buttonStyle(IconButtonStyle(size: 24))
                         .accessibilityLabel("Remove \(file.name)")
                     }
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 8)
                     if file.id != model.selectedFiles.last?.id {
-                        Divider().opacity(0.5)
+                        GlassDivider().padding(.leading, 42)
                     }
                 }
             }
         }
         .padding(CDSpacing.l)
-        .cdGlass(radius: CDRadius.medium)
+        .glassPanel(cornerRadius: CDRadius.card)
     }
 }
+
+// MARK: - Nearby
 
 struct NearbyCard: View {
     @EnvironmentObject private var model: AppModel
 
-    private let columns = [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: CDSpacing.m)]
+    private let columns = [GridItem(.adaptive(minimum: 170, maximum: 240), spacing: CDSpacing.m)]
 
     var body: some View {
         VStack(alignment: .leading, spacing: CDSpacing.l) {
-            SectionHeader(title: "Nearby devices", detail: headerDetail)
-            stateContent
-            if !model.nearby.isEmpty {
-                sendBar
+            HStack {
+                SectionHeader(title: "Nearby", detail: headerDetail)
+                if model.discoveryStatus == .browsing && !model.nearby.isEmpty {
+                    ProgressView().controlSize(.small).scaleEffect(0.8)
+                        .accessibilityLabel("Still looking")
+                }
             }
+            stateContent
         }
         .padding(CDSpacing.l)
-        .cdGlass(radius: CDRadius.medium)
+        .glassPanel(cornerRadius: CDRadius.card)
     }
 
     private var headerDetail: String? {
-        switch model.discoveryStatus {
-        case .browsing: return model.nearby.isEmpty ? "Looking…" : nil
-        default: return nil
-        }
+        if model.nearby.isEmpty { return model.discoveryStatus == .browsing ? "Looking…" : nil }
+        return model.selectedFiles.isEmpty ? "Add files, then click a device" : "Click a device to send"
     }
 
     @ViewBuilder
@@ -173,21 +199,26 @@ struct NearbyCard: View {
                 Button("Open System Settings") { openLocalNetworkSettings() }
                     .buttonStyle(GlassButtonStyle())
             }
+            .frame(maxWidth: .infinity)
         } else if case .failed(let message) = model.discoveryStatus {
             StateMessage(symbol: "exclamationmark.triangle", title: "Can't look for devices", message: message,
                          tint: CDPalette.coral)
         } else if model.nearby.isEmpty {
             HStack(spacing: CDSpacing.xl) {
                 RadarView(active: model.discoveryStatus == .browsing)
-                    .frame(width: 120, height: 120)
-                VStack(alignment: .leading, spacing: CDSpacing.s) {
-                    Text("Looking for nearby devices…").font(.system(size: 14, weight: .semibold))
-                    Text("Open CrossDrop on your Android phone and turn on Receiving. Both devices must be on the same Wi-Fi. Guest networks and some office networks block devices from seeing each other.")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                    .frame(width: 112, height: 112)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Looking for nearby devices")
+                        .font(CDFont.headline)
+                        .foregroundColor(.white)
+                    Text("Open CrossDrop on your phone and turn on Receiving. Both devices need the same Wi-Fi; guest networks often keep devices from seeing each other.")
+                        .font(CDFont.callout)
+                        .foregroundColor(CDPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .legibleText()
             }
+            .padding(.vertical, CDSpacing.s)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
         } else {
@@ -195,40 +226,17 @@ struct NearbyCard: View {
                 ForEach(model.nearby) { device in
                     DeviceTile(device: device,
                                trusted: model.isTrusted(device.deviceId),
-                               selected: model.selectedDeviceId == device.deviceId) {
-                        model.selectedDeviceId = device.deviceId
+                               canSend: !model.selectedFiles.isEmpty) {
+                        if model.selectedFiles.isEmpty {
+                            model.selectedDeviceId = device.deviceId
+                            model.chooseFiles()
+                        } else {
+                            model.sendSelection(to: device)
+                        }
                     }
                 }
             }
         }
-    }
-
-    private var sendBar: some View {
-        HStack(spacing: CDSpacing.m) {
-            Text(sendHint)
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer()
-            Button {
-                if let device = model.selectedDevice { model.sendSelection(to: device) }
-            } label: {
-                Label("Send", systemImage: "paperplane.fill")
-            }
-            .buttonStyle(PrimaryButtonStyle())
-            .keyboardShortcut(.defaultAction)
-            .disabled(model.selectedFiles.isEmpty || model.selectedDevice == nil)
-        }
-    }
-
-    private var sendHint: String {
-        if model.selectedFiles.isEmpty { return "Add files above, then choose a device." }
-        guard let device = model.selectedDevice else { return "Choose a device to send to." }
-        let what = "\(Format.files(model.selectedFiles.count)) (\(Format.bytes(model.selectedTotalBytes)))"
-        if model.isTrusted(device.deviceId) {
-            return "Send \(what) to \(device.name)."
-        }
-        return "Send \(what) to \(device.name). You'll confirm a pairing code on both devices first."
     }
 
     private func openLocalNetworkSettings() {
@@ -241,77 +249,62 @@ struct NearbyCard: View {
 struct DeviceTile: View {
     let device: DiscoveredDevice
     let trusted: Bool
-    let selected: Bool
+    let canSend: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: CDSpacing.s) {
-                DeviceAvatar(platform: device.platform, size: 48)
-                Text(device.name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                HStack(spacing: 4) {
-                    Image(systemName: trusted ? "checkmark.seal.fill" : "seal")
-                    Text(trusted ? "Paired" : "Not paired yet")
+            HStack(spacing: CDSpacing.m) {
+                DeviceAvatar(platform: device.platform, size: 42)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(device.name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Image(systemName: trusted ? "checkmark.seal.fill" : "sparkles")
+                            .font(.system(size: 9, weight: .bold))
+                        Text(trusted ? "Paired" : "New · pair first")
+                    }
+                    .font(CDFont.caption)
+                    .foregroundColor(trusted ? CDPalette.mint : CDPalette.textSecondary)
                 }
-                .font(.system(size: 11))
-                .foregroundColor(trusted ? CDPalette.mint : .secondary)
+                Spacer(minLength: 0)
+                Image(systemName: canSend ? "paperplane.fill" : "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(canSend ? Color.black.opacity(0.8) : .white)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(canSend ? Color.white : Color.white.opacity(0.14)))
             }
-            .padding(CDSpacing.m)
-            .frame(maxWidth: .infinity, minHeight: 128)
-            .background(
-                RoundedRectangle(cornerRadius: CDRadius.medium, style: .continuous)
-                    .fill(selected ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.035))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: CDRadius.medium, style: .continuous)
-                    .strokeBorder(selected ? Color.accentColor : Color.white.opacity(0.25), lineWidth: selected ? 2 : 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: CDRadius.medium, style: .continuous))
+            .padding(12)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TileButtonStyle())
         .accessibilityLabel("\(device.name), \(device.platform == "android" ? "Android" : "Mac"), \(trusted ? "paired" : "not paired")")
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityHint("Selects this device as the destination.")
+        .accessibilityHint(canSend ? "Sends the selected files" : "Choose files to send to this device")
     }
 }
 
-/// Discovery animation; static rings when Reduce Motion is on or when idle.
-struct RadarView: View {
-    let active: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+/// Inset glass tile that lifts slightly on hover.
+struct TileButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        TileBody(configuration: configuration)
+    }
 
-    var body: some View {
-        ZStack {
-            if active && !reduceMotion {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { timeline in
-                    let time = timeline.date.timeIntervalSinceReferenceDate
-                    ZStack {
-                        ForEach(0..<3, id: \.self) { index in
-                            let phase = (time / 2.4 + Double(index) / 3.0).truncatingRemainder(dividingBy: 1.0)
-                            Circle()
-                                .stroke(CDPalette.sky.opacity(0.55 * (1 - phase)), lineWidth: 1.5)
-                                .scaleEffect(0.35 + phase * 0.65)
-                        }
-                    }
-                }
-            } else {
-                ForEach(0..<3, id: \.self) { index in
-                    Circle()
-                        .stroke(CDPalette.sky.opacity(0.18 + Double(index) * 0.06), lineWidth: 1)
-                        .scaleEffect(0.45 + Double(index) * 0.25)
-                }
-            }
-            ZStack {
-                Circle().fill(CDPalette.brand)
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-            }
-            .frame(width: 44, height: 44)
+    private struct TileBody: View {
+        let configuration: ButtonStyleConfiguration
+        @State private var hovering = false
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+            configuration.label
+                .background(shape.fill(Color.white.opacity(configuration.isPressed ? 0.2 : (hovering ? 0.15 : 0.09))))
+                .overlay(shape.strokeBorder(Color.white.opacity(hovering ? 0.45 : 0.22), lineWidth: 1))
+                .contentShape(shape)
+                .scaleEffect(hovering && !reduceMotion ? 1.015 : 1)
+                .animation(reduceMotion ? nil : CDMotion.quick, value: hovering)
+                .onHover { hovering = $0 }
+                .modifier(FocusRing(shape: shape))
         }
-        .accessibilityHidden(true)
     }
 }

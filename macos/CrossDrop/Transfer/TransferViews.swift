@@ -4,6 +4,7 @@ import AppKit
 import CrossDropCore
 #endif
 
+/// One transfer: who, what, live progress, and the actions that make sense right now.
 struct TransferCard: View {
     @EnvironmentObject private var model: AppModel
     let item: TransferItem
@@ -14,43 +15,37 @@ struct TransferCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: CDSpacing.m) {
-            ZStack(alignment: .bottomTrailing) {
-                DeviceAvatar(platform: snapshot.peerPlatform, size: compact ? 32 : 42)
-                Image(systemName: outgoing ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                    .font(.system(size: compact ? 12 : 15))
-                    .foregroundColor(outgoing ? CDPalette.sky : CDPalette.mint)
-                    .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
-                    .offset(x: 3, y: 3)
-                    .accessibilityHidden(true)
-            }
+            leadingIcon
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(outgoing ? "To \(snapshot.peerName)" : "From \(snapshot.peerName)")
-                        .font(.system(size: compact ? 12 : 14, weight: .semibold))
+            VStack(alignment: .leading, spacing: compact ? 5 : 7) {
+                HStack(alignment: .firstTextBaseline, spacing: CDSpacing.s) {
+                    Text(title)
+                        .font(.system(size: compact ? 12 : 13, weight: .semibold))
+                        .foregroundColor(.white)
                         .lineLimit(1)
+                        .truncationMode(.middle)
                     Spacer(minLength: CDSpacing.s)
                     statusLabel
                 }
-                Text(fileSummary)
-                    .font(.system(size: compact ? 11 : 12))
-                    .foregroundColor(.secondary)
+                Text(subtitle)
+                    .font(compact ? CDFont.caption : CDFont.callout)
+                    .foregroundColor(CDPalette.textSecondary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
 
                 if showsProgress {
-                    CapsuleProgress(value: item.fraction)
+                    CapsuleProgress(value: item.fraction, tint: outgoing ? .white : CDPalette.mint)
+                        .padding(.top, 2)
                     TimelineView(.periodic(from: Date(), by: 1)) { _ in
                         Text(progressText)
-                            .font(.system(size: 11).monospacedDigit())
-                            .foregroundColor(.secondary)
+                            .font(CDFont.caption.monospacedDigit())
+                            .foregroundColor(CDPalette.textTertiary)
                     }
                 }
 
                 if hasProblem {
                     Text(TransferText.errorMessage(snapshot))
-                        .font(.system(size: 11))
-                        .foregroundColor(snapshot.phase == .failed ? CDPalette.coral : .secondary)
+                        .font(CDFont.caption)
+                        .foregroundColor(snapshot.phase == .failed ? CDPalette.coral : CDPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -60,40 +55,67 @@ struct TransferCard: View {
             }
         }
         .padding(compact ? CDSpacing.m : CDSpacing.l)
-        .cdGlass(radius: CDRadius.medium)
+        .glassPanel(cornerRadius: compact ? 16 : CDRadius.card, style: compact ? .inset : .regular)
         .accessibilityElement(children: .contain)
     }
 
+    @ViewBuilder
+    private var leadingIcon: some View {
+        let size: CGFloat = compact ? 30 : 40
+        ZStack(alignment: .bottomTrailing) {
+            if let file = singleFile {
+                FileIcon(url: file.savedURL ?? file.sourceURL, name: file.name, size: size)
+            } else {
+                DeviceAvatar(platform: snapshot.peerPlatform, size: size)
+            }
+            Image(systemName: outgoing ? "arrow.up" : "arrow.down")
+                .font(.system(size: compact ? 7 : 9, weight: .heavy))
+                .foregroundColor(.black.opacity(0.8))
+                .frame(width: compact ? 13 : 17, height: compact ? 13 : 17)
+                .background(Circle().fill(outgoing ? Color.white : CDPalette.mint))
+                .offset(x: 3, y: 3)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var singleFile: TransferFileState? {
+        snapshot.files.count == 1 ? snapshot.files.first : nil
+    }
+
+    private var title: String {
+        let names = snapshot.files.map { $0.name }
+        guard let first = names.first else { return outgoing ? "To \(snapshot.peerName)" : "From \(snapshot.peerName)" }
+        return names.count > 1 ? "\(first) + \(names.count - 1) more" : first
+    }
+
+    private var subtitle: String {
+        let who = outgoing ? "To \(snapshot.peerName)" : "From \(snapshot.peerName)"
+        return "\(who) · \(Format.bytes(snapshot.totalBytes))"
+    }
+
     private var statusLabel: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             if snapshot.phase == .completed {
                 Image(systemName: "checkmark.circle.fill").foregroundColor(CDPalette.mint)
             } else if snapshot.phase == .failed {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundColor(CDPalette.coral)
-            } else if !snapshot.phase.isFinished {
-                ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+            } else if !snapshot.phase.isFinished && snapshot.phase != .transferring {
+                ProgressView().controlSize(.small).scaleEffect(0.65).frame(width: 14, height: 14)
             }
             Text(TransferText.status(snapshot))
         }
         .font(.system(size: 11, weight: .medium))
-        .foregroundColor(.secondary)
+        .foregroundColor(CDPalette.textSecondary)
         .lineLimit(1)
     }
 
     private var showsProgress: Bool {
-        snapshot.phase == .transferring || (snapshot.phase == .preparing && snapshot.totalBytes > 0)
+        snapshot.phase == .transferring
     }
 
     private var hasProblem: Bool {
         snapshot.phase == .failed || snapshot.phase == .rejected
             || (snapshot.phase == .cancelled && snapshot.error?.fromPeer == true)
-    }
-
-    private var fileSummary: String {
-        let names = snapshot.files.map { $0.name }
-        let first = names.first ?? ""
-        let rest = names.count > 1 ? " and \(names.count - 1) more" : ""
-        return "\(first)\(rest) · \(Format.bytes(snapshot.totalBytes))"
     }
 
     private var progressText: String {
@@ -114,44 +136,26 @@ struct TransferCard: View {
                     .accessibilityLabel("Cancel transfer \(outgoing ? "to" : "from") \(snapshot.peerName)")
             }
             if !outgoing && snapshot.phase == .completed {
-                Button("Show in Finder") {
+                Button {
                     model.reveal(snapshot.files.compactMap { $0.savedURL })
+                } label: {
+                    Label("Show in Finder", systemImage: "magnifyingglass")
                 }
-                .buttonStyle(GlassButtonStyle())
+                .buttonStyle(PrimaryButtonStyle())
             }
             if model.canRetry(item) {
-                Button("Try Again") { model.retry(item) }
-                    .buttonStyle(GlassButtonStyle())
+                Button {
+                    model.retry(item)
+                } label: {
+                    Label("Try Again", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(PrimaryButtonStyle())
             }
             if snapshot.phase.isFinished {
                 Button("Dismiss") { model.dismiss(item) }
                     .buttonStyle(GlassButtonStyle())
             }
         }
-        .padding(.top, 2)
-    }
-}
-
-struct ActivityView: View {
-    @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: CDSpacing.m) {
-                SectionHeader(title: "This session",
-                              detail: model.transfers.isEmpty ? nil : "Finished transfers are also saved to History")
-                if model.transfers.isEmpty {
-                    StateMessage(symbol: "arrow.up.arrow.down.circle",
-                                 title: "No transfers yet",
-                                 message: "Files you send or receive appear here with live progress.")
-                        .cdGlass(radius: CDRadius.medium)
-                } else {
-                    ForEach(model.transfers) { item in
-                        TransferCard(item: item)
-                    }
-                }
-            }
-            .padding(CDSpacing.xl)
-        }
+        .padding(.top, 4)
     }
 }

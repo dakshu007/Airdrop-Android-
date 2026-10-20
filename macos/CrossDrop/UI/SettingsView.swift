@@ -16,84 +16,88 @@ struct SettingsView: View {
 
     private let autoOffChoices = [
         AutoOffChoice(minutes: 0, label: "Never"),
-        AutoOffChoice(minutes: 10, label: "After 10 minutes"),
-        AutoOffChoice(minutes: 30, label: "After 30 minutes"),
-        AutoOffChoice(minutes: 60, label: "After 1 hour"),
+        AutoOffChoice(minutes: 10, label: "10 min"),
+        AutoOffChoice(minutes: 30, label: "30 min"),
+        AutoOffChoice(minutes: 60, label: "1 hour"),
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: CDSpacing.l) {
+        PageScroll {
+            PageTitle(title: "Settings", subtitle: "Everything here stays on this Mac.")
+
+            SettingsSection(title: "Appearance", symbol: "photo.on.rectangle") {
+                WallpaperPicker()
+            }
+
             SettingsSection(title: "This Mac", symbol: "laptopcomputer") {
-                Text("Name shown to nearby devices").font(.system(size: 12)).foregroundColor(.secondary)
-                HStack {
+                Text("Name shown to nearby devices")
+                    .font(CDFont.caption)
+                    .foregroundColor(CDPalette.textTertiary)
+                HStack(spacing: CDSpacing.s) {
                     TextField("Device name", text: $nameDraft)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
+                        .font(CDFont.body)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .frame(height: 32)
+                        .glassPanel(cornerRadius: 10, style: .inset)
                         .onSubmit { model.rename(nameDraft) }
                         .accessibilityLabel("Device name")
                     Button("Save") { model.rename(nameDraft) }
-                        .buttonStyle(GlassButtonStyle())
+                        .buttonStyle(PrimaryButtonStyle())
                         .disabled(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                   || nameDraft == model.deviceName)
                 }
             }
 
             SettingsSection(title: "Receiving", symbol: "antenna.radiowaves.left.and.right") {
-                Toggle("Let nearby devices send files to this Mac",
-                       isOn: Binding(get: { model.receivingEnabled }, set: { model.setReceiving($0) }))
-                    .toggleStyle(.switch)
-                Picker("Turn off automatically", selection: Binding(get: { model.autoOffMinutes },
-                                                                     set: { model.setAutoOff(minutes: $0) })) {
-                    ForEach(autoOffChoices) { choice in
-                        Text(choice.label).tag(choice.minutes)
-                    }
+                Toggle(isOn: Binding(get: { model.receivingEnabled }, set: { model.setReceiving($0) })) {
+                    Text("Let nearby devices send files to this Mac")
+                        .font(CDFont.body)
+                        .foregroundColor(.white)
                 }
-                .frame(maxWidth: 360)
-                if let date = model.autoOffDate {
-                    Text("Receiving turns off at \(date.formatted(date: .omitted, time: .shortened)).")
-                        .font(.system(size: 11)).foregroundColor(.secondary)
+                .toggleStyle(GlassToggleStyle())
+                GlassDivider()
+                HStack {
+                    Text("Turn off automatically")
+                        .font(CDFont.body)
+                        .foregroundColor(.white)
+                    Spacer()
+                    SegmentedGlass(choices: autoOffChoices.map { SegmentChoice(id: $0.minutes, label: $0.label) },
+                                   selection: Binding(get: { model.autoOffMinutes },
+                                                      set: { model.setAutoOff(minutes: $0) }))
                 }
-                Text("While receiving is on, this Mac announces itself on the local network with its name and a random device ID. Every connection still has to prove its identity, and unknown devices must pair first.")
-                    .font(.system(size: 11)).foregroundColor(.secondary)
+                Text("While receiving is on, this Mac announces its name and a random device ID on the local network. Every connection still proves its identity, and new devices must pair first.")
+                    .font(CDFont.caption)
+                    .foregroundColor(CDPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            SettingsSection(title: "Saving", symbol: "folder") {
-                Text("Received files are saved to").font(.system(size: 12)).foregroundColor(.secondary)
-                HStack {
-                    Image(systemName: "folder.fill").foregroundColor(CDPalette.sky)
-                    Text(model.destination.path)
-                        .font(.system(size: 12))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                    Spacer()
-                    Button("Change…") { model.chooseDestination() }
-                        .buttonStyle(GlassButtonStyle())
-                    Button("Show") { NSWorkspace.shared.open(model.destination) }
-                        .buttonStyle(GlassButtonStyle())
-                }
-                Text("Existing files are never overwritten: a new copy gets a number, like “photo (1).jpg”.")
-                    .font(.system(size: 11)).foregroundColor(.secondary)
-            }
-
             SettingsSection(title: "Notifications", symbol: "bell") {
-                Toggle("Show notifications for requests and finished transfers",
-                       isOn: Binding(get: { model.notificationsEnabled }, set: { model.setNotifications($0) }))
-                    .toggleStyle(.switch)
-                Text("Notifications name the device but never the files.")
-                    .font(.system(size: 11)).foregroundColor(.secondary)
+                Toggle(isOn: Binding(get: { model.notificationsEnabled }, set: { model.setNotifications($0) })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Requests and finished transfers")
+                            .font(CDFont.body)
+                            .foregroundColor(.white)
+                        Text("Notifications name the device, never the files.")
+                            .font(CDFont.caption)
+                            .foregroundColor(CDPalette.textTertiary)
+                    }
+                }
+                .toggleStyle(GlassToggleStyle())
             }
 
             SettingsSection(title: "Privacy and security", symbol: "lock.shield") {
-                VStack(alignment: .leading, spacing: 6) {
-                    bullet("Files go straight from device to device on your local network. There is no cloud relay, account, analytics or telemetry.")
-                    bullet("Connections are encrypted (AES-256-GCM) after both devices prove their identity keys. New devices must confirm a matching six-digit code.")
+                VStack(alignment: .leading, spacing: 8) {
+                    bullet("Files go straight from device to device on your local network. No cloud relay, account, analytics or telemetry.")
+                    bullet("Connections are encrypted (AES-256-GCM) after both devices prove their identity keys. New devices confirm a matching six-digit code.")
                     bullet("Each received file is checked against its SHA-256 checksum before it appears in your folder.")
                     bullet("Your device key is stored in the macOS Keychain. Transfer history stays on this Mac.")
                     bullet("This is early software that hasn't been independently audited.")
                 }
                 Text("CrossDrop \(AppModel.appVersion)")
-                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .font(CDFont.caption)
+                    .foregroundColor(CDPalette.textTertiary)
                     .padding(.top, 4)
             }
         }
@@ -101,9 +105,12 @@ struct SettingsView: View {
     }
 
     private func bullet(_ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("•").foregroundColor(.secondary)
-            Text(text).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Circle().fill(Color.white.opacity(0.6)).frame(width: 4, height: 4).offset(y: -2)
+            Text(text)
+                .font(CDFont.callout)
+                .foregroundColor(CDPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -116,12 +123,105 @@ struct SettingsSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: CDSpacing.m) {
             Label(title, systemImage: symbol)
-                .font(.system(size: 14, weight: .semibold))
+                .font(CDFont.headline)
+                .foregroundColor(.white)
+                .legibleText()
                 .accessibilityAddTraits(.isHeader)
             content
         }
         .padding(CDSpacing.l)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .cdGlass(radius: CDRadius.medium)
+        .glassPanel(cornerRadius: CDRadius.card)
+    }
+}
+
+/// Thumbnails of the built-in wallpapers; the choice cross-fades the whole app.
+struct WallpaperPicker: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: CDSpacing.m) {
+            ForEach(Wallpaper.allCases) { wallpaper in
+                let selected = model.wallpaper == wallpaper
+                Button {
+                    model.setWallpaper(wallpaper)
+                } label: {
+                    VStack(spacing: 6) {
+                        Image(nsImage: WallpaperCache.shared.image(wallpaper))
+                            .resizable()
+                            .interpolation(.medium)
+                            .scaledToFill()
+                            .frame(width: 128, height: 80)
+                            .clipShape(RoundedRectangle(cornerRadius: CDRadius.row, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CDRadius.row, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(selected ? 0.95 : 0.25), lineWidth: selected ? 2 : 1)
+                            )
+                            .overlay(alignment: .topTrailing) {
+                                if selected {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 9, weight: .heavy))
+                                        .foregroundColor(.black.opacity(0.8))
+                                        .frame(width: 18, height: 18)
+                                        .background(Circle().fill(Color.white))
+                                        .padding(6)
+                                }
+                            }
+                            .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
+                            .scaleEffect(selected && !reduceMotion ? 1.03 : 1)
+                        Text(wallpaper.title)
+                            .font(CDFont.caption.weight(selected ? .semibold : .regular))
+                            .foregroundColor(selected ? .white : CDPalette.textSecondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(wallpaper.title) wallpaper")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .animation(reduceMotion ? nil : CDMotion.quick, value: model.wallpaper)
+    }
+}
+
+struct SegmentChoice: Identifiable {
+    let id: Int
+    let label: String
+}
+
+/// Glass segmented control for a handful of choices.
+struct SegmentedGlass: View {
+    let choices: [SegmentChoice]
+    @Binding var selection: Int
+    @Namespace private var namespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(choices) { choice in
+                let selected = selection == choice.id
+                Button {
+                    withAnimation(CDMotion.layout(reduceMotion)) { selection = choice.id }
+                } label: {
+                    Text(choice.label)
+                        .font(.system(size: 11, weight: selected ? .semibold : .medium))
+                        .foregroundColor(selected ? Color.black.opacity(0.85) : .white.opacity(0.85))
+                        .padding(.horizontal, 10)
+                        .frame(height: 26)
+                        .background {
+                            if selected {
+                                Capsule().fill(Color.white)
+                                    .matchedGeometryEffect(id: "segment", in: namespace)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(Color.white.opacity(0.1)))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 1))
     }
 }

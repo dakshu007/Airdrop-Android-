@@ -10,6 +10,7 @@ enum AppSettings {
         static let destinationPath = "destinationPath"
         static let autoOffMinutes = "autoOffMinutes"
         static let notificationsEnabled = "notificationsEnabled"
+        static let wallpaper = "wallpaper"
     }
 
     static var deviceName: String {
@@ -48,5 +49,10 @@ enum AppSettings {
     static var notificationsEnabled: Bool {
         get { defaults.object(forKey: Key.notificationsEnabled) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.notificationsEnabled) }
+    }
+
+    static var wallpaper: String {
+        get { defaults.string(forKey: Key.wallpaper) ?? "dusk" }
+        set { defaults.set(newValue, forKey: Key.wallpaper) }
     }
 }

@@ -6,118 +6,225 @@ import CrossDropCore
 
 struct MainWindow: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ZStack {
-            GlassBackdrop()
-            VStack(spacing: 0) {
-                HeaderBar()
-                    .padding(.horizontal, CDSpacing.xl)
-                    .padding(.top, 34)
-                TabBar()
-                    .padding(.horizontal, CDSpacing.xl)
-                    .padding(.top, CDSpacing.l)
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        WallpaperCanvas(wallpaper: model.wallpaper) {
+            ZStack {
+                HStack(alignment: .top, spacing: CDSpacing.l) {
+                    Sidebar()
+                        .frame(width: 224)
+                    page
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+                .padding(14)
+
+                PromptLayer()
             }
+            .overlay(alignment: .bottom) { NoticeToast() }
         }
-        .frame(minWidth: 780, minHeight: 600)
-        .overlay(alignment: .bottom) { NoticeToast() }
-        .sheet(item: $model.activePromptBinding) { prompt in
-            PromptSheet(prompt: prompt)
-                .environmentObject(model)
-        }
+        .frame(minWidth: 900, minHeight: 620)
         .onAppear { model.beginDiscovery() }
         .onDisappear { model.endDiscovery() }
     }
 
     @ViewBuilder
-    private var content: some View {
-        switch model.selectedTab {
-        case .send: SendView()
-        case .activity: ActivityView()
-        case .devices: DevicesView()
-        case .history: HistoryView()
-        case .settings:
-            ScrollView {
-                SettingsView()
-                    .frame(maxWidth: 640)
-                    .padding(CDSpacing.xl)
-                    .frame(maxWidth: .infinity)
+    private var page: some View {
+        ZStack {
+            switch model.selectedTab {
+            case .send: SendView()
+            case .receive: ReceiveView()
+            case .devices: DevicesView()
+            case .history: HistoryView()
+            case .settings: SettingsView()
             }
         }
+        .id(model.selectedTab)
+        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
     }
 }
 
-struct HeaderBar: View {
-    @EnvironmentObject private var model: AppModel
+/// Scrollable page body with consistent margins.
+struct PageScroll<Content: View>: View {
+    @ViewBuilder let content: Content
 
     var body: some View {
-        HStack(alignment: .center, spacing: CDSpacing.m) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous).fill(CDPalette.brand)
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 17, weight: .bold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: CDSpacing.l) {
+                content
+            }
+            .padding(.top, 30)
+            .padding(.bottom, CDSpacing.xl)
+            .padding(.trailing, 4)
+            .frame(maxWidth: 860, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollIndicators(.never)
+    }
+}
+
+// MARK: - Sidebar
+
+struct Sidebar: View {
+    @EnvironmentObject private var model: AppModel
+    @Namespace private var selection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 30, height: 30)
+                    .accessibilityHidden(true)
+                Text("CrossDrop")
+                    .font(CDFont.title)
                     .foregroundColor(.white)
             }
-            .frame(width: 38, height: 38)
-            .accessibilityHidden(true)
+            .legibleText()
+            .padding(.top, 38) // clears the window buttons, which sit on the glass
+            .padding(.horizontal, 8)
+            .padding(.bottom, 18)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("CrossDrop").font(.system(size: 20, weight: .bold, design: .rounded))
-                HStack(spacing: 6) {
-                    Image(systemName: "lock.fill").font(.system(size: 10))
-                    Text("Direct and encrypted, on your local network. No cloud, no account.")
+            ForEach(AppTab.allCases) { tab in
+                Button {
+                    withAnimation(CDMotion.layout(reduceMotion)) { model.selectedTab = tab }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: tab.symbol)
+                            .font(.system(size: 15, weight: .medium))
+                            .frame(width: 20)
+                        Text(tab.title)
+                            .font(.system(size: 13, weight: .semibold))
+                        Spacer(minLength: 0)
+                        if let count = badge(for: tab), count > 0 {
+                            Text("\(count)")
+                                .font(.system(size: 10, weight: .bold).monospacedDigit())
+                                .foregroundColor(.black.opacity(0.8))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color.white))
+                        }
+                    }
                 }
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .accessibilityElement(children: .combine)
+                .buttonStyle(SidebarRowStyle(selected: model.selectedTab == tab, namespace: selection,
+                                             reduceMotion: reduceMotion))
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(model.selectedTab == tab ? .isSelected : [])
             }
-            Spacer()
-            ReceiveToggle()
+
+            Spacer(minLength: CDSpacing.l)
+            ReceivingPill()
+        }
+        .padding(10)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .glassPanel(cornerRadius: CDRadius.panel)
+    }
+
+    private func badge(for tab: AppTab) -> Int? {
+        switch tab {
+        case .send: return model.activeTransfers.filter { $0.snapshot.direction == .outgoing }.count
+        case .receive: return model.activeTransfers.filter { $0.snapshot.direction == .incoming }.count
+        default: return nil
         }
     }
 }
 
-struct ReceiveToggle: View {
-    @EnvironmentObject private var model: AppModel
-    var compact = false
+/// 44pt row: dark pill when selected (slides between rows), soft highlight on hover,
+/// light-blue ring on keyboard focus.
+struct SidebarRowStyle: ButtonStyle {
+    let selected: Bool
+    let namespace: Namespace.ID
+    let reduceMotion: Bool
 
-    var body: some View {
-        HStack(spacing: CDSpacing.s) {
-            StatusDot(color: color)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(model.receivingEnabled ? "Receiving" : "Receiving off")
-                    .font(.system(size: 12, weight: .semibold))
-                if !compact {
-                    Text(detail).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
-                }
-            }
-            Toggle("Receiving", isOn: Binding(get: { model.receivingEnabled }, set: { model.setReceiving($0) }))
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .controlSize(.small)
-                .accessibilityLabel("Receive files from nearby devices")
-                .accessibilityValue(model.receivingEnabled ? "On" : "Off")
-        }
-        .padding(.leading, 12)
-        .padding(.trailing, 8)
-        .padding(.vertical, 6)
-        .cdGlass(radius: 14)
+    func makeBody(configuration: Configuration) -> some View {
+        RowBody(configuration: configuration, selected: selected, namespace: namespace, reduceMotion: reduceMotion)
     }
 
-    private var color: Color {
-        switch model.receiverStatus {
+    private struct RowBody: View {
+        let configuration: ButtonStyleConfiguration
+        let selected: Bool
+        let namespace: Namespace.ID
+        let reduceMotion: Bool
+        @State private var hovering = false
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: CDRadius.row, style: .continuous)
+            configuration.label
+                .foregroundColor(.white.opacity(selected ? 1 : 0.86))
+                .padding(.horizontal, 12)
+                .frame(height: 44)
+                .background(
+                    ZStack {
+                        if selected {
+                            shape.fill(Color.black.opacity(0.55))
+                                .overlay(shape.strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+                                .matchedGeometryEffect(id: "sidebar.selection", in: namespace)
+                        } else if hovering || configuration.isPressed {
+                            shape.fill(Color.white.opacity(configuration.isPressed ? 0.12 : 0.08))
+                        }
+                    }
+                )
+                .contentShape(shape)
+                .onHover { value in
+                    if reduceMotion {
+                        hovering = value
+                    } else {
+                        withAnimation(.easeOut(duration: 0.15)) { hovering = value }
+                    }
+                }
+                .modifier(FocusRing(shape: shape))
+        }
+    }
+}
+
+/// Bottom of the sidebar: whether this Mac can receive right now. Clicking opens Receive.
+struct ReceivingPill: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Button {
+            model.selectedTab = .receive
+        } label: {
+            HStack(spacing: 10) {
+                StatusDot(color: ReceiverText.color(model.receiverStatus))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(model.receivingEnabled ? "Receiving" : "Not receiving")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                    Text(ReceiverText.detail(model))
+                        .font(.system(size: 10.5))
+                        .foregroundColor(CDPalette.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .glassPanel(cornerRadius: 16, style: .inset)
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(model.receivingEnabled ? "Receiving on. \(ReceiverText.detail(model))" : "Receiving off")
+        .accessibilityHint("Opens Receive")
+    }
+}
+
+enum ReceiverText {
+    static func color(_ status: ReceiverStatus) -> Color {
+        switch status {
         case .ready: return CDPalette.mint
         case .starting: return CDPalette.amber
-        case .off: return Color.secondary.opacity(0.5)
+        case .off: return Color.white.opacity(0.4)
         case .noNetwork, .localNetworkDenied, .failed: return CDPalette.coral
         }
     }
 
-    private var detail: String {
+    static func detail(_ model: AppModel) -> String {
         switch model.receiverStatus {
-        case .ready: return "Visible as “\(model.deviceName)”"
+        case .ready: return "Visible as \(model.deviceName)"
         case .starting: return "Starting…"
         case .off: return "Nearby devices can't send to you"
         case .noNetwork: return "Waiting for Wi-Fi"
@@ -127,57 +234,35 @@ struct ReceiveToggle: View {
     }
 }
 
-struct TabBar: View {
+// MARK: - Prompts
+
+/// Pairing and incoming-offer prompts: a glass card over the blurred, dimmed wallpaper.
+struct PromptLayer: View {
     @EnvironmentObject private var model: AppModel
-    @Namespace private var selection
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(AppTab.allCases) { tab in
-                Button {
-                    if reduceMotion {
-                        model.selectedTab = tab
-                    } else {
-                        withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) { model.selectedTab = tab }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: tab.symbol)
-                        Text(tab.title)
-                        if tab == .activity, !model.activeTransfers.isEmpty {
-                            Text("\(model.activeTransfers.count)")
-                                .font(.system(size: 10, weight: .bold))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(Capsule().fill(CDPalette.sky))
-                                .foregroundColor(.white)
-                        }
-                    }
-                    .font(.system(size: 12, weight: model.selectedTab == tab ? .semibold : .medium))
-                    .foregroundColor(model.selectedTab == tab ? .primary : .secondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background {
-                        if model.selectedTab == tab {
-                            Capsule()
-                                .fill(Color.primary.opacity(0.09))
-                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
-                                .matchedGeometryEffect(id: "tab", in: selection)
-                        }
-                    }
-                    .contentShape(Capsule())
+        ZStack {
+            if let prompt = model.prompts.first {
+                ZStack {
+                    FrostedFill()
+                    Color.black.opacity(0.3)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(tab.title)
-                .accessibilityAddTraits(model.selectedTab == tab ? .isSelected : [])
+                .ignoresSafeArea()
+                .transition(.opacity)
+                .accessibilityHidden(true)
+
+                PromptCard(prompt: prompt)
+                    .frame(width: 440)
+                    .id(prompt.id)
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.94).combined(with: .opacity))
             }
         }
-        .padding(4)
-        .cdGlass(radius: 20)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(CDMotion.layout(reduceMotion), value: model.prompts.first?.id)
     }
 }
+
+// MARK: - Toast
 
 struct NoticeToast: View {
     @EnvironmentObject private var model: AppModel
@@ -186,32 +271,38 @@ struct NoticeToast: View {
     var body: some View {
         ZStack {
             if let notice = model.notice {
-                HStack(spacing: CDSpacing.s) {
-                    Image(systemName: "info.circle.fill").foregroundColor(CDPalette.sky)
-                    Text(notice.text).font(.system(size: 12))
+                HStack(spacing: CDSpacing.m) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundColor(.white)
+                    Text(notice.text)
+                        .font(CDFont.callout)
+                        .foregroundColor(.white)
                         .fixedSize(horizontal: false, vertical: true)
                     Button {
                         model.notice = nil
                     } label: {
                         Image(systemName: "xmark")
                     }
-                    .buttonStyle(IconButtonStyle())
+                    .buttonStyle(IconButtonStyle(size: 24))
                     .accessibilityLabel("Dismiss")
                 }
-                .padding(.horizontal, 14)
+                .padding(.leading, 16)
+                .padding(.trailing, 10)
                 .padding(.vertical, 10)
                 .frame(maxWidth: 520)
-                .cdGlass(radius: 16)
-                .padding(.bottom, CDSpacing.l)
+                .glassPanel(cornerRadius: 18)
+                .padding(.bottom, 22)
                 .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                 .id(notice.id)
             }
         }
-        .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85), value: model.notice)
+        .animation(CDMotion.layout(reduceMotion), value: model.notice)
     }
 }
 
-/// Shared user-facing text for transfer states and errors.
+// MARK: - Shared text
+
+/// User-facing text for transfer states and errors.
 enum TransferText {
     static func status(_ snapshot: TransferSnapshot) -> String {
         let outgoing = snapshot.direction == .outgoing
@@ -222,7 +313,7 @@ enum TransferText {
         case .waitingForAcceptance: return "Waiting for \(snapshot.peerName) to accept"
         case .awaitingApproval: return "Waiting for your approval"
         case .transferring: return outgoing ? "Sending" : "Receiving"
-        case .completed: return outgoing ? "Sent" : "Received and verified"
+        case .completed: return outgoing ? "Delivered" : "Received and verified"
         case .failed: return "Failed"
         case .cancelled: return snapshot.error?.fromPeer == true ? "Cancelled by \(snapshot.peerName)" : "Cancelled"
         case .rejected: return outgoing ? "Declined" : "You declined"

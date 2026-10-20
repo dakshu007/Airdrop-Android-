@@ -7,14 +7,14 @@ import CrossDropCore
 #endif
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case send, activity, devices, history, settings
+    case send, receive, devices, history, settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .send: return "Send"
-        case .activity: return "Activity"
+        case .receive: return "Receive"
         case .devices: return "Devices"
         case .history: return "History"
         case .settings: return "Settings"
@@ -24,9 +24,9 @@ enum AppTab: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .send: return "paperplane"
-        case .activity: return "arrow.up.arrow.down"
+        case .receive: return "tray.and.arrow.down"
         case .devices: return "checkmark.shield"
-        case .history: return "clock"
+        case .history: return "clock.arrow.circlepath"
         case .settings: return "gearshape"
         }
     }
@@ -164,6 +164,7 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     @Published private(set) var autoOffMinutes: Int
     @Published private(set) var notificationsEnabled: Bool
     @Published private(set) var autoOffDate: Date?
+    @Published private(set) var wallpaper: Wallpaper
 
     // UI
     @Published var selectedTab: AppTab = .send
@@ -195,6 +196,7 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         destination = AppSettings.destination
         autoOffMinutes = AppSettings.autoOffMinutes
         notificationsEnabled = AppSettings.notificationsEnabled
+        wallpaper = Wallpaper(rawValue: AppSettings.wallpaper) ?? .dusk
         trustedDevices = trustStore.all
         history = historyStore.entries
         trustStore.onChange = { [weak self] list in
@@ -630,6 +632,19 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         notificationsEnabled = enabled
         AppSettings.notificationsEnabled = enabled
         if enabled { NotificationManager.shared.requestAuthorization { _ in } }
+    }
+
+    func setWallpaper(_ value: Wallpaper) {
+        wallpaper = value
+        AppSettings.wallpaper = value.rawValue
+    }
+
+    var outgoingTransfers: [TransferItem] {
+        transfers.filter { $0.snapshot.direction == .outgoing }
+    }
+
+    var incomingTransfers: [TransferItem] {
+        transfers.filter { $0.snapshot.direction == .incoming }
     }
 
     // MARK: - Notices

@@ -15,7 +15,7 @@ struct CrossDropApp: App {
                 .environmentObject(model)
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 920, height: 700)
+        .defaultSize(width: 1040, height: 700)
         .commands {
             CrossDropCommands(model: model)
         }
@@ -28,16 +28,6 @@ struct CrossDropApp: App {
                 .environmentObject(model)
         }
         .menuBarExtraStyle(.window)
-
-        Settings {
-            ScrollView {
-                SettingsView()
-                    .padding(CDSpacing.xl)
-            }
-            .background(GlassBackdrop())
-            .environmentObject(model)
-            .frame(width: 580, height: 640)
-        }
     }
 }
 
@@ -68,18 +58,32 @@ struct CrossDropCommands: Commands {
     let model: AppModel
 
     var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") {
+                model.selectedTab = .settings
+                model.requestMainWindow()
+            }
+            .keyboardShortcut(",", modifiers: .command)
+        }
         CommandGroup(replacing: .newItem) {
-            Button("Choose Files to Send…") { model.chooseFiles() }
-                .keyboardShortcut("o", modifiers: .command)
+            Button("Choose Files to Send…") {
+                model.selectedTab = .send
+                model.chooseFiles()
+            }
+            .keyboardShortcut("o", modifiers: .command)
         }
         CommandMenu("Transfer") {
             Button("Turn Receiving On or Off") { model.setReceiving(!model.receivingEnabled) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
             Divider()
-            ForEach(Array(AppTab.allCases.enumerated()), id: \.offset) { index, tab in
-                Button(tab.title) { model.selectedTab = tab }
-                    .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
-            }
+            Button("Send") { model.selectedTab = .send }
+                .keyboardShortcut("1", modifiers: .command)
+            Button("Receive") { model.selectedTab = .receive }
+                .keyboardShortcut("2", modifiers: .command)
+            Button("Devices") { model.selectedTab = .devices }
+                .keyboardShortcut("3", modifiers: .command)
+            Button("History") { model.selectedTab = .history }
+                .keyboardShortcut("4", modifiers: .command)
         }
     }
 }

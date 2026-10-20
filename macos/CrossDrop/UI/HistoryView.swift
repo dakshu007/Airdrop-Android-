@@ -8,33 +8,30 @@ struct HistoryView: View {
     @State private var confirmClear = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: CDSpacing.m) {
-                HStack {
-                    SectionHeader(title: "History", detail: "Stored only on this Mac")
-                    if !model.history.isEmpty {
-                        Button("Clear History…") { confirmClear = true }
-                            .buttonStyle(GlassButtonStyle(destructive: true))
-                    }
-                }
-                if model.history.isEmpty {
-                    StateMessage(symbol: "clock", title: "No history yet",
-                                 message: "Finished transfers are listed here. The list never leaves this Mac.")
-                        .cdGlass(radius: CDRadius.medium)
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(model.history) { entry in
-                            HistoryRow(entry: entry)
-                            if entry.id != model.history.last?.id {
-                                Divider().opacity(0.5).padding(.leading, 56)
-                            }
-                        }
-                    }
-                    .padding(.vertical, CDSpacing.s)
-                    .cdGlass(radius: CDRadius.medium)
+        PageScroll {
+            HStack(alignment: .bottom) {
+                PageTitle(title: "History", subtitle: "Stored only on this Mac.")
+                if !model.history.isEmpty {
+                    Button("Clear History…") { confirmClear = true }
+                        .buttonStyle(GlassButtonStyle(destructive: true))
                 }
             }
-            .padding(CDSpacing.xl)
+            if model.history.isEmpty {
+                StateMessage(symbol: "clock.arrow.circlepath", title: "Nothing here yet",
+                             message: "Finished transfers are listed here. The list never leaves this Mac.")
+                    .glassPanel(cornerRadius: CDRadius.card)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(model.history) { entry in
+                        HistoryRow(entry: entry)
+                        if entry.id != model.history.last?.id {
+                            GlassDivider().padding(.leading, 64)
+                        }
+                    }
+                }
+                .padding(.vertical, 6)
+                .glassPanel(cornerRadius: CDRadius.card)
+            }
         }
         .confirmationDialog("Clear all history?", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Clear History", role: .destructive) { model.clearHistory() }
@@ -48,19 +45,32 @@ struct HistoryView: View {
 struct HistoryRow: View {
     @EnvironmentObject private var model: AppModel
     let entry: HistoryEntry
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: CDSpacing.m) {
-            Image(systemName: entry.isIncoming ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
-                .font(.system(size: 26))
-                .foregroundColor(entry.isIncoming ? CDPalette.mint : CDPalette.sky)
-                .frame(width: 32)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                Text(subtitle).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
+            ZStack(alignment: .bottomTrailing) {
+                FileIcon(url: savedURLs.first, name: entry.files.first?.name ?? "", size: 32)
+                Image(systemName: entry.isIncoming ? "arrow.down" : "arrow.up")
+                    .font(.system(size: 8, weight: .heavy))
+                    .foregroundColor(.black.opacity(0.8))
+                    .frame(width: 15, height: 15)
+                    .background(Circle().fill(entry.isIncoming ? CDPalette.mint : Color.white))
+                    .offset(x: 3, y: 3)
             }
-            Spacer()
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(CDFont.body.weight(.medium))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(subtitle)
+                    .font(CDFont.caption)
+                    .foregroundColor(CDPalette.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: CDSpacing.s)
             statusChip
             if entry.isIncoming, entry.status == "completed", !savedURLs.isEmpty {
                 Button {
@@ -68,13 +78,19 @@ struct HistoryRow: View {
                 } label: {
                     Image(systemName: "magnifyingglass")
                 }
-                .buttonStyle(IconButtonStyle())
+                .buttonStyle(IconButtonStyle(size: 26))
                 .help("Show in Finder")
                 .accessibilityLabel("Show in Finder")
             }
         }
         .padding(.horizontal, CDSpacing.l)
-        .padding(.vertical, CDSpacing.s)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: CDRadius.row, style: .continuous)
+                .fill(Color.white.opacity(hovering ? 0.06 : 0))
+                .padding(.horizontal, 6)
+        )
+        .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
     }
 
@@ -84,7 +100,7 @@ struct HistoryRow: View {
 
     private var title: String {
         let first = entry.files.first?.name ?? "Files"
-        return entry.files.count > 1 ? "\(first) and \(entry.files.count - 1) more" : first
+        return entry.files.count > 1 ? "\(first) + \(entry.files.count - 1) more" : first
     }
 
     private var subtitle: String {
@@ -93,19 +109,11 @@ struct HistoryRow: View {
     }
 
     private var statusChip: some View {
-        let (text, color) = { () -> (String, Color) in
-            switch entry.status {
-            case "completed": return (entry.isIncoming ? "Received" : "Sent", CDPalette.mint)
-            case "rejected": return ("Declined", Color.secondary)
-            case "cancelled": return ("Cancelled", Color.secondary)
-            default: return ("Failed", CDPalette.coral)
-            }
-        }()
-        return Text(text)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundColor(color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(color.opacity(0.12)))
+        switch entry.status {
+        case "completed": return Chip(text: entry.isIncoming ? "Received" : "Sent", tint: CDPalette.mint)
+        case "rejected": return Chip(text: "Declined")
+        case "cancelled": return Chip(text: "Cancelled")
+        default: return Chip(text: "Failed", tint: CDPalette.coral)
+        }
     }
 }
