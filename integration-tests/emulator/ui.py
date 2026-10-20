@@ -32,8 +32,10 @@ def set_scales(value):
 
 
 def dump_once():
-    out = adb("shell", "uiautomator", "dump", "/sdcard/cd-ui.xml", check=False)
+    proc = subprocess.run(["adb", "shell", "uiautomator", "dump", "/sdcard/cd-ui.xml"], capture_output=True, text=True)
+    out = proc.stdout + proc.stderr
     if "dumped" not in out.lower():
+        print(f"dump failed: {out.strip()[:200]}", file=sys.stderr)
         return None
     try:
         return ET.fromstring(adb("exec-out", "cat", "/sdcard/cd-ui.xml"))

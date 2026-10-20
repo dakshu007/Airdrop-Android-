@@ -17,10 +17,11 @@ OUT=$3
 PKG=com.crossdrop.app
 ACTIVITY=com.crossdrop.MainActivity
 HERE=$(cd "$(dirname "$0")" && pwd)
-UI="python3 $HERE/ui.py"
 mkdir -p "$OUT/shots" "$OUT/video" "$OUT/frames"
 LOG="$OUT/steps.log"
 : > "$LOG"
+# UI helper; why a lookup failed goes to ui.log.
+ui() { python3 "$HERE/ui.py" "$@" 2>>"$OUT/ui.log"; }
 
 # Stop early (keeping what was collected) if the emulator goes away, rather
 # than hanging on adb.
@@ -87,6 +88,11 @@ adb shell wm density | tee -a "$LOG"
 for key in animator_duration_scale transition_animation_scale window_animation_scale; do
   adb shell settings put global "$key" 1
 done
+# A freshly booted emulator is busy (launcher, Play services); system "isn't
+# responding" dialogs would sit on top of the app, so hide them and let it settle.
+adb shell settings put global hide_error_dialogs 1
+adb shell input keyevent KEYCODE_HOME
+sleep 25
 adb shell settings put system font_scale 1.0
 adb logcat -c
 # Streamed to disk from the start, so the last lines before any crash are kept.
@@ -102,10 +108,10 @@ shot 00-launch
 
 # ------------------------------------------------------------------ welcome
 step "welcome"
-$UI wait "Get started" 40 >/dev/null && ok "welcome visible" || fail "welcome visible"
+ui wait "Get started" 40 >/dev/null && ok "welcome visible" || fail "welcome visible"
 shot 01-welcome
 rec_start 01-welcome 6; rec_end
-$UI tap "Get started" >/dev/null && ok "get started" || fail "get started"
+ui tap "Get started" >/dev/null && ok "get started" || fail "get started"
 sleep 2.5
 
 # ------------------------------------------------------------------ home
@@ -122,13 +128,13 @@ for key in animator_duration_scale transition_animation_scale window_animation_s
 sleep 2
 
 step "turn on receiving"
-$UI tap "Turn on Receiving" >/dev/null && ok "turn on receiving" || fail "turn on receiving"
+ui tap "Turn on Receiving" >/dev/null && ok "turn on receiving" || fail "turn on receiving"
 sleep 2.5
 shot 03-notification-explainer
-$UI tap "Continue" 8 >/dev/null && ok "continue" || fail "continue (explainer)"
+ui tap "Continue" 8 >/dev/null && ok "continue" || fail "continue (explainer)"
 sleep 2
 shot 04-permission-dialog
-$UI tap "Allow" 8 >/dev/null && ok "allow notifications" || fail "allow notifications"
+ui tap "Allow" 8 >/dev/null && ok "allow notifications" || fail "allow notifications"
 sleep 3
 shot 05-home-searching
 rec_start 05-home-searching 6; rec_end
@@ -137,7 +143,7 @@ rec_start 05-home-searching 6; rec_end
 step "tabs"
 declare -A TAB
 for t in Nearby Activity Devices Settings; do
-  xy=$($UI find "$t") && TAB[$t]=$xy || fail "find tab $t"
+  xy=$(ui find "$t") && TAB[$t]=$xy || fail "find tab $t"
 done
 frames_reset
 rec_start 06-tab-switching 12
@@ -206,7 +212,7 @@ if [ -n "$MEDIA_ID" ]; then
     --grant-read-uri-permission -n "$PKG/$ACTIVITY" >/dev/null
   sleep 4
   shot 10-share
-  $UI tap "Cancel sharing" 8 >/dev/null && ok "cancel sharing" || fail "cancel sharing"
+  ui tap "Cancel sharing" 8 >/dev/null && ok "cancel sharing" || fail "cancel sharing"
   sleep 2
 else
   fail "media id for share test"
@@ -229,11 +235,11 @@ if [ -n "$PORT" ]; then
   sleep 5
   shot 11-pairing
   rec_end
-  $UI tap "Codes match" 20 >/dev/null && ok "codes match" || fail "codes match"
-  $UI wait "Files are on their way" 30 >/dev/null && ok "incoming offer" || fail "incoming offer"
+  ui tap "Codes match" 20 >/dev/null && ok "codes match" || fail "codes match"
+  ui wait "Files are on their way" 30 >/dev/null && ok "incoming offer" || fail "incoming offer"
   sleep 1.5
   shot 12-incoming
-  xy=$($UI find "Accept") || fail "find accept"
+  xy=$(ui find "Accept") || fail "find accept"
   frames_reset
   rec_start 13-receiving 20
   # shellcheck disable=SC2086
@@ -244,11 +250,11 @@ if [ -n "$PORT" ]; then
   shot 13-receiving-later
   rec_end
   frames_save 13-receiving
-  $UI wait "All done!" 120 >/dev/null && ok "done screen" || fail "done screen"
+  ui wait "All done!" 120 >/dev/null && ok "done screen" || fail "done screen"
   shot 14-done
   rec_start 14-done 5; rec_end
   timeout 60 tail --pid="$CLI_PID" -f /dev/null; echo "cli finished" | tee -a "$LOG"
-  $UI tap "Done" 10 >/dev/null || $UI tap "Not now" 5 >/dev/null
+  ui tap "Done" 10 >/dev/null || ui tap "Not now" 5 >/dev/null
   sleep 2
 
   step "failed transfer (sender goes away)"
@@ -256,14 +262,14 @@ if [ -n "$PORT" ]; then
     "$WORK/Holiday-Video.mp4" > "$OUT/cli-send-2.log" 2>&1 &
   CLI_PID=$!
   # The CLI keeps no trust between runs, so it pairs again first.
-  $UI tap "Codes match" 30 >/dev/null && ok "codes match (second)" || fail "codes match (second)"
-  $UI tap "Accept" 30 >/dev/null && ok "accept second" || fail "accept second"
+  ui tap "Codes match" 30 >/dev/null && ok "codes match (second)" || fail "codes match (second)"
+  ui tap "Accept" 30 >/dev/null && ok "accept second" || fail "accept second"
   sleep 2
   kill "$CLI_PID" 2>/dev/null
-  $UI wait "That didn’t go through" 40 >/dev/null && ok "failed screen" || fail "failed screen"
+  ui wait "That didn’t go through" 40 >/dev/null && ok "failed screen" || fail "failed screen"
   shot 15-failed
   rec_start 15-failed 4; rec_end
-  $UI tap "Not now" 10 >/dev/null
+  ui tap "Not now" 10 >/dev/null
   sleep 2
   # shellcheck disable=SC2086
   [ -n "${TAB[Activity]:-}" ] && tap_xy ${TAB[Activity]}
