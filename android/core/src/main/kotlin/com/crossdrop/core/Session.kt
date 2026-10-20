@@ -72,7 +72,13 @@ internal object Pairing {
                     is Connection.Incoming.Local -> {
                         val d = item.value as? PairingDecision ?: continue
                         if (d.prompt !== prompt || localAccepted) continue
-                        mapIo { conn.sendControl(Message.build("pair.confirm", "accepted" to d.accept)) }
+                        try {
+                            mapIo { conn.sendControl(Message.build("pair.confirm", "accepted" to d.accept)) }
+                        } catch (e: ProtocolException) {
+                            // The peer may have declined and closed before our answer went out;
+                            // report its answer rather than the broken connection.
+                            throw peerDecline(conn) ?: e
+                        }
                         if (!d.accept) throw ProtocolException(ErrorCode.PAIRING_REJECTED, "declined locally")
                         localAccepted = true
                         if (!remoteAccepted) events.onPairingWaitingForPeer(prompt)
@@ -95,6 +101,24 @@ internal object Pairing {
         } finally {
             prompt.decision.complete(false)
             events.onPairingClosed(prompt, paired)
+        }
+    }
+
+    /** After a failed write, looks briefly for a `pair.confirm false` the peer sent before closing. */
+    private fun peerDecline(conn: Connection): ProtocolException? {
+        val deadline = System.currentTimeMillis() + 1_000
+        while (true) {
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) return null
+            val item = try {
+                conn.next(remaining)
+            } catch (e: ProtocolException) {
+                return null
+            }
+            val msg = (item as? Connection.Incoming.Control)?.message ?: continue
+            if (msg.type == "pair.confirm" && msg.fields["accepted"] == false) {
+                return ProtocolException(ErrorCode.PAIRING_REJECTED, "declined by peer", remote = true)
+            }
         }
     }
 

@@ -52,7 +52,17 @@ enum PairingFlow {
 
         switch outcome {
         case .accepted:
-            try await channel.sendControl(WireMessage.make("pair.confirm", ["accepted": true]))
+            do {
+                try await channel.sendControl(WireMessage.make("pair.confirm", ["accepted": true]))
+            } catch {
+                // The peer may have declined and closed before our confirmation went out;
+                // report its answer rather than the broken connection.
+                if let answer = try? await peerAnswer.value,
+                   answer.type == "pair.confirm", answer.bool("accepted") == false {
+                    throw CrossDropError.peer(ErrorCode.pairingRejected)
+                }
+                throw error
+            }
         case .declined, .timedOut:
             try? await channel.sendControl(WireMessage.make("pair.confirm", ["accepted": false]))
             throw CrossDropError.local(ErrorCode.pairingRejected, outcome == .timedOut ? "timed out" : "declined")
