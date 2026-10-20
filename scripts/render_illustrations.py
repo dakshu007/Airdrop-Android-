@@ -243,6 +243,15 @@ def drip(s, pos=(0, 0, 0), scale=1.0, yaw=0.0, mood="smile", arms="down", look=(
     elif arms == "wave":
         s.add(capsule(P(-0.5, 0.62, 0.12), P(-0.7, 0.36, 0.22), 0.12 * S), "mint", g, 0.12 * S)
         s.add(capsule(P(0.5, 0.78, 0.1), P(0.86, 1.2, 0.0), 0.12 * S), "mint", g, 0.12 * S)
+    elif arms == "binoculars":
+        s.add(capsule(P(-0.5, 0.62, 0.15), P(-0.4, 0.76, 0.7), 0.12 * S), "mint", g, 0.12 * S)
+        s.add(capsule(P(0.5, 0.62, 0.15), P(0.4, 0.76, 0.7), 0.12 * S), "mint", g, 0.12 * S)
+    elif arms == "cable":
+        s.add(capsule(P(-0.5, 0.62, 0.12), P(-0.7, 0.36, 0.22), 0.12 * S), "mint", g, 0.12 * S)
+        s.add(capsule(P(0.5, 0.62, 0.15), P(0.72, 0.62, 0.55), 0.12 * S), "mint", g, 0.12 * S)
+    elif arms == "hug":
+        s.add(capsule(P(-0.5, 0.55, 0.2), P(-0.2, 0.42, 0.6), 0.12 * S), "mint", g, 0.12 * S)
+        s.add(capsule(P(0.5, 0.55, 0.2), P(0.2, 0.42, 0.6), 0.12 * S), "mint", g, 0.12 * S)
     # Feet
     s.add(ellipsoid(P(-0.24, 0.07, 0.12), (0.17 * S, 0.08 * S, 0.2 * S), R), "mint", g, 0.08 * S)
     s.add(ellipsoid(P(0.24, 0.07, 0.12), (0.17 * S, 0.08 * S, 0.2 * S), R), "mint", g, 0.08 * S)
@@ -253,15 +262,33 @@ def drip(s, pos=(0, 0, 0), scale=1.0, yaw=0.0, mood="smile", arms="down", look=(
     if mood == "happy":
         for sx in (-1, 1):
             s.add(torus_arc(P(sx * ex + lx, ey + ly - 0.02, ez + 0.01), 0.075 * S, 0.026 * S, 20, 160, R), "eye")
+    elif mood == "blink":
+        for sx in (-1, 1):
+            s.add(capsule(P(sx * ex + lx - 0.055, ey + ly - 0.01, ez + 0.012), P(sx * ex + lx + 0.055, ey + ly - 0.01, ez + 0.012), 0.024 * S), "eye")
+    elif mood == "sleepy":
+        for sx in (-1, 1):
+            s.add(torus_arc(P(sx * ex + lx, ey + ly + 0.03, ez + 0.01), 0.065 * S, 0.024 * S, 205, 335, R), "eye")
+    elif mood == "hidden":
+        pass
     else:
         for sx in (-1, 1):
             s.add(ellipsoid(P(sx * ex + lx, ey + ly, ez), (0.065 * S, 0.09 * S, 0.05 * S), R), "eye")
             s.add(sphere(P(sx * ex + lx + 0.022, ey + ly + 0.035, ez + 0.042), 0.022 * S), "white_glow")
     # Mouth
-    if mood in ("smile", "happy"):
+    if mood in ("smile", "happy", "blink"):
         s.add(torus_arc(P(lx, 0.74 + ly, 0.565), 0.1 * S, 0.024 * S, 200, 340, R), "eye")
     elif mood == "open":
         s.add(ellipsoid(P(lx, 0.68 + ly, 0.56), (0.075 * S, 0.06 * S, 0.04 * S), R), "eye")
+    elif mood == "sleepy":
+        s.add(ellipsoid(P(lx, 0.7 + ly, 0.56), (0.035 * S, 0.035 * S, 0.03 * S), R), "eye")
+    elif mood == "worried":
+        s.add(torus_arc(P(lx, 0.62 + ly, 0.555), 0.085 * S, 0.022 * S, 25, 155, R), "eye")
+        for sx in (-1, 1):
+            a = P(sx * (ex + 0.08) + lx, ey + ly + 0.13, ez - 0.02)
+            b = P(sx * (ex - 0.06) + lx, ey + ly + 0.18, ez - 0.01)
+            s.add(capsule(a, b, 0.02 * S), "eye")
+    elif mood == "hidden":
+        s.add(torus_arc(P(lx, 0.68 + ly, 0.565), 0.08 * S, 0.022 * S, 200, 340, R), "eye")
     # Cheeks
     for sx in (-1, 1):
         s.add(ellipsoid(P(sx * 0.33 + lx, 0.72 + ly, 0.47), (0.07 * S, 0.04 * S, 0.03 * S), R), "cheek")
@@ -334,6 +361,38 @@ def shield(s, c, R, scale=1.0):
     front = np.array(c) + R @ v(0, 0, 0.06 * S)
     s.add(rbox(tuple(front + R @ v(0, -0.06 * S, 0)), (0.12 * S, 0.1 * S, 0.02 * S), 0.03 * S, R), "ink")
     s.add(torus_arc(tuple(front + R @ v(0, 0.05 * S, 0)), 0.08 * S, 0.025 * S, 0, 180, R), "ink")
+
+
+def binoculars(s, c, R, scale=1.0):
+    S = scale
+    cc = np.array(c, np.float32)
+    for sx in (-1, 1):
+        tube = cc + R @ v(sx * 0.13 * S, 0, 0)
+        s.add(rcyl(tuple(tube), 0.1 * S, 0.14 * S, 0.03 * S, R @ rot(90, 0, 0)), "graphite")
+        lens = tube + R @ v(0, 0, 0.14 * S)
+        s.add(rcyl(tuple(lens), 0.075 * S, 0.012 * S, 0.008 * S, R @ rot(90, 0, 0)), "screen")
+    s.add(rbox(tuple(cc), (0.08 * S, 0.035 * S, 0.06 * S), 0.02 * S, R), "graphite")
+
+
+def plug_cable(s, start, R, scale=1.0):
+    S = scale
+    a = np.array(start, np.float32)
+    pts = [a + R @ v(x * S, y * S, z * S) for x, y, z in ((0, 0, 0), (0.25, -0.2, 0.1), (0.45, -0.45, 0.05), (0.75, -0.55, -0.05), (1.05, -0.5, -0.1))]
+    for p0, p1 in zip(pts, pts[1:]):
+        s.add(capsule(tuple(p0), tuple(p1), 0.045 * S), "graphite", "cable", 0.05 * S)
+    s.add(rbox(tuple(a + R @ v(-0.08 * S, 0.05 * S, 0)), (0.11 * S, 0.08 * S, 0.08 * S), 0.03 * S, R), "silver")
+    for sx in (-1, 1):
+        prong = a + R @ v(-0.2 * S, 0.07 * S, sx * 0.035 * S)
+        s.add(capsule(tuple(prong), tuple(prong + R @ v(-0.1 * S, 0, 0)), 0.018 * S), "gold")
+    spark = pts[-1] + R @ v(0.15 * S, 0.05 * S, 0)
+    sparkle(s, tuple(spark), 0.08 * S)
+
+
+def zzz(s, c, scale=1.0):
+    cc = np.array(c, np.float32)
+    for i, k in enumerate((1.0, 0.75, 0.55)):
+        p = cc + v(0.16 * i * scale, 0.2 * i * scale, 0)
+        s.add(sphere(tuple(p), 0.06 * k * scale), "lime")
 
 
 def orb(s, c, r, mat="gold"):
@@ -567,7 +626,65 @@ def scene_mac():
     return s, dict(cam=(0, 1.7, 6.6), target=(0, 0.75, 0), fov=30)
 
 
+def scene_welcome_blink():
+    s, cam = scene_welcome()
+    s.objs.clear()
+    drip(s, pos=(0, 0, 0.2), scale=1.0, mood="blink", arms="wave")
+    phone(s, (-1.25, 0.95, -0.2), rot(0, 25, 12), 0.95)
+    laptop(s, (1.35, 0.04, -0.35), yaw=-28, scale=0.8)
+    orb(s, (-0.62, 1.95, -0.1), 0.09, "lime")
+    orb(s, (0.95, 1.85, 0.2), 0.06, "lime")
+    sparkle(s, (-0.25, 2.05, 0.3), 0.12)
+    return s, cam
+
+
+def scene_nearby_blink():
+    s = Scene()
+    drip(s, pos=(-0.2, 0, 0), scale=1.0, mood="blink", arms="wave")
+    phone(s, (0.78, 1.32, 0.25), rot(0, -18, -14), 0.55)
+    orb(s, (-1.0, 1.55, 0.0), 0.08, "lime")
+    sparkle(s, (1.25, 1.95, 0.2), 0.1)
+    return s, dict(cam=(0, 1.15, 5.6), target=(0, 0.85, 0), fov=30)
+
+
+def scene_sleepy():
+    s = Scene()
+    drip(s, pos=(0, 0, 0), scale=1.0, yaw=-8, mood="sleepy", arms="hug")
+    zzz(s, (0.55, 1.6, 0.3), 1.4)
+    return s, dict(cam=(0, 1.15, 5.6), target=(0, 0.85, 0), fov=30)
+
+
+def scene_searching():
+    s = Scene()
+    drip(s, pos=(0, 0, 0), scale=1.0, mood="hidden", arms="binoculars")
+    binoculars(s, (0, 0.86, 0.78), rot(-4, 0, 0), 1.55)
+    sparkle(s, (0.95, 1.65, 0.2), 0.1)
+    orb(s, (-1.0, 1.4, 0.0), 0.07, "lime")
+    return s, dict(cam=(0, 1.15, 5.6), target=(0, 0.85, 0), fov=30)
+
+
+def scene_nowifi():
+    s = Scene()
+    drip(s, pos=(-0.35, 0, 0), scale=1.0, mood="worried", arms="cable")
+    plug_cable(s, (0.55, 0.64, 0.62), rot(0, -20, 0), 1.35)
+    return s, dict(cam=(0, 1.15, 5.8), target=(0.1, 0.8, 0), fov=31)
+
+
+def scene_failed():
+    s = Scene()
+    drip(s, pos=(0.15, 0, 0), scale=1.0, mood="worried", arms="down")
+    document(s, (-0.95, 0.55, 0.35), rot(-8, 26, 28), 0.7)
+    orb(s, (1.0, 1.5, 0.1), 0.06, "lime")
+    return s, dict(cam=(0, 1.15, 5.8), target=(0, 0.8, 0), fov=31)
+
+
 SCENES = {
+    "welcome-blink": scene_welcome_blink,
+    "nearby-blink": scene_nearby_blink,
+    "sleepy": scene_sleepy,
+    "searching": scene_searching,
+    "nowifi": scene_nowifi,
+    "failed": scene_failed,
     "welcome": scene_welcome,
     "nearby": scene_nearby,
     "pairing": scene_pairing,
