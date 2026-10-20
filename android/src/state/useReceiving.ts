@@ -1,25 +1,24 @@
 import { useCallback } from 'react';
-import { Alert } from 'react-native';
 import * as CrossDrop from '../native/crossdrop';
 import type { Snapshot } from '../native/types';
 
+type Listener = (next: () => void) => void;
+let listener: Listener | null = null;
+
+/** Lets <NotificationPrompt/> (rendered once by the navigator) show the explainer. */
+export function setNotificationPromptListener(l: Listener | null) {
+  listener = l;
+}
+
+/** Explains notifications in an in-app sheet, asks Android, then continues either way. */
 function askForNotificationsThen(next: () => void) {
-  Alert.alert(
-    'Allow notifications?',
-    'CrossDrop shows a notification while it is receiving and when files arrive. File names stay hidden on the lock screen.',
-    [
-      { text: 'Not now', style: 'cancel', onPress: next },
-      {
-        text: 'Continue',
-        onPress: () => {
-          CrossDrop.requestNotificationPermission()
-            .catch(() => undefined)
-            .finally(next);
-        },
-      },
-    ],
-    { cancelable: false },
-  );
+  if (listener) {
+    listener(next);
+  } else {
+    CrossDrop.requestNotificationPermission()
+      .catch(() => undefined)
+      .finally(next);
+  }
 }
 
 /** Turns Receiving on or off, explaining notifications the first time it is switched on. */

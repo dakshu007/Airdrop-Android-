@@ -7,7 +7,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { useReducedMotion } from '../hooks/useReducedMotion';
+import { useStill } from '../hooks/useStill';
 
 /** Drip, the CrossDrop character. Renders from scripts/render_illustrations.py. */
 export type Pose =
@@ -92,7 +92,7 @@ export function Drip({
   lean = 0,
   label,
 }: DripProps) {
-  const reduced = useReducedMotion();
+  const reduced = useStill();
   const cycle = useRef(new Animated.Value(0)).current;
   const once = useRef(
     new Animated.Value(motion === 'pop' || motion === 'wobble' ? 0 : 1),
@@ -291,6 +291,33 @@ export function Drip({
   );
 }
 
+/**
+ * Decodes every pose once, invisibly, so a screen that shows Drip for the
+ * first time (pairing, incoming, done) doesn't wait for the image.
+ */
+export function DripPreloader() {
+  const sources = [...Object.values(POSES), ...Object.values(BLINKS)];
+  return (
+    <View
+      pointerEvents="none"
+      style={styles.preload}
+      importantForAccessibility="no-hide-descendants"
+    >
+      {sources.map((source, i) => (
+        <Image key={i} source={source} style={styles.dot} fadeDuration={0} />
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   fill: { width: '100%', height: '100%' },
+  preload: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    opacity: 0,
+    flexDirection: 'row',
+  },
+  dot: { width: 1, height: 1 },
 });

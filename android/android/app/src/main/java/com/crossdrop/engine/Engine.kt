@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import com.crossdrop.core.CrossDropServer
 import com.crossdrop.core.ErrorCode
 import com.crossdrop.core.IncomingOffer
@@ -137,6 +138,8 @@ class Engine private constructor(private val app: Context) {
                 CrossDropService.update(app)
                 return@execute
             }
+            // The port is random and also announced over DNS-SD; logging it lets tools find the listener.
+            Log.i(TAG, "Receiving on port $port")
             val stillWanted = synchronized(lock) {
                 if (receivingEnabled) {
                     server = s
@@ -613,6 +616,7 @@ class Engine private constructor(private val app: Context) {
     companion object {
         const val APP_VERSION = "0.1.0"
         const val RECEIVE_AUTO_OFF_MS = 10 * 60 * 1000L
+        private const val TAG = "CrossDrop"
 
         @Volatile
         private var instance: Engine? = null

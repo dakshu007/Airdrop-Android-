@@ -8,7 +8,7 @@ import React from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Button } from './src/components/Button';
-import { Drip } from './src/components/Drip';
+import { Drip, DripPreloader } from './src/components/Drip';
 import { Logo } from './src/components/Logo';
 import { Text } from './src/components/Text';
 import { Navigator } from './src/navigation/Navigator';
@@ -78,6 +78,7 @@ function Root() {
     <View style={[styles.flex, { backgroundColor: t.background }]}>
       <StatusBar barStyle="dark-content" />
       {content}
+      {snapshot ? <DripPreloader /> : null}
     </View>
   );
 }

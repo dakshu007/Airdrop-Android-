@@ -35,12 +35,15 @@ object SharedFiles {
         var name: String? = null
         var size: Long? = null
         if (uri.scheme == ContentResolver.SCHEME_CONTENT) {
-            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
-                if (c.moveToFirst()) {
-                    val ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    val si = c.getColumnIndex(OpenableColumns.SIZE)
-                    if (ni >= 0 && !c.isNull(ni)) name = c.getString(ni)
-                    if (si >= 0 && !c.isNull(si)) size = c.getLong(si).takeIf { it >= 0 }
+            // Some providers refuse metadata queries even when reading is allowed; fall back below.
+            runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) {
+                        val ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        val si = c.getColumnIndex(OpenableColumns.SIZE)
+                        if (ni >= 0 && !c.isNull(ni)) name = c.getString(ni)
+                        if (si >= 0 && !c.isNull(si)) size = c.getLong(si).takeIf { it >= 0 }
+                    }
                 }
             }
         } else if (uri.scheme == ContentResolver.SCHEME_FILE) {
@@ -48,8 +51,21 @@ object SharedFiles {
             name = f.name
             size = f.length()
         }
-        val mime = context.contentResolver.getType(uri)
-        return SharedFile(uri.toString(), name?.takeIf { it.isNotBlank() } ?: (uri.lastPathSegment ?: "file"), size, mime)
+        val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+        return SharedFile(uri.toString(), name?.takeIf { it.isNotBlank() } ?: fallbackName(uri, mime), size, mime)
+    }
+
+    /** "Image 1000000024.png" rather than a bare provider id when the provider won't tell us the name. */
+    private fun fallbackName(uri: Uri, mime: String?): String {
+        val kind = when {
+            mime?.startsWith("image/") == true -> "Image"
+            mime?.startsWith("video/") == true -> "Video"
+            mime?.startsWith("audio/") == true -> "Audio"
+            else -> "File"
+        }
+        val id = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+        val ext = mime?.let { android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
+        return listOfNotNull(kind, id).joinToString(" ") + (ext?.let { ".$it" } ?: "")
     }
 
     fun listToJson(files: List<SharedFile>): String = Json.write(files.map { it.toJson() })

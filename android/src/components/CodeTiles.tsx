@@ -115,11 +115,7 @@ const styles = StyleSheet.create({
     borderColor: '#D5E7DB',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#185434',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    boxShadow: '0px 6px 14px rgba(24,84,52,0.10)',
   },
   digit: {
     fontVariant: ['tabular-nums'],

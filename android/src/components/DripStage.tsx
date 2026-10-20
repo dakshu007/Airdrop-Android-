@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
-import { useReducedMotion } from '../hooks/useReducedMotion';
+import { useStill } from '../hooks/useStill';
 import type { NearbyDevice } from '../native/types';
 import { useTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/tokens';
@@ -34,7 +34,7 @@ interface DripStageProps {
 }
 
 function Ping() {
-  const reduced = useReducedMotion();
+  const reduced = useStill();
   const v = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (reduced) {

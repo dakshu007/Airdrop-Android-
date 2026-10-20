@@ -57,17 +57,9 @@ frames_save() {
 
 tap_xy() { adb shell input tap "$1" "$2"; }
 
+# The engine logs its (random) listening port: "Receiving on port N".
 listen_port() {
-  local uid
-  uid=$(adb shell dumpsys package "$PKG" | grep -m1 -o 'userId=[0-9]*' | cut -d= -f2)
-  adb shell cat /proc/net/tcp6 /proc/net/tcp 2>/dev/null | python3 -c "
-import sys
-uid = '$uid'
-for line in sys.stdin:
-    f = line.split()
-    if len(f) > 7 and f[3] == '0A' and f[7] == uid:
-        print(int(f[1].split(':')[-1], 16)); break
-"
+  adb logcat -d -s CrossDrop:I | grep -o 'Receiving on port [0-9]*' | tail -1 | awk '{print $4}'
 }
 
 # ------------------------------------------------------------------ setup
@@ -100,6 +92,12 @@ shot 02-home-napping
 frames_reset
 rec_start 02-home-napping 6; rec_end
 frames_save 02-home-idle
+# Same screen with motion paused (system animation scale 0 reads as Reduce Motion),
+# to separate the cost of the animations from the emulator's baseline.
+for key in animator_duration_scale transition_animation_scale window_animation_scale; do adb shell settings put global "$key" 0; done
+sleep 2; frames_reset; sleep 6; frames_save 02-home-still
+for key in animator_duration_scale transition_animation_scale window_animation_scale; do adb shell settings put global "$key" 1; done
+sleep 2
 
 step "turn on receiving"
 $UI tap "Turn on Receiving" >/dev/null && ok "turn on receiving" || fail "turn on receiving"
@@ -254,7 +252,7 @@ fi
 # ------------------------------------------------------------------ logs
 step "logs"
 adb logcat -d > "$OUT/logcat.txt"
-grep -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS.*(Error|Warning)|E ReactNative" "$OUT/logcat.txt" > "$OUT/logcat-problems.txt" || true
+grep -E "FATAL EXCEPTION|ReactNativeJS|E ReactNative|E unknown:React" "$OUT/logcat.txt" > "$OUT/logcat-problems.txt" || true
 echo "logcat problems: $(wc -l < "$OUT/logcat-problems.txt")" | tee -a "$LOG"
 grep -c '^FAIL' "$LOG" | sed 's/^/failed steps: /' | tee -a "$LOG"
 exit 0

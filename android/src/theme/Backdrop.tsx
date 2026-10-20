@@ -6,7 +6,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 
 /**
@@ -25,60 +24,26 @@ const GRADIENTS: Record<Mood, [string, string, string]> = {
   failed: ['#FFFFFF', '#FBF5F1', '#F1E4DC'],
 };
 
+/** Inner, middle and edge colour of the soft spheres (rgb triplets). */
 const SPHERES: Record<Mood, [string, string, string]> = {
-  idle: ['#D8F7B4', '#7FD99A', '#2E9E66'],
-  off: ['#E4F3D9', '#A9D9B6', '#6BA884'],
-  incoming: ['#D8F7B4', '#7FD99A', '#2E9E66'],
-  active: ['#E8FBB8', '#9BE68A', '#3BAA70'],
-  done: ['#D8F7B4', '#7FD99A', '#2E9E66'],
-  failed: ['#FBE3CF', '#E8B08E', '#C4785A'],
+  idle: ['216,247,180', '127,217,154', '46,158,102'],
+  off: ['228,243,217', '169,217,182', '107,168,132'],
+  incoming: ['216,247,180', '127,217,154', '46,158,102'],
+  active: ['232,251,184', '155,230,138', '59,170,112'],
+  done: ['216,247,180', '127,217,154', '46,158,102'],
+  failed: ['251,227,207', '232,176,142', '196,120,90'],
 };
 
-function Gradient({ mood, id }: { mood: Mood; id: string }) {
+const gradient = (mood: Mood) => {
   const [a, b, c] = GRADIENTS[mood];
-  return (
-    <Svg
-      style={StyleSheet.absoluteFill}
-      width="100%"
-      height="100%"
-      preserveAspectRatio="none"
-    >
-      <Defs>
-        <RadialGradient id={id} cx="0.5" cy="0" fx="0.5" fy="0" r="1">
-          <Stop offset="0" stopColor={a} />
-          <Stop offset="0.45" stopColor={b} />
-          <Stop offset="1" stopColor={c} />
-        </RadialGradient>
-      </Defs>
-      <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${id})`} />
-    </Svg>
-  );
-}
+  return `radial-gradient(ellipse 120% 75% at 50% 0%, ${a} 0%, ${b} 45%, ${c} 100%)`;
+};
 
-/** A soft glowing sphere: a radial gradient that fades out, standing in for a blurred ball. */
-function Sphere({
-  size,
-  colors,
-  id,
-}: {
-  size: number;
-  colors: [string, string, string];
-  id: string;
-}) {
-  return (
-    <Svg width={size} height={size}>
-      <Defs>
-        <RadialGradient id={id} cx="0.42" cy="0.38" r="0.5">
-          <Stop offset="0" stopColor={colors[0]} stopOpacity={0.75} />
-          <Stop offset="0.45" stopColor={colors[1]} stopOpacity={0.5} />
-          <Stop offset="0.8" stopColor={colors[2]} stopOpacity={0.12} />
-          <Stop offset="1" stopColor={colors[2]} stopOpacity={0} />
-        </RadialGradient>
-      </Defs>
-      <Rect x="0" y="0" width={size} height={size} fill={`url(#${id})`} />
-    </Svg>
-  );
-}
+/** A glowing ball that fades to nothing at its edge, standing in for a blurred sphere. */
+const sphere = (mood: Mood) => {
+  const [a, b, c] = SPHERES[mood];
+  return `radial-gradient(circle closest-side at 42% 38%, rgba(${a},0.75) 0%, rgba(${b},0.5) 45%, rgba(${c},0.12) 80%, rgba(${c},0) 100%)`;
+};
 
 function useDrift(reduced: boolean, duration: number) {
   const v = useRef(new Animated.Value(0)).current;
@@ -109,7 +74,11 @@ function useDrift(reduced: boolean, duration: number) {
   return v;
 }
 
-/** Full-screen background; place first inside a full-screen container. */
+/**
+ * Full-screen background drawn with native gradients (nothing to measure or
+ * rasterise, so it is ready in the first frame). Place first inside a
+ * full-screen container.
+ */
 export function Backdrop({ mood }: { mood: Mood }) {
   const reduced = useReducedMotion();
   const { width, height } = useWindowDimensions();
@@ -138,17 +107,31 @@ export function Backdrop({ mood }: { mood: Mood }) {
       style={[StyleSheet.absoluteFill, styles.base]}
       pointerEvents="none"
       accessible={false}
+      importantForAccessibility="no-hide-descendants"
     >
-      {previous ? <Gradient mood={previous} id="bdPrev" /> : null}
-      <Animated.View style={[StyleSheet.absoluteFill, { opacity: fade }]}>
-        <Gradient mood={shown} id="bdNow" />
-      </Animated.View>
+      {previous ? (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundImage: gradient(previous) },
+          ]}
+        />
+      ) : null}
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          { opacity: fade, backgroundImage: gradient(shown) },
+        ]}
+      />
       <Animated.View
         style={[
           styles.abs,
           {
+            width: big,
+            height: big,
             left: -big * 0.42,
             top: height * 0.62,
+            backgroundImage: sphere(shown),
             transform: [
               {
                 translateX: a.interpolate({
@@ -165,15 +148,16 @@ export function Backdrop({ mood }: { mood: Mood }) {
             ],
           },
         ]}
-      >
-        <Sphere size={big} colors={SPHERES[shown]} id="bdS1" />
-      </Animated.View>
+      />
       <Animated.View
         style={[
           styles.abs,
           {
+            width: small,
+            height: small,
             right: -small * 0.3,
             top: height * 0.17,
+            backgroundImage: sphere(shown),
             transform: [
               {
                 translateX: b.interpolate({
@@ -190,9 +174,7 @@ export function Backdrop({ mood }: { mood: Mood }) {
             ],
           },
         ]}
-      >
-        <Sphere size={small} colors={SPHERES[shown]} id="bdS2" />
-      </Animated.View>
+      />
     </View>
   );
 }

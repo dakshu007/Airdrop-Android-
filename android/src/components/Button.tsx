@@ -148,11 +148,7 @@ const styles = StyleSheet.create({
   largeText: { fontSize: 17 },
   lift: {
     borderRadius: radii.pill,
-    shadowColor: '#0F1D16',
-    shadowOpacity: 0.22,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 8,
+    boxShadow: '0px 14px 30px rgba(15,29,22,0.22)',
   },
   disabled: { opacity: 0.45 },
 });

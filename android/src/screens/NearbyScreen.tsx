@@ -134,8 +134,10 @@ function Tray({
       <Frost radius={22} />
       <View style={styles.trayHead}>
         <Text variant="headline" style={styles.flex} numberOfLines={1}>
-          {pluralFiles(files.length)} · {formatBytes(total)}
-          {unknown ? '+' : ''}
+          {pluralFiles(files.length)} ·{' '}
+          {unknown && total === 0
+            ? 'size unknown'
+            : `${formatBytes(total)}${unknown ? '+' : ''}`}
         </Text>
         {onAdd ? (
           <Button
@@ -488,7 +490,7 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     backgroundColor: '#FFFFFF',
-    elevation: 1,
+    boxShadow: '0px 1px 3px rgba(0,0,0,0.2)',
   },
   titles: { gap: spacing.xs, paddingHorizontal: spacing.xxs },
   footer: { gap: spacing.sm },

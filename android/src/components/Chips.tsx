@@ -9,7 +9,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { platformLabel } from '../copy';
-import { useReducedMotion } from '../hooks/useReducedMotion';
+import { useStill } from '../hooks/useStill';
 import type { NearbyDevice } from '../native/types';
 import { useTheme } from '../theme/ThemeProvider';
 import { green, minTouch, spacing } from '../theme/tokens';
@@ -67,7 +67,7 @@ export function RoundButton({
 
 /** Gentle up-and-down float, offset by `phase` so chips don't move in step. */
 function useFloat(phase: number) {
-  const reduced = useReducedMotion();
+  const reduced = useStill();
   const v = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (reduced) {
@@ -241,10 +241,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   chipShadow: {
-    shadowColor: '#185434',
-    shadowOpacity: 0.14,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    borderRadius: 17,
+    boxShadow: '0px 12px 28px rgba(24,84,52,0.13)',
   },
   chip: {
     flexDirection: 'row',

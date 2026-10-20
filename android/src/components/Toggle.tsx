@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Pressable, StyleSheet } from 'react-native';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 
 const W = 54;
@@ -76,9 +76,7 @@ export function Toggle({
               ],
             },
           ]}
-        >
-          <View style={styles.knobShine} />
-        </Animated.View>
+        />
       </Animated.View>
     </Pressable>
   );
@@ -99,19 +97,6 @@ const styles = StyleSheet.create({
     height: KNOB,
     borderRadius: KNOB / 2,
     backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: 'hidden',
-  },
-  knobShine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: KNOB / 2,
-    backgroundColor: 'rgba(0,0,0,0.04)',
+    boxShadow: '0px 1px 3px rgba(0,0,0,0.2)',
   },
 });
