@@ -22,7 +22,22 @@ mkdir -p "$OUT/shots" "$OUT/video" "$OUT/frames"
 LOG="$OUT/steps.log"
 : > "$LOG"
 
-step() { echo "== $*" | tee -a "$LOG"; }
+# Stop early (keeping what was collected) if the emulator goes away, rather
+# than hanging on adb.
+alive() {
+  if [ "$(timeout 10 adb get-state 2>/dev/null)" != "device" ]; then
+    echo "FAIL emulator is gone (crashed or disconnected)" | tee -a "$LOG"
+    finish
+  fi
+}
+finish() {
+  [ -n "${LOGCAT_PID:-}" ] && kill "$LOGCAT_PID" 2>/dev/null
+  grep -E "FATAL EXCEPTION|ReactNativeJS|E ReactNative|F libc|F DEBUG|SIGSEGV|SIGABRT" "$OUT/logcat.txt" > "$OUT/logcat-problems.txt" 2>/dev/null || true
+  echo "logcat problems: $(wc -l < "$OUT/logcat-problems.txt")" | tee -a "$LOG"
+  grep -c '^FAIL' "$LOG" | sed 's/^/failed steps: /' | tee -a "$LOG"
+  exit 0
+}
+step() { alive; echo "== $*" | tee -a "$LOG"; }
 ok() { echo "OK   $*" | tee -a "$LOG"; }
 fail() { echo "FAIL $*" | tee -a "$LOG"; }
 check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then ok "$what"; else fail "$what"; fi; }
@@ -72,11 +87,16 @@ for key in animator_duration_scale transition_animation_scale window_animation_s
 done
 adb shell settings put system font_scale 1.0
 adb logcat -c
+# Streamed to disk from the start, so the last lines before any crash are kept.
+adb logcat -v threadtime > "$OUT/logcat.txt" 2>/dev/null &
+LOGCAT_PID=$!
 
 step "install"
 check "install apk" adb install -r "$APK"
 adb shell am start -W -n "$PKG/$ACTIVITY" >/dev/null
 sleep 6
+alive
+shot 00-launch
 
 # ------------------------------------------------------------------ welcome
 step "welcome"
@@ -225,7 +245,7 @@ if [ -n "$PORT" ]; then
   $UI wait "All done!" 120 >/dev/null && ok "done screen" || fail "done screen"
   shot 14-done
   rec_start 14-done 5; rec_end
-  wait "$CLI_PID"; echo "cli exit $?" | tee -a "$LOG"
+  timeout 60 tail --pid="$CLI_PID" -f /dev/null; echo "cli finished" | tee -a "$LOG"
   $UI tap "Done" 10 >/dev/null || $UI tap "Not now" 5 >/dev/null
   sleep 2
 
@@ -251,8 +271,5 @@ fi
 
 # ------------------------------------------------------------------ logs
 step "logs"
-adb logcat -d > "$OUT/logcat.txt"
-grep -E "FATAL EXCEPTION|ReactNativeJS|E ReactNative|E unknown:React" "$OUT/logcat.txt" > "$OUT/logcat-problems.txt" || true
-echo "logcat problems: $(wc -l < "$OUT/logcat-problems.txt")" | tee -a "$LOG"
-grep -c '^FAIL' "$LOG" | sed 's/^/failed steps: /' | tee -a "$LOG"
-exit 0
+sleep 2
+finish

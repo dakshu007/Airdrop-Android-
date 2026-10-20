@@ -102,7 +102,7 @@ jobs:
           if-no-files-found: error
 
   android-ui:
-    name: Android UI run (emulator)
+    name: Android UI run (emulator, ${{ matrix.gpu }})
     # Installs the APK on an emulator and walks every screen; a Kotlin CLI on
     # the runner plays the Mac so pairing, incoming, done and failure appear.
     # Results (screenshots, recordings, frame stats, logcat) are published as a
@@ -110,7 +110,13 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: android
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two software GPU paths (the runners have no GPU), to tell emulator
+        # graphics faults apart from app faults.
+        gpu: [swiftshader_indirect, swangle_indirect]
     permissions:
       contents: write
     steps:
@@ -143,7 +149,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: false
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-snapshot-save -no-window -gpu ${{ matrix.gpu }} -noaudio -no-boot-anim -camera-back none
           script: integration-tests/emulator/run.sh dist/CrossDrop.apk "$PWD/android/core/build/install/crossdrop-cli/bin/crossdrop-cli" ui-results
       - name: Summary
         if: always()
@@ -152,7 +158,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: CrossDrop-android-ui
+          name: CrossDrop-android-ui-${{ matrix.gpu }}
           path: ui-results
       - name: Publish results as a pre-release
         if: always()
@@ -161,9 +167,9 @@ jobs:
         run: |
           [ -d ui-results ] || exit 0
           (cd ui-results && zip -qr ../crossdrop-ui-run.zip .)
-          gh release create "ui-check-${{ github.run_number }}" crossdrop-ui-run.zip \
+          gh release create "ui-check-${{ github.run_number }}-${{ matrix.gpu }}" crossdrop-ui-run.zip \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
-            --title "UI check ${{ github.run_number }} (emulator, not an app build)" \
+            --title "UI check ${{ github.run_number }} (emulator, ${{ matrix.gpu }}; not an app build)" \
             --notes "Screenshots, screen recordings, frame stats and logcat from the Android emulator run of \`${GITHUB_SHA::7}\`. Emulator graphics are software-rendered (SwiftShader), so frame timings are pessimistic compared with a real phone."
 
   macos:
