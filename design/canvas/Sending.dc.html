@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CrossDrop sending</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0B6B3F}a:hover{color:#08502F}
+@keyframes cdFloat{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-10px) rotate(2deg)}}
+@keyframes cdDrift{0%,100%{transform:translate(0,0)}50%{transform:translate(18px,-22px)}}
+@keyframes cdSpin{to{transform:rotate(360deg)}}
+.cd-float{animation:cdFloat 2.4s ease-in-out infinite}
+.cd-drift{animation:cdDrift 5s ease-in-out infinite}
+.cd-drift2{animation:cdDrift 4s ease-in-out infinite reverse}
+.cd-sheen{animation:cdSpin 2.8s linear infinite}
+@media (prefers-reduced-motion: reduce){.cd-float,.cd-drift,.cd-drift2,.cd-sheen{animation:none}}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; box-sizing: border-box; background: radial-gradient(120% 70% at 50% 0%, #FFFFFF 0%, #F2FCE6 40%, #D9F5C4 100%); font-family: Poppins, system-ui, sans-serif; color: #0F1D16">
+
+  <div class="cd-drift" aria-hidden="true" style="position: absolute; width: 200px; height: 200px; left: -80px; top: 600px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #D8F7B4 0%, #7FD99A 45%, #2E9E66 100%); filter: blur(28px); opacity: 0.45"></div>
+  <div class="cd-drift2" aria-hidden="true" style="position: absolute; width: 110px; height: 110px; right: -30px; top: 160px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #EFFFD2 0%, #9BE6A6 55%, #3BAA70 100%); filter: blur(18px); opacity: 0.5"></div>
+
+  <div style="position: absolute; top: 76px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0 28px">
+    <div style="display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.95); font-size: 13px; font-weight: 500; color: #2B3D33">
+      <span style="width: 7px; height: 7px; border-radius: 50%; background: #149A5B"></span>
+      Connected · encrypted
+    </div>
+    <h1 style="margin: 10px 0 0; font-family: Poppins, sans-serif; font-size: 32px; line-height: 1.12; font-weight: 700; letter-spacing: -0.025em; text-align: center">Sending to<br>MacBook Pro</h1>
+    <p style="margin: 0; font-size: 15px; color: #4B5B52; text-align: center">Holiday-Video.mp4 and 1 more</p>
+  </div>
+
+  <div role="progressbar" aria-label="Sending" aria-valuemin="0" aria-valuemax="100" aria-valuenow="56" style="position: absolute; left: 50%; top: 290px; width: 250px; height: 250px; margin-left: -125px; border-radius: 50%; background: conic-gradient(#149A5B 0deg, #6FD493 140deg, #149A5B 201.6deg, rgba(20,154,91,0.12) 201.6deg 360deg); box-shadow: 0 24px 50px rgba(20,110,64,0.16)">
+    <div class="cd-sheen" aria-hidden="true" style="position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgba(255,255,255,0) 0deg, rgba(255,255,255,0.75) 20deg, rgba(255,255,255,0) 40deg, rgba(255,255,255,0) 360deg)"></div>
+    <div style="position: absolute; inset: 12px; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #FFFFFF 0%, #F2FBF4 60%, #E2F5E8 100%); display: flex; align-items: center; justify-content: center">
+      <img class="cd-float" src="/_blob/3afacabd94166ae408ba8af46078890a" alt="Drip riding a paper plane" style="width: 200px; height: 200px; margin-top: -40px">
+      <div style="position: absolute; bottom: 38px; left: 0; right: 0; text-align: center; font-family: Poppins, sans-serif; font-size: 28px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">56%</div>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 24px; right: 24px; top: 572px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+    <div style="padding: 12px 10px; border-radius: 18px; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.95); box-shadow: 0 8px 20px rgba(24,84,52,0.08); display: flex; flex-direction: column; align-items: center; gap: 2px">
+      <span style="font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums">412 MB</span>
+      <span style="font-size: 12px; color: #4B5B52">of 737 MB</span>
+    </div>
+    <div style="padding: 12px 10px; border-radius: 18px; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.95); box-shadow: 0 8px 20px rgba(24,84,52,0.08); display: flex; flex-direction: column; align-items: center; gap: 2px">
+      <span style="font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums">38 MB/s</span>
+      <span style="font-size: 12px; color: #4B5B52">speed</span>
+    </div>
+    <div style="padding: 12px 10px; border-radius: 18px; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.95); box-shadow: 0 8px 20px rgba(24,84,52,0.08); display: flex; flex-direction: column; align-items: center; gap: 2px">
+      <span style="font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums">~9 s</span>
+      <span style="font-size: 12px; color: #4B5B52">left</span>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 24px; right: 24px; bottom: 48px; display: flex; flex-direction: column; gap: 12px">
+    <a href="Done.dc.html" style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 56px; border-radius: 999px; background: rgba(255,255,255,0.75); border: 1px solid rgba(255,255,255,0.98); box-shadow: 0 8px 20px rgba(24,84,52,0.08); color: #0F1D16; text-decoration: none; font-size: 16px; font-weight: 600">
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F1D16" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>
+      Cancel
+    </a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

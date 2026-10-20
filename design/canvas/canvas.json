@@ -1,0 +1,30 @@
+{
+  "v": 3,
+  "createdOnFiles": { "v": 1, "at": "2026-10-20T05:20:00Z" },
+  "title": "CrossDrop Design",
+  "launch": { "view": "canvas" },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": { "x": 0, "y": 0, "w": 390, "h": 844, "title": "Android · Welcome", "radius": 44 },
+    "Home.dc.html": { "x": 470, "y": 0, "w": 390, "h": 844, "title": "Android · Nearby", "radius": 44 },
+    "Pairing.dc.html": { "x": 940, "y": 0, "w": 390, "h": 844, "title": "Android · Pairing code", "radius": 44 },
+    "Incoming.dc.html": { "x": 1410, "y": 0, "w": 390, "h": 844, "title": "Android · Incoming files", "radius": 44 },
+    "Sending.dc.html": { "x": 1880, "y": 0, "w": 390, "h": 844, "title": "Android · Sending", "radius": 44 },
+    "Done.dc.html": { "x": 2350, "y": 0, "w": 390, "h": 844, "title": "Android · Done", "radius": 44 },
+    "ReceivingOff.dc.html": { "x": 0, "y": 1264, "w": 390, "h": 844, "title": "Android · Receiving off", "radius": 44 },
+    "Searching.dc.html": { "x": 470, "y": 1264, "w": 390, "h": 844, "title": "Android · No devices yet", "radius": 44 },
+    "NoWifi.dc.html": { "x": 940, "y": 1264, "w": 390, "h": 844, "title": "Android · No Wi-Fi", "radius": 44 },
+    "Failed.dc.html": { "x": 1410, "y": 1264, "w": 390, "h": 844, "title": "Android · Transfer failed", "radius": 44 },
+    "Settings.dc.html": { "x": 1880, "y": 1264, "w": 390, "h": 844, "title": "Android · Settings", "radius": 44 },
+    "Mac.dc.html": { "x": 0, "y": 2528, "w": 1280, "h": 800, "title": "macOS · Main window", "radius": 18, "expand": "fill" },
+    "MenuBar.dc.html": { "x": 1360, "y": 2528, "w": 360, "h": 600, "title": "macOS · Menu bar panel", "radius": 18 }
+  },
+  "order": ["Main.dc.html", "Home.dc.html", "Pairing.dc.html", "Incoming.dc.html", "Sending.dc.html", "Done.dc.html", "ReceivingOff.dc.html", "Searching.dc.html", "NoWifi.dc.html", "Failed.dc.html", "Settings.dc.html", "Mac.dc.html", "MenuBar.dc.html"],
+  "notes": {
+    "android": { "x": 0, "y": -300, "text": "Android — Mint Air", "kind": "title1", "maxW": 2740 },
+    "states": { "x": 0, "y": 964, "text": "Android — Drip's moods & settings", "kind": "title1", "maxW": 2270 },
+    "motion": { "x": 2350, "y": 1264, "text": "Motion (all off with Reduce motion):\n• Drip bobs gently and blinks every few seconds\n• Device chips float; tapping one makes Drip lean toward it\n• Pairing digits flip in one by one, with a light haptic tick each\n• Sending: plane floats, ring sheen sweeps, spheres drift, background warms to lime\n• Done: Drip pops in, confetti bursts, soft drop sound (optional)", "w": 380, "fill": "green" },
+    "macos": { "x": 0, "y": 2228, "text": "macOS — Mint Air", "kind": "title1", "maxW": 1720 }
+  },
+  "designSystems": []
+}

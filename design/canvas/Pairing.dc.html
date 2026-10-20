@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CrossDrop pairing code</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0B6B3F}a:hover{color:#08502F}
+@keyframes cdFlip{0%{opacity:0;transform:perspective(300px) rotateX(-90deg) translateY(-6px)}60%{opacity:1;transform:perspective(300px) rotateX(12deg)}100%{opacity:1;transform:perspective(300px) rotateX(0)}}
+@keyframes cdBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.cd-tile{animation:cdFlip 520ms cubic-bezier(.2,.8,.2,1) both}
+.cd-bob{animation:cdBob 3.6s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.cd-tile,.cd-bob{animation:none}}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; box-sizing: border-box; background: radial-gradient(120% 70% at 50% 0%, #FFFFFF 0%, #F1FAF3 45%, #DDF3E3 100%); font-family: Poppins, system-ui, sans-serif; color: #0F1D16">
+
+  <div aria-hidden="true" style="position: absolute; width: 240px; height: 240px; left: -110px; top: 560px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #D8F7B4 0%, #7FD99A 45%, #2E9E66 100%); filter: blur(30px); opacity: 0.45"></div>
+
+  <div style="position: absolute; top: 54px; left: 24px; right: 24px; display: flex; align-items: center; justify-content: space-between">
+    <a href="Home.dc.html" aria-label="Cancel pairing" style="width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.95); background: rgba(255,255,255,0.65); box-shadow: 0 6px 18px rgba(24,84,52,0.08); display: flex; align-items: center; justify-content: center">
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0F1D16" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>
+    </a>
+    <div style="display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.95); font-size: 13px; font-weight: 500; color: #2B3D33">
+      <span style="width: 7px; height: 7px; border-radius: 50%; background: #E0A100"></span>
+      New device
+    </div>
+    <div style="width: 44px"></div>
+  </div>
+
+  <img class="cd-bob" src="/_blob/7dcc2e4828ff87bd4ee8c522df9c119f" alt="Drip holding a lock, keeping the pairing safe" style="position: absolute; left: 50%; top: 92px; width: 210px; height: 210px; margin-left: -105px">
+  <div style="display: none; position: absolute; top: 132px; left: 0; right: 0; align-items: center; justify-content: center; gap: 14px">
+    <div style="width: 64px; height: 64px; border-radius: 22px; background: rgba(255,255,255,0.75); border: 1px solid rgba(255,255,255,0.95); box-shadow: 0 10px 24px rgba(24,84,52,0.10); display: flex; align-items: center; justify-content: center">
+      <svg role="img" aria-label="This phone" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#0B6B3F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"></rect><path d="M11 18.5h2"></path></svg>
+    </div>
+    <div aria-hidden="true" style="display: flex; gap: 6px">
+      <div style="width: 6px; height: 6px; border-radius: 50%; background: #9BCFAE"></div>
+      <div style="width: 6px; height: 6px; border-radius: 50%; background: #5DB585"></div>
+      <div style="width: 6px; height: 6px; border-radius: 50%; background: #149A5B"></div>
+      <div style="width: 6px; height: 6px; border-radius: 50%; background: #5DB585"></div>
+      <div style="width: 6px; height: 6px; border-radius: 50%; background: #9BCFAE"></div>
+    </div>
+    <div style="width: 64px; height: 64px; border-radius: 22px; background: rgba(255,255,255,0.75); border: 1px solid rgba(255,255,255,0.95); box-shadow: 0 10px 24px rgba(24,84,52,0.10); display: flex; align-items: center; justify-content: center">
+      <svg role="img" aria-label="Studio iMac" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0B6B3F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M9 20h6"></path><path d="M12 16v4"></path></svg>
+    </div>
+  </div>
+
+  <div style="position: absolute; top: 300px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0 32px">
+    <h1 style="margin: 0; font-family: Poppins, sans-serif; font-size: 32px; line-height: 1.1; font-weight: 700; letter-spacing: -0.025em; text-align: center">Do these match?</h1>
+    <p style="margin: 0; font-size: 15px; line-height: 1.5; color: #4B5B52; text-align: center">Studio iMac is showing a code too.<br>Pair only if both are the same.</p>
+  </div>
+
+  <div role="group" aria-label="Pairing code 3 0 9 9 9 7" style="position: absolute; top: 432px; left: 24px; right: 24px; height: 150px; border-radius: 32px; background: rgba(255,255,255,0.62); border: 1px solid rgba(255,255,255,0.95); box-shadow: 0 24px 50px rgba(24,84,52,0.12); backdrop-filter: blur(16px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px">
+    <div aria-hidden="true" style="display: flex; align-items: center; gap: 6px; font-family: Poppins, sans-serif; font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: #0F1D16">
+      <span class="cd-tile" style="width: 44px; height: 60px; border-radius: 14px; background: rgba(255,255,255,0.9); border: 1px solid #D5E7DB; box-shadow: 0 6px 14px rgba(24,84,52,0.10); display: flex; align-items: center; justify-content: center; animation-delay: 0ms">3</span>
+      <span class="cd-tile" style="width: 44px; height: 60px; border-radius: 14px; background: rgba(255,255,255,0.9); border: 1px solid #D5E7DB; box-shadow: 0 6px 14px rgba(24,84,52,0.10); display: flex; align-items: center; justify-content: center; animation-delay: 90ms">0</span>
+      <span class="cd-tile" style="width: 44px; height: 60px; border-radius: 14px; background: rgba(255,255,255,0.9); border: 1px solid #D5E7DB; box-shadow: 0 6px 14px rgba(24,84,52,0.10); display: flex; align-items: center; justify-content: center; animation-delay: 180ms">9</span>
+      <span style="width: 10px"></span>
+      <span class="cd-tile" style="width: 44px; height: 60px; border-radius: 14px; background: rgba(255,255,255,0.9); border: 1px solid #D5E7DB; box-shadow: 0 6px 14px rgba(24,84,52,0.10); display: flex; align-items: center; justify-content: center; animation-delay: 270ms">9</span>
+      <span class="cd-tile" style="width: 44px; height: 60px; border-radius: 14px; background: rgba(255,255,255,0.9); border: 1px solid #D5E7DB; box-shadow: 0 6px 14px rgba(24,84,52,0.10); display: flex; align-items: center; justify-content: center; animation-delay: 360ms">9</span>
+      <span class="cd-tile" style="width: 44px; height: 60px; border-radius: 14px; background: rgba(255,255,255,0.9); border: 1px solid #D5E7DB; box-shadow: 0 6px 14px rgba(24,84,52,0.10); display: flex; align-items: center; justify-content: center; animation-delay: 450ms">7</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: #4B5B52">
+      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4B5B52" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+      Expires in 1:38
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 24px; right: 24px; bottom: 48px; display: flex; flex-direction: column; gap: 12px">
+    <a href="Sending.dc.html" style="display: flex; align-items: center; justify-content: center; gap: 10px; height: 58px; border-radius: 999px; background: #0F1D16; color: #FFFFFF; text-decoration: none; font-size: 17px; font-weight: 600; box-shadow: 0 14px 30px rgba(15,29,22,0.22)">
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg>
+      Codes match
+    </a>
+    <a href="Home.dc.html" style="display: flex; align-items: center; justify-content: center; height: 54px; border-radius: 999px; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.95); color: #0F1D16; text-decoration: none; font-size: 16px; font-weight: 600">They don’t match</a>
+    <p style="margin: 4px 0 0; font-size: 12px; line-height: 1.5; color: #4B5B52; text-align: center">You only do this once per device.</p>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

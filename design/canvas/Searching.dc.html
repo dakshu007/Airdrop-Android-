@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CrossDrop no devices yet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0B6B3F}a:hover{color:#08502F}
+@keyframes cdScan{0%,100%{transform:rotate(-5deg)}50%{transform:rotate(5deg)}}
+@keyframes cdPing{0%{transform:scale(.4);opacity:.6}100%{transform:scale(1.25);opacity:0}}
+.cd-scan{animation:cdScan 3.2s ease-in-out infinite;transform-origin:50% 85%}
+.cd-ping{animation:cdPing 2.6s ease-out infinite}
+@media (prefers-reduced-motion: reduce){.cd-scan,.cd-ping{animation:none}.cd-ping{opacity:.25}}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; box-sizing: border-box; background: radial-gradient(120% 70% at 50% 0%, #FFFFFF 0%, #F1FAF3 45%, #DDF3E3 100%); font-family: Poppins, system-ui, sans-serif; color: #0F1D16">
+
+  <div aria-hidden="true" style="position: absolute; width: 200px; height: 200px; right: -80px; top: 120px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #D8F7B4 0%, #7FD99A 45%, #2E9E66 100%); filter: blur(28px); opacity: 0.45"></div>
+
+  <div style="position: absolute; top: 70px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0 32px">
+    <div style="display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgba(255,255,255,0.75); border: 1px solid rgba(255,255,255,0.95); font-size: 13px; font-weight: 500; color: #2B3D33">
+      <span style="width: 7px; height: 7px; border-radius: 50%; background: #149A5B"></span>
+      Looking nearby
+    </div>
+    <h1 style="margin: 6px 0 0; font-family: Poppins, sans-serif; font-size: 32px; line-height: 1.1; font-weight: 700; letter-spacing: -0.025em; text-align: center">No devices yet</h1>
+    <p style="margin: 0; font-size: 15px; line-height: 1.5; color: #4B5B52; text-align: center">Drip is still looking. A Mac shows up here as soon as it’s ready.</p>
+  </div>
+
+  <div class="cd-ping" aria-hidden="true" style="position: absolute; left: 50%; top: 250px; width: 300px; height: 300px; margin-left: -150px; border-radius: 50%; border: 2px solid rgba(20,154,91,0.35)"></div>
+  <img class="cd-scan" src="/_blob/584be4f801753226a6e1be677c7fd03b" alt="Drip looking through binoculars" style="position: absolute; left: 50%; top: 236px; width: 320px; height: 320px; margin-left: -160px">
+
+  <section aria-label="Things to check" style="position: absolute; left: 24px; right: 24px; top: 568px; border-radius: 22px; background: rgba(255,255,255,0.72); border: 1px solid rgba(255,255,255,0.95); box-shadow: 0 10px 24px rgba(24,84,52,0.08); padding: 6px 16px">
+    <div style="display: flex; align-items: center; gap: 12px; padding: 9px 0">
+      <span style="width: 26px; height: 26px; border-radius: 50%; background: #0F1D16; color: #FFFFFF; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0">1</span>
+      <span style="font-size: 13px; line-height: 1.4">Open CrossDrop on your Mac and turn on Receiving</span>
+    </div>
+    <div style="height: 1px; background: #E1EEE5"></div>
+    <div style="display: flex; align-items: center; gap: 12px; padding: 9px 0">
+      <span style="width: 26px; height: 26px; border-radius: 50%; background: #0F1D16; color: #FFFFFF; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0">2</span>
+      <span style="font-size: 13px; line-height: 1.4">Use the same Wi‑Fi on both — guest networks often block this</span>
+    </div>
+  </section>
+
+  <nav aria-label="Main" style="position: absolute; left: 24px; right: 24px; bottom: 26px; height: 64px; border-radius: 26px; background: rgba(255,255,255,0.72); border: 1px solid rgba(255,255,255,0.95); box-shadow: 0 10px 30px rgba(24,84,52,0.10); display: flex; align-items: center; justify-content: space-around; padding: 0 10px">
+    <a href="Home.dc.html" aria-label="Nearby" aria-current="page" style="width: 48px; height: 48px; border-radius: 50%; background: #DDF3E3; display: flex; align-items: center; justify-content: center">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F1D16" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"></circle><path d="M16.2 7.8a6 6 0 0 1 0 8.4"></path><path d="M7.8 16.2a6 6 0 0 1 0-8.4"></path><path d="M19 5a10 10 0 0 1 0 14"></path><path d="M5 19A10 10 0 0 1 5 5"></path></svg>
+    </a>
+    <a href="#" aria-label="Activity" style="width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#5E6E65" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16"></path><path d="M3 16l4 4 4-4"></path><path d="M17 20V4"></path><path d="M13 8l4-4 4 4"></path></svg>
+    </a>
+    <a href="#" aria-label="Devices" style="width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#5E6E65" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="13" height="9" rx="1.5"></rect><path d="M1 17h17"></path><rect x="18" y="8" width="5" height="11" rx="1.2"></rect></svg>
+    </a>
+    <a href="Settings.dc.html" aria-label="Settings" style="width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center">
+      <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#5E6E65" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg>
+    </a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

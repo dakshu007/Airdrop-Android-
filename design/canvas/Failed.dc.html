@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CrossDrop transfer failed</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0B6B3F}a:hover{color:#08502F}
+@keyframes cdWobble{0%,100%{transform:rotate(0)}20%{transform:rotate(-3deg)}40%{transform:rotate(2.5deg)}60%{transform:rotate(-1.5deg)}80%{transform:rotate(0.8deg)}}
+.cd-wobble{animation:cdWobble 1.1s ease-out 0.2s 1 both;transform-origin:50% 90%}
+@media (prefers-reduced-motion: reduce){.cd-wobble{animation:none}}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; box-sizing: border-box; background: radial-gradient(120% 70% at 50% 0%, #FFFFFF 0%, #FBF5F1 45%, #F1E4DC 100%); font-family: Poppins, system-ui, sans-serif; color: #0F1D16">
+
+  <div aria-hidden="true" style="position: absolute; width: 220px; height: 220px; right: -90px; top: 470px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #FBE3CF 0%, #E8B08E 50%, #C4785A 100%); filter: blur(32px); opacity: 0.35"></div>
+
+  <div style="position: absolute; top: 70px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0 32px">
+    <div style="display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgba(255,255,255,0.75); border: 1px solid rgba(255,255,255,0.95); font-size: 13px; font-weight: 500; color: #2B3D33">
+      <span style="width: 7px; height: 7px; border-radius: 50%; background: #C9573B"></span>
+      Not sent
+    </div>
+    <h1 style="margin: 6px 0 0; font-family: Poppins, sans-serif; font-size: 32px; line-height: 1.1; font-weight: 700; letter-spacing: -0.025em; text-align: center">That didn’t go through</h1>
+    <p style="margin: 0; font-size: 15px; line-height: 1.5; color: #4B5B52; text-align: center">The connection to MacBook Pro was lost. Nothing incomplete was kept on either device.</p>
+  </div>
+
+  <img class="cd-wobble" src="/_blob/a481ebff2f1a6ede3e0f2d3a3f8e0f92" alt="Drip looking worried, holding a tilted document" style="position: absolute; left: 50%; top: 262px; width: 320px; height: 320px; margin-left: -160px">
+
+  <section aria-label="Transfer" style="position: absolute; left: 24px; right: 24px; top: 586px; display: flex; align-items: center; gap: 12px; border-radius: 20px; background: rgba(255,255,255,0.72); border: 1px solid rgba(255,255,255,0.95); box-shadow: 0 10px 24px rgba(84,40,24,0.07); padding: 12px 14px">
+    <span style="width: 38px; height: 38px; border-radius: 12px; background: #FBE9E2; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A8442B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path></svg>
+    </span>
+    <span style="flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0">
+      <span style="font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">3 photos · 18.4 MB</span>
+      <span style="font-size: 12px; color: #4B5B52">Stopped at 62% · Wi‑Fi dropped</span>
+    </span>
+  </section>
+
+  <div style="position: absolute; left: 24px; right: 24px; bottom: 40px; display: flex; flex-direction: column; gap: 10px">
+    <a href="Sending.dc.html" style="display: flex; align-items: center; justify-content: center; gap: 10px; height: 56px; border-radius: 999px; background: #0F1D16; color: #FFFFFF; text-decoration: none; font-size: 16px; font-weight: 600; box-shadow: 0 14px 30px rgba(15,29,22,0.22)">
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"></path><path d="M3 21v-5h5"></path></svg>
+      Try again
+    </a>
+    <a href="Home.dc.html" style="display: flex; align-items: center; justify-content: center; height: 52px; border-radius: 999px; background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.95); color: #0F1D16; text-decoration: none; font-size: 15px; font-weight: 600">Not now</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
