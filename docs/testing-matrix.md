@@ -11,11 +11,11 @@ tested, not "expected to fail".
 | Strict JSON parsing and message validation | Kotlin `JsonTest` | Pass (2026-10-20) |
 | Loopback transfer with pairing (empty + 1 MB file), trust reuse, duplicate name → `name (1)`, declined offer, declined pairing, receiver forgot sender, not receiving, integrity failure cleanup, receiver cancel, oversized frame, unsupported version | Kotlin `LoopbackTest` (real sockets, 127.0.0.1) | Pass (2026-10-20) |
 | CLI transfer Kotlin→Kotlin (5 MB random, Unicode name, empty file; hashes compared) | `integration-tests/interop.sh` on Linux | Pass (2026-10-20) |
-| Protocol vectors and loopback in Swift | `swift test` on GitHub macOS runner | See CI |
-| Kotlin↔Swift interop over TCP, both directions | `integration-tests/interop.sh` on GitHub macOS runner | See CI |
+| Protocol vectors and loopback in Swift | `swift test`, GitHub macos-15 runner, Xcode 16.4 | Pass (2026-10-20) |
+| Kotlin↔Swift interop over TCP: Kotlin→Swift, Swift→Kotlin, Swift→Swift, Kotlin→Kotlin (6 files incl. empty, 5 MB, Unicode, duplicate name; pairing codes match) | `integration-tests/interop.sh`, GitHub macos-15 runner | Pass (2026-10-20) |
 | React Native: typecheck, lint, 64 unit/render tests | Jest (Linux) | Pass (2026-10-20) |
-| Android APK build | GitHub Ubuntu runner | See CI |
-| macOS universal app build + DMG | GitHub macOS runner | See CI |
+| Android release APK build (arm64-v8a, armeabi-v7a, x86_64) | GitHub ubuntu-24.04 runner | Pass (2026-10-20) |
+| macOS universal app (arm64 + x86_64), ad-hoc signature verified, DMG | GitHub macos-15 runner | Pass (2026-10-20) |
 
 ## Manual, on real devices
 
