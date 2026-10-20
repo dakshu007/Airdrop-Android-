@@ -83,7 +83,7 @@ export function Button({
       ]}
     >
       {kind === 'primary' && !inactive ? (
-        <SoftShadow color="rgba(15,29,22,0.20)" offsetY={10} spread={6} />
+        <SoftShadow color="#0F1D16" opacity={0.28} offsetY={10} spread={6} />
       ) : null}
       <Pressable
         onPress={onPress}

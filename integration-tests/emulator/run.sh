@@ -253,6 +253,8 @@ if [ -n "$PORT" ]; then
   "$CLI" send --host 127.0.0.1 --port 47123 --identity "$WORK/id" --name "Daksh’s MacBook Pro" --platform macos \
     "$WORK/Holiday-Video.mp4" > "$OUT/cli-send-2.log" 2>&1 &
   CLI_PID=$!
+  # The CLI keeps no trust between runs, so it pairs again first.
+  $UI tap "Codes match" 30 >/dev/null && ok "codes match (second)" || fail "codes match (second)"
   $UI tap "Accept" 30 >/dev/null && ok "accept second" || fail "accept second"
   sleep 2
   kill "$CLI_PID" 2>/dev/null

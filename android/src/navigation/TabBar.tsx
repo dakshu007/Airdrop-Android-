@@ -67,7 +67,7 @@ export function TabBar({ current, onSelect, badges }: TabBarProps) {
       ]}
     >
       <View>
-        <SoftShadow offsetY={10} spread={10} color="rgba(24,84,52,0.12)" />
+        <SoftShadow offsetY={10} spread={10} opacity={0.16} />
         <View
           accessibilityRole="tablist"
           style={styles.bar}

@@ -123,7 +123,7 @@ export function FloatChip({
       ]}
       importantForAccessibility="no-hide-descendants"
     >
-      <SoftShadow offsetY={8} spread={8} color="rgba(24,84,52,0.13)" />
+      <SoftShadow offsetY={8} spread={8} opacity={0.18} />
       <View style={styles.chip}>
         <Frost radius={16} />
         {children}
@@ -173,7 +173,7 @@ export function DeviceChip({
         style,
       ]}
     >
-      <SoftShadow offsetY={10} spread={8} color="rgba(24,84,52,0.14)" />
+      <SoftShadow offsetY={10} spread={8} opacity={0.2} />
       <Pressable
         onPress={onPress}
         onPressIn={() => {

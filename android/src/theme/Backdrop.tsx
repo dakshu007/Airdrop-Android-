@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
+  Image,
+  ImageSourcePropType,
   StyleSheet,
   useWindowDimensions,
   View,
@@ -15,34 +17,23 @@ import { useReducedMotion } from '../hooks/useReducedMotion';
  */
 export type Mood = 'idle' | 'off' | 'incoming' | 'active' | 'done' | 'failed';
 
-const GRADIENTS: Record<Mood, [string, string, string]> = {
-  idle: ['#FFFFFF', '#F1FAF3', '#DDF3E3'],
-  off: ['#FFFFFF', '#F2F6F3', '#E1ECE5'],
-  incoming: ['#FFFFFF', '#EAF7EE', '#CFEBD8'],
-  active: ['#FFFFFF', '#F2FCE6', '#D9F5C4'],
-  done: ['#FFFFFF', '#E6F7EA', '#BFE8CB'],
-  failed: ['#FFFFFF', '#FBF5F1', '#F1E4DC'],
+/** Pre-drawn gradients (scripts/make_ui_textures.py): one texture each, no per-pixel work. */
+const BACKDROPS: Record<Mood, ImageSourcePropType> = {
+  idle: require('../assets/ui/backdrop-idle.jpg'),
+  off: require('../assets/ui/backdrop-off.jpg'),
+  incoming: require('../assets/ui/backdrop-incoming.jpg'),
+  active: require('../assets/ui/backdrop-active.jpg'),
+  done: require('../assets/ui/backdrop-done.jpg'),
+  failed: require('../assets/ui/backdrop-failed.jpg'),
 };
 
-/** Inner, middle and edge colour of the soft spheres (rgb triplets). */
-const SPHERES: Record<Mood, [string, string, string]> = {
-  idle: ['216,247,180', '127,217,154', '46,158,102'],
-  off: ['228,243,217', '169,217,182', '107,168,132'],
-  incoming: ['216,247,180', '127,217,154', '46,158,102'],
-  active: ['232,251,184', '155,230,138', '59,170,112'],
-  done: ['216,247,180', '127,217,154', '46,158,102'],
-  failed: ['251,227,207', '232,176,142', '196,120,90'],
-};
-
-const gradient = (mood: Mood) => {
-  const [a, b, c] = GRADIENTS[mood];
-  return `radial-gradient(ellipse 120% 75% at 50% 0%, ${a} 0%, ${b} 45%, ${c} 100%)`;
-};
-
-/** A glowing ball that fades to nothing at its edge, standing in for a blurred sphere. */
-const sphere = (mood: Mood) => {
-  const [a, b, c] = SPHERES[mood];
-  return `radial-gradient(circle closest-side at 42% 38%, rgba(${a},0.75) 0%, rgba(${b},0.5) 45%, rgba(${c},0.12) 80%, rgba(${c},0) 100%)`;
+const SPHERES: Record<Mood, ImageSourcePropType> = {
+  idle: require('../assets/ui/sphere-green.png'),
+  off: require('../assets/ui/sphere-cool.png'),
+  incoming: require('../assets/ui/sphere-green.png'),
+  active: require('../assets/ui/sphere-lime.png'),
+  done: require('../assets/ui/sphere-green.png'),
+  failed: require('../assets/ui/sphere-warm.png'),
 };
 
 function useDrift(reduced: boolean, duration: number) {
@@ -110,20 +101,22 @@ export function Backdrop({ mood }: { mood: Mood }) {
       importantForAccessibility="no-hide-descendants"
     >
       {previous ? (
-        <View
-          style={[
-            StyleSheet.absoluteFill,
-            { backgroundImage: gradient(previous) },
-          ]}
+        <Image
+          source={BACKDROPS[previous]}
+          style={StyleSheet.absoluteFill}
+          resizeMode="stretch"
+          fadeDuration={0}
         />
       ) : null}
-      <Animated.View
-        style={[
-          StyleSheet.absoluteFill,
-          { opacity: fade, backgroundImage: gradient(shown) },
-        ]}
+      <Animated.Image
+        source={BACKDROPS[shown]}
+        style={[StyleSheet.absoluteFill, { opacity: fade }]}
+        resizeMode="stretch"
+        fadeDuration={0}
       />
-      <Animated.View
+      <Animated.Image
+        source={SPHERES[shown]}
+        fadeDuration={0}
         style={[
           styles.abs,
           {
@@ -131,7 +124,6 @@ export function Backdrop({ mood }: { mood: Mood }) {
             height: big,
             left: -big * 0.42,
             top: height * 0.62,
-            backgroundImage: sphere(shown),
             transform: [
               {
                 translateX: a.interpolate({
@@ -149,7 +141,9 @@ export function Backdrop({ mood }: { mood: Mood }) {
           },
         ]}
       />
-      <Animated.View
+      <Animated.Image
+        source={SPHERES[shown]}
+        fadeDuration={0}
         style={[
           styles.abs,
           {
@@ -157,7 +151,6 @@ export function Backdrop({ mood }: { mood: Mood }) {
             height: small,
             right: -small * 0.3,
             top: height * 0.17,
-            backgroundImage: sphere(shown),
             transform: [
               {
                 translateX: b.interpolate({
