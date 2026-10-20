@@ -1,24 +1,38 @@
 import { useEffect, useState } from 'react';
 import { AccessibilityInfo } from 'react-native';
 
+/** Last value the system reported, shared so new screens start with the right one. */
+let known: boolean | null = null;
+const listeners = new Set<(value: boolean) => void>();
+
+function publish(value: boolean) {
+  known = value;
+  listeners.forEach(l => l(value));
+}
+
+let subscribed = false;
+function ensureSubscribed() {
+  if (subscribed) return;
+  subscribed = true;
+  AccessibilityInfo.isReduceMotionEnabled()
+    .then(publish)
+    .catch(() => publish(false));
+  AccessibilityInfo.addEventListener('reduceMotionChanged', publish);
+}
+
 /**
- * True when the system asks for reduced motion. Starts as `true` so nothing
- * moves before the real setting is known.
+ * True when the system asks for reduced motion. Until the first answer
+ * arrives it is `true`, so nothing moves before the setting is known; after
+ * that every component starts with the known value.
  */
 export function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(true);
+  const [reduced, setReduced] = useState(known ?? true);
   useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then(value => mounted && setReduced(value))
-      .catch(() => mounted && setReduced(false));
-    const sub = AccessibilityInfo.addEventListener(
-      'reduceMotionChanged',
-      value => setReduced(value),
-    );
+    ensureSubscribed();
+    listeners.add(setReduced);
+    if (known !== null) setReduced(known);
     return () => {
-      mounted = false;
-      sub.remove();
+      listeners.delete(setReduced);
     };
   }, []);
   return reduced;

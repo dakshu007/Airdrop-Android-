@@ -115,7 +115,6 @@ const styles = StyleSheet.create({
     borderColor: '#D5E7DB',
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0px 6px 14px rgba(24,84,52,0.10)',
   },
   digit: {
     fontVariant: ['tabular-nums'],

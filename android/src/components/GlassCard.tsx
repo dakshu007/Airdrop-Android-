@@ -121,7 +121,7 @@ export function GlassCard({
 }
 
 const styles = StyleSheet.create({
-  shadowWrap: { boxShadow: '0px 10px 24px rgba(24,84,52,0.08)' },
+  shadowWrap: {},
   pressable: { overflow: 'hidden', minHeight: 48 },
   surface: {
     overflow: 'hidden',

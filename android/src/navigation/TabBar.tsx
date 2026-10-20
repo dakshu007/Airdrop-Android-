@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SoftShadow } from '../components/Frost';
 import { Icon, IconName } from '../components/Icon';
 import { Text } from '../components/Text';
 import { useReducedMotion } from '../hooks/useReducedMotion';
@@ -65,57 +66,63 @@ export function TabBar({ current, onSelect, badges }: TabBarProps) {
         },
       ]}
     >
-      <View
-        accessibilityRole="tablist"
-        style={styles.bar}
-        onLayout={e => setWidth(e.nativeEvent.layout.width)}
-      >
-        {itemWidth > 0 ? (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.lens,
-              { backgroundColor: t.accentSoft, transform: [{ translateX: x }] },
-            ]}
-          />
-        ) : null}
-        {TABS.map(tab => {
-          const selected = tab.key === current;
-          const badge = badges[tab.key] ?? 0;
-          return (
-            <Pressable
-              key={tab.key}
-              onPress={() => onSelect(tab.key)}
-              accessibilityRole="tab"
-              accessibilityLabel={
-                badge > 0 ? `${tab.label}, ${badge} active` : tab.label
-              }
-              accessibilityState={{ selected }}
-              style={styles.item}
-            >
-              <View style={styles.icon}>
-                <Icon
-                  name={tab.icon}
-                  size={22}
-                  color={selected ? t.textPrimary : t.textTertiary}
-                  strokeWidth={selected ? 2 : 1.8}
-                />
-                {badge > 0 ? (
-                  <View style={styles.badge}>
-                    <Text
-                      variant="caption"
-                      tone="onAccent"
-                      maxFontSizeMultiplier={1.3}
-                      style={styles.badgeText}
-                    >
-                      {badge > 9 ? '9+' : badge}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-            </Pressable>
-          );
-        })}
+      <View>
+        <SoftShadow offsetY={10} spread={10} color="rgba(24,84,52,0.12)" />
+        <View
+          accessibilityRole="tablist"
+          style={styles.bar}
+          onLayout={e => setWidth(e.nativeEvent.layout.width)}
+        >
+          {itemWidth > 0 ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.lens,
+                {
+                  backgroundColor: t.accentSoft,
+                  transform: [{ translateX: x }],
+                },
+              ]}
+            />
+          ) : null}
+          {TABS.map(tab => {
+            const selected = tab.key === current;
+            const badge = badges[tab.key] ?? 0;
+            return (
+              <Pressable
+                key={tab.key}
+                onPress={() => onSelect(tab.key)}
+                accessibilityRole="tab"
+                accessibilityLabel={
+                  badge > 0 ? `${tab.label}, ${badge} active` : tab.label
+                }
+                accessibilityState={{ selected }}
+                style={styles.item}
+              >
+                <View style={styles.icon}>
+                  <Icon
+                    name={tab.icon}
+                    size={22}
+                    color={selected ? t.textPrimary : t.textTertiary}
+                    strokeWidth={selected ? 2 : 1.8}
+                  />
+                  {badge > 0 ? (
+                    <View style={styles.badge}>
+                      <Text
+                        variant="caption"
+                        tone="onAccent"
+                        maxFontSizeMultiplier={1.3}
+                        style={styles.badgeText}
+                      >
+                        {badge > 9 ? '9+' : badge}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
     </View>
   );
@@ -132,7 +139,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.95)',
-    boxShadow: '0px 10px 30px rgba(24,84,52,0.12)',
   },
   lens: {
     position: 'absolute',

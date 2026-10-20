@@ -268,7 +268,9 @@ export function Drip({
           StyleSheet.absoluteFill,
           {
             transform: transforms,
-            opacity: motion === 'pop' && !reduced ? once : 1,
+            // Always the animated value for pop (set to 1 when still), never
+            // swapped for a constant, which can strand the native view at 0.
+            opacity: motion === 'pop' ? once : 1,
           },
         ]}
       >

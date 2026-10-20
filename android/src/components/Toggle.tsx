@@ -97,6 +97,7 @@ const styles = StyleSheet.create({
     height: KNOB,
     borderRadius: KNOB / 2,
     backgroundColor: '#FFFFFF',
-    boxShadow: '0px 1px 3px rgba(0,0,0,0.2)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.12)',
   },
 });

@@ -69,16 +69,14 @@ export function Stage({
           styles.fill,
           {
             opacity: progress,
-            transform: reduced
-              ? []
-              : [
-                  {
-                    translateY: progress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [height * 0.12, 0],
-                    }),
-                  },
-                ],
+            transform: [
+              {
+                translateY: progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [reduced ? 0 : height * 0.12, 0],
+                }),
+              },
+            ],
           },
         ]}
       >

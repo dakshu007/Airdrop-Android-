@@ -40,11 +40,31 @@ export function Frost({ radius, tint, borderless }: FrostProps) {
   );
 }
 
-/** Soft green shadow under floating glass (cards, chips, the tab bar). */
-export const glassShadow = {
-  boxShadow: '0px 10px 24px rgba(24,84,52,0.08)',
-} as const;
-
-export const floatShadow = {
-  boxShadow: '0px 12px 28px rgba(24,84,52,0.13)',
-} as const;
+/**
+ * A soft drop shadow drawn as a radial gradient behind the element: no blur
+ * pass, so it costs nothing per frame and works on every GPU. Place it as the
+ * first child of a container without `overflow: hidden`.
+ */
+export function SoftShadow({
+  color = 'rgba(24,84,52,0.16)',
+  offsetY = 10,
+  spread = 10,
+}: {
+  color?: string;
+  offsetY?: number;
+  spread?: number;
+}) {
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: 'absolute',
+        left: -spread,
+        right: -spread,
+        top: offsetY - spread / 2,
+        bottom: -(offsetY + spread),
+        backgroundImage: `radial-gradient(ellipse closest-side, ${color} 55%, rgba(0,0,0,0) 100%)`,
+      }}
+    />
+  );
+}

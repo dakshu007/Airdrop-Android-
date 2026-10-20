@@ -58,9 +58,8 @@ function Ping() {
         styles.ring,
         styles.pingRing,
         {
-          opacity: reduced
-            ? 0.25
-            : v.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0] }),
+          // At rest (Reduce Motion) v sits at 0.6, giving a faint static ring.
+          opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0] }),
           transform: [
             {
               scale: v.interpolate({

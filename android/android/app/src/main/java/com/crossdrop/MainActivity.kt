@@ -22,6 +22,16 @@ class MainActivity : ReactActivity() {
         if (savedInstanceState == null) handleIntent(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        Engine.get(this).setAppVisible(true)
+    }
+
+    override fun onStop() {
+        Engine.get(this).setAppVisible(false)
+        super.onStop()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

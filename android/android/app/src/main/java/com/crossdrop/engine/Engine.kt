@@ -351,6 +351,37 @@ class Engine private constructor(private val app: Context) {
         changed()
     }
 
+    // ---------------------------------------------------------------- foreground
+
+    /** True while CrossDrop is on screen; requests then show in the app, not as heads-up notifications. */
+    @Volatile
+    private var appVisible = false
+
+    fun setAppVisible(visible: Boolean) {
+        appVisible = visible
+        val (prompts, pending) = synchronized(lock) { pairing.values.map { it.prompt } to offers.values.toList() }
+        if (visible) {
+            prompts.forEach { notifier.cancel(it.sessionId) }
+            pending.forEach { notifier.cancel(it.transferId) }
+        } else {
+            // Leaving the app with a decision pending: make sure it can still be found.
+            prompts.forEach(::notifyPairing)
+            pending.forEach(::notifyOffer)
+        }
+    }
+
+    private fun notifyPairing(prompt: PairingPrompt) =
+        notifier.request(prompt.sessionId, "Pair with ${prompt.peer.name}?", "Check that the code matches on both devices.")
+
+    private fun notifyOffer(offer: IncomingOffer) {
+        val count = offer.files.size
+        notifier.request(
+            offer.transferId,
+            "${offer.peer.name} wants to send you ${if (count == 1) "a file" else "$count files"}",
+            "Open CrossDrop to accept or decline.",
+        )
+    }
+
     // ---------------------------------------------------------------- receiving events
 
     private val receiverEvents = object : ReceiverEvents {
@@ -358,7 +389,7 @@ class Engine private constructor(private val app: Context) {
 
         override fun onPairingPrompt(prompt: PairingPrompt) {
             addPairing(prompt)
-            notifier.request(prompt.sessionId, "Pair with ${prompt.peer.name}?", "Check that the code matches on both devices.")
+            if (!appVisible) notifyPairing(prompt)
         }
 
         override fun onPairingWaitingForPeer(prompt: PairingPrompt) = pairingWaiting(prompt)
@@ -370,12 +401,7 @@ class Engine private constructor(private val app: Context) {
 
         override fun onOffer(offer: IncomingOffer) {
             synchronized(lock) { offers[offer.transferId] = offer }
-            val count = offer.files.size
-            notifier.request(
-                offer.transferId,
-                "${offer.peer.name} wants to send you ${if (count == 1) "a file" else "$count files"}",
-                "Open CrossDrop to accept or decline.",
-            )
+            if (!appVisible) notifyOffer(offer)
             changed()
         }
 

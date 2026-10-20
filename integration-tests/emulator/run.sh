@@ -121,7 +121,7 @@ sleep 2
 
 step "turn on receiving"
 $UI tap "Turn on Receiving" >/dev/null && ok "turn on receiving" || fail "turn on receiving"
-sleep 1.5
+sleep 2.5
 shot 03-notification-explainer
 $UI tap "Continue" 8 >/dev/null && ok "continue" || fail "continue (explainer)"
 sleep 2

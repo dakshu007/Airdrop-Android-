@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { minTouch, radii, spacing } from '../theme/tokens';
-import { Frost } from './Frost';
+import { Frost, SoftShadow } from './Frost';
 import { Icon, IconName } from './Icon';
 import { Text } from './Text';
 
@@ -82,6 +82,9 @@ export function Button({
         style,
       ]}
     >
+      {kind === 'primary' && !inactive ? (
+        <SoftShadow color="rgba(15,29,22,0.20)" offsetY={10} spread={6} />
+      ) : null}
       <Pressable
         onPress={onPress}
         disabled={inactive}
@@ -148,7 +151,6 @@ const styles = StyleSheet.create({
   largeText: { fontSize: 17 },
   lift: {
     borderRadius: radii.pill,
-    boxShadow: '0px 14px 30px rgba(15,29,22,0.22)',
   },
   disabled: { opacity: 0.45 },
 });

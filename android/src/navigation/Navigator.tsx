@@ -98,16 +98,14 @@ function TabLayer({
         StyleSheet.absoluteFill,
         {
           opacity: v,
-          transform: reduced
-            ? []
-            : [
-                {
-                  translateY: v.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [10, 0],
-                  }),
-                },
-              ],
+          transform: [
+            {
+              translateY: v.interpolate({
+                inputRange: [0, 1],
+                outputRange: [reduced ? 0 : 10, 0],
+              }),
+            },
+          ],
         },
       ]}
     >
@@ -209,7 +207,7 @@ export function Navigator() {
           style={[
             StyleSheet.absoluteFill,
             {
-              opacity: reduced ? 1 : shareProgress,
+              opacity: shareProgress,
               transform: [
                 {
                   translateY: shareProgress.interpolate({

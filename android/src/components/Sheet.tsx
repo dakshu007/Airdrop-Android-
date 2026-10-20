@@ -58,14 +58,16 @@ export function Sheet({
     }
   }, [visible, reduced, progress]);
 
-  const translateY = reduced
-    ? 0
-    : progress.interpolate({
-        inputRange: [0, 1],
-        outputRange: [Math.min(480, height * 0.6), 0],
-      });
-
-  const sheetOpacity = reduced ? progress : 1;
+  // Always bound to the animated value: swapping an animated style for a
+  // constant can leave the native view at its last animated value.
+  const translateY = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [reduced ? 0 : Math.min(480, height * 0.6), 0],
+  });
+  const sheetOpacity = progress.interpolate({
+    inputRange: [0, 0.3, 1],
+    outputRange: [reduced ? 0 : 1, 1, 1],
+  });
 
   return (
     <Modal
@@ -93,7 +95,11 @@ export function Sheet({
         >
           <Frost radius={SHEET_RADIUS} tint="rgba(255,255,255,0.94)" />
           <View style={styles.grabber} />
-          <ScrollView bounces={false} contentContainerStyle={styles.content}>
+          <ScrollView
+            bounces={false}
+            style={styles.scroll}
+            contentContainerStyle={styles.content}
+          >
             {children}
           </ScrollView>
         </Animated.View>
@@ -126,6 +132,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
     backgroundColor: '#C7DDCD',
   },
+  scroll: { flexGrow: 0 },
   content: {
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.sm,

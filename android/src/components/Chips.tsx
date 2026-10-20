@@ -13,7 +13,7 @@ import { useStill } from '../hooks/useStill';
 import type { NearbyDevice } from '../native/types';
 import { useTheme } from '../theme/ThemeProvider';
 import { green, minTouch, spacing } from '../theme/tokens';
-import { Frost } from './Frost';
+import { Frost, SoftShadow } from './Frost';
 import { Icon, IconName } from './Icon';
 import { IconBubble } from './IconBubble';
 import { Text } from './Text';
@@ -123,6 +123,7 @@ export function FloatChip({
       ]}
       importantForAccessibility="no-hide-descendants"
     >
+      <SoftShadow offsetY={8} spread={8} color="rgba(24,84,52,0.13)" />
       <View style={styles.chip}>
         <Frost radius={16} />
         {children}
@@ -172,6 +173,7 @@ export function DeviceChip({
         style,
       ]}
     >
+      <SoftShadow offsetY={10} spread={8} color="rgba(24,84,52,0.14)" />
       <Pressable
         onPress={onPress}
         onPressIn={() => {
@@ -240,10 +242,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  chipShadow: {
-    borderRadius: 17,
-    boxShadow: '0px 12px 28px rgba(24,84,52,0.13)',
-  },
+  chipShadow: {},
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
