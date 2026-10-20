@@ -1,5 +1,6 @@
 import {
   countdown,
+  countdownCoarse,
   etaSeconds,
   filesTitle,
   formatBytes,
@@ -88,6 +89,11 @@ test('countdown', () => {
   expect(countdown(119_100)).toBe('2:00');
   expect(countdown(61_000)).toBe('1:01');
   expect(countdown(-5)).toBe('0:00');
+  expect(countdownCoarse(119_100)).toBe('2 min');
+  expect(countdownCoarse(61_000)).toBe('2 min');
+  expect(countdownCoarse(60_000)).toBe('60 s');
+  expect(countdownCoarse(42_000)).toBe('50 s');
+  expect(countdownCoarse(3_000)).toBe('10 s');
 });
 
 test('files helpers', () => {

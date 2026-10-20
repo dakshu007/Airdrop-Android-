@@ -154,6 +154,19 @@ export function pluralFiles(count: number): string {
   return count === 1 ? '1 file' : `${count} files`;
 }
 
+/**
+ * Calm countdown for prompts: whole minutes, then 10-second steps in the last
+ * minute ("2 min", "1 min", "50 s" … "10 s"). It changes rarely, so the
+ * screen stays still and screen readers aren't interrupted every second.
+ */
+export function countdownCoarse(msLeft: number): string {
+  const s = Math.max(0, msLeft / 1000);
+  if (s > 60) {
+    return `${Math.ceil(s / 60)} min`;
+  }
+  return `${Math.max(10, Math.ceil(s / 10) * 10)} s`;
+}
+
 export function countdown(msLeft: number): string {
   const total = Math.max(0, Math.ceil(msLeft / 1000));
   const m = Math.floor(total / 60);

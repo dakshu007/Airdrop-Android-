@@ -49,7 +49,8 @@ export function Overlays() {
   const transfer = followed
     ? snapshot.transfers.find(tr => tr.id === followed)
     : undefined;
-  const now = useNow(1000, !!pairing || !!offer);
+  // Countdowns are coarse (see countdownCoarse), so a 5-second clock is plenty.
+  const now = useNow(5000, !!pairing || !!offer);
 
   // Stop following a transfer that was dismissed or simply cancelled.
   useEffect(() => {

@@ -7,7 +7,7 @@ import { Drip } from '../components/Drip';
 import { Frost } from '../components/Frost';
 import { Stage, useArtSize } from '../components/Stage';
 import { Text } from '../components/Text';
-import { countdown, spokenPairingCode } from '../format';
+import { countdownCoarse, spokenPairingCode } from '../format';
 import * as CrossDrop from '../native/crossdrop';
 import type { PairingPrompt } from '../native/types';
 import { useTheme } from '../theme/ThemeProvider';
@@ -75,7 +75,7 @@ export function PairingStage({ prompt, now, responded, onRespond }: Props) {
           accessibilityRole="text"
           accessibilityLabel={`Pairing code ${spokenPairingCode(
             prompt.code,
-          )}. Expires in ${countdown(prompt.expiresAt - now)}`}
+          )}. Expires in ${countdownCoarse(prompt.expiresAt - now)}`}
         >
           <Frost radius={32} />
           <CodeTiles
@@ -83,7 +83,7 @@ export function PairingStage({ prompt, now, responded, onRespond }: Props) {
             onTick={() => CrossDrop.feedback('tick')}
           />
           <Text variant="footnote" tone="secondary" center>
-            Expires in {countdown(prompt.expiresAt - now)}
+            Expires in {countdownCoarse(prompt.expiresAt - now)}
           </Text>
         </View>
 

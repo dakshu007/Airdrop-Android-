@@ -8,7 +8,7 @@ import { Frost } from '../components/Frost';
 import { Icon } from '../components/Icon';
 import { Stage, useArtSize } from '../components/Stage';
 import { Text } from '../components/Text';
-import { countdown, formatBytes, pluralFiles } from '../format';
+import { countdownCoarse, formatBytes, pluralFiles } from '../format';
 import type { IncomingOffer } from '../native/types';
 import { useTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/tokens';
@@ -125,7 +125,7 @@ export function IncomingStage({
         </View>
         <Text variant="footnote" tone="tertiary" center style={styles.expires}>
           Only accept files you expect · expires in{' '}
-          {countdown(offer.expiresAt - now)}
+          {countdownCoarse(offer.expiresAt - now)}
         </Text>
       </View>
     </Stage>
