@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "nowifi.png",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

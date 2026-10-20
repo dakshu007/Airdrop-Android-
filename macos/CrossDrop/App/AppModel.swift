@@ -164,11 +164,13 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     @Published private(set) var autoOffMinutes: Int
     @Published private(set) var notificationsEnabled: Bool
     @Published private(set) var autoOffDate: Date?
-    @Published private(set) var wallpaper: Wallpaper
+    @Published private(set) var soundOnDone: Bool
 
     // UI
     @Published var selectedTab: AppTab = .send
     @Published var notice: Notice?
+    /// The "All done!" moment shown briefly after a transfer is verified.
+    @Published var celebration: Celebration?
     @Published private(set) var windowRequest = 0
 
     let identity: DeviceIdentity
@@ -196,7 +198,7 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         destination = AppSettings.destination
         autoOffMinutes = AppSettings.autoOffMinutes
         notificationsEnabled = AppSettings.notificationsEnabled
-        wallpaper = Wallpaper(rawValue: AppSettings.wallpaper) ?? .dusk
+        soundOnDone = AppSettings.soundOnDone
         trustedDevices = trustStore.all
         history = historyStore.entries
         trustStore.onChange = { [weak self] list in
@@ -634,9 +636,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         if enabled { NotificationManager.shared.requestAuthorization { _ in } }
     }
 
-    func setWallpaper(_ value: Wallpaper) {
-        wallpaper = value
-        AppSettings.wallpaper = value.rawValue
+    func setSoundOnDone(_ enabled: Bool) {
+        soundOnDone = enabled
+        AppSettings.soundOnDone = enabled
+        if enabled { DoneSound.play() }
     }
 
     var outgoingTransfers: [TransferItem] {
@@ -721,6 +724,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
 
         let count = snapshot.files.count
         let noun = count == 1 ? "file" : "\(count) files"
+        if snapshot.phase == .completed {
+            if soundOnDone { DoneSound.play() }
+            celebrate(snapshot)
+        }
         switch (snapshot.direction, snapshot.phase) {
         case (.incoming, .completed):
             notify(title: "Received \(noun)", body: "From \(snapshot.peerName). Saved and verified.")
@@ -733,8 +740,25 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         }
     }
 
+    private func celebrate(_ snapshot: TransferSnapshot) {
+        let noun = Format.files(snapshot.files.count)
+        let message = snapshot.direction == .outgoing
+            ? "\(noun) arrived on \(snapshot.peerName) and passed the integrity check."
+            : "\(noun) from \(snapshot.peerName) saved and passed the integrity check."
+        let item = Celebration(id: UUID(), message: message)
+        celebration = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
+            if self?.celebration?.id == item.id { self?.celebration = nil }
+        }
+    }
+
     private func notify(title: String, body: String) {
         guard notificationsEnabled, !NSApp.isActive else { return }
         NotificationManager.shared.post(title: title, body: body)
     }
+}
+
+struct Celebration: Equatable {
+    let id: UUID
+    let message: String
 }

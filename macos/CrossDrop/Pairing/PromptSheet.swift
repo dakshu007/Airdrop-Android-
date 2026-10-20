@@ -36,13 +36,15 @@ private struct PairingContent: View {
 
     var body: some View {
         VStack(spacing: CDSpacing.l) {
-            DeviceAvatar(platform: prompt.peer.platform, size: 56)
+            StatusPill(text: "New device · \(prompt.peer.name)", dot: Color(hex: 0xE0A100))
+            DripView(pose: .pairing, size: 140, motion: .bob)
+                .padding(.vertical, -10)
             VStack(spacing: 6) {
-                Text("Pair with \(prompt.peer.name)?")
-                    .font(CDFont.title)
-                    .foregroundColor(.white)
+                Text("Do these match?")
+                    .font(CDFont.poppins(26, .bold))
+                    .foregroundColor(CDPalette.textPrimary)
                     .multilineTextAlignment(.center)
-                Text("Make sure \(prompt.peer.name) shows the same code.")
+                Text("\(prompt.peer.name) is showing a code too. Pair only if both are the same.")
                     .font(CDFont.body)
                     .foregroundColor(CDPalette.textSecondary)
                     .multilineTextAlignment(.center)
@@ -50,15 +52,11 @@ private struct PairingContent: View {
             }
             .legibleText()
 
-            Text(Format.code(prompt.code))
-                .font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
-                .tracking(4)
-                .foregroundColor(.white)
-                .padding(.horizontal, 26)
-                .padding(.vertical, 12)
-                .glassPanel(cornerRadius: CDRadius.card, style: .inset)
-                .shadow(color: Color.white.opacity(0.15), radius: 18)
-                .accessibilityLabel("Pairing code \(prompt.code.map { String($0) }.joined(separator: " "))")
+            CodeTiles(code: prompt.code)
+                .padding(.vertical, 18)
+                .padding(.horizontal, 22)
+                .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Color.white.opacity(0.55)))
+                .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Color.white.opacity(0.95), lineWidth: 1))
 
             Group {
                 if waiting {
@@ -67,7 +65,7 @@ private struct PairingContent: View {
                         Text("Waiting for \(prompt.peer.name) to confirm…")
                     }
                 } else {
-                    Text("Only continue if both codes match exactly. Paired devices can be forgotten any time in Devices.")
+                    Text("You only do this once per device. Paired devices can be forgotten any time in Devices.")
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -76,11 +74,11 @@ private struct PairingContent: View {
             .foregroundColor(CDPalette.textSecondary)
 
             HStack(spacing: CDSpacing.m) {
-                Button("Cancel") { respond(false) }
+                Button(waiting ? "Cancel" : "They Don't Match") { respond(false) }
                     .buttonStyle(GlassButtonStyle())
                     .keyboardShortcut(.cancelAction)
                 Button("Codes Match") { respond(true) }
-                    .buttonStyle(PrimaryButtonStyle())
+                    .buttonStyle(PrimaryButtonStyle(large: true))
                     .keyboardShortcut(.defaultAction)
                     .disabled(waiting)
             }
@@ -97,17 +95,20 @@ private struct OfferContent: View {
 
     var body: some View {
         VStack(spacing: CDSpacing.l) {
-            DeviceAvatar(platform: offer.peer.platform, size: 56)
+            DripView(pose: .incoming, size: 150, motion: .pop)
+                .padding(.vertical, -12)
             VStack(spacing: 8) {
+                Text("Files are on their way")
+                    .font(CDFont.poppins(24, .bold))
+                    .foregroundColor(CDPalette.textPrimary)
                 Text("\(offer.peer.name) wants to send you \(Format.files(offer.files.count))")
-                    .font(CDFont.title)
-                    .foregroundColor(.white)
+                    .font(CDFont.body)
+                    .foregroundColor(CDPalette.textSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                    .legibleText()
                 HStack(spacing: 6) {
                     Chip(text: trusted ? "Paired" : "Not paired", symbol: trusted ? "checkmark.seal.fill" : "seal",
-                         tint: trusted ? CDPalette.mint : .white)
+                         tint: trusted ? CDPalette.mint : CDPalette.amber)
                     Chip(text: Format.bytes(offer.totalBytes))
                 }
             }
@@ -119,7 +120,7 @@ private struct OfferContent: View {
                             FileIcon(url: nil, name: file.name, size: 26)
                             Text(FileNaming.sanitize(file.name))
                                 .font(CDFont.callout)
-                                .foregroundColor(.white)
+                                .foregroundColor(CDPalette.textPrimary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                             Spacer(minLength: CDSpacing.s)
@@ -149,7 +150,7 @@ private struct OfferContent: View {
                     .buttonStyle(GlassButtonStyle(destructive: true))
                     .keyboardShortcut(.cancelAction)
                 Button("Accept") { respond(true) }
-                    .buttonStyle(PrimaryButtonStyle())
+                    .buttonStyle(PrimaryButtonStyle(large: true))
                     .keyboardShortcut(.defaultAction)
             }
             .padding(.top, 4)

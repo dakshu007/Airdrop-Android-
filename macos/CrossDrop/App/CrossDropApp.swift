@@ -32,6 +32,10 @@ struct CrossDropApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        BundledFonts.register()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationManager.shared.configure()
         let center = NSWorkspace.shared.notificationCenter

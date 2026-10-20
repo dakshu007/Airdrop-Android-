@@ -53,16 +53,16 @@ struct HistoryRow: View {
                 FileIcon(url: savedURLs.first, name: entry.files.first?.name ?? "", size: 32)
                 Image(systemName: entry.isIncoming ? "arrow.down" : "arrow.up")
                     .font(.system(size: 8, weight: .heavy))
-                    .foregroundColor(.black.opacity(0.8))
+                    .foregroundColor(.white)
                     .frame(width: 15, height: 15)
-                    .background(Circle().fill(entry.isIncoming ? CDPalette.mint : Color.white))
+                    .background(Circle().fill(entry.isIncoming ? CDPalette.mint : CDPalette.ink))
                     .offset(x: 3, y: 3)
             }
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(CDFont.body.weight(.medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(CDPalette.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(subtitle)
@@ -87,7 +87,7 @@ struct HistoryRow: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: CDRadius.row, style: .continuous)
-                .fill(Color.white.opacity(hovering ? 0.06 : 0))
+                .fill(Color.white.opacity(hovering ? 0.7 : 0))
                 .padding(.horizontal, 6)
         )
         .onHover { hovering = $0 }

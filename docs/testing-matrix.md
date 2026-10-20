@@ -13,7 +13,9 @@ tested, not "expected to fail".
 | CLI transfer Kotlin→Kotlin (5 MB random, Unicode name, empty file; hashes compared) | `integration-tests/interop.sh` on Linux | Pass (2026-10-20) |
 | Protocol vectors and loopback in Swift | `swift test`, GitHub macos-15 runner, Xcode 16.4 | Pass (2026-10-20) |
 | Kotlin↔Swift interop over TCP: Kotlin→Swift, Swift→Kotlin, Swift→Swift, Kotlin→Kotlin (6 files incl. empty, 5 MB, Unicode, duplicate name; pairing codes match) | `integration-tests/interop.sh`, GitHub macos-15 runner | Pass (2026-10-20) |
-| React Native: typecheck, lint, 64 unit/render tests | Jest (Linux) | Pass (2026-10-20) |
+| React Native: typecheck, lint, 68 unit/render tests (Mint Air screens: welcome, napping, searching, no Wi‑Fi, device chips, pairing tiles, incoming, transfer progress, failure + retry; run with Reduce Motion on) | Jest (Linux) | Pass (2026-10-20) |
+| Mint Air Android screens rendered in a browser (react-native-web harness, 412×892) and compared with the design canvas | Local, Chromium | Looked right (2026-10-20); not a substitute for a device |
+| Android Kotlin bridge changes (preferences, haptics, done sound, Wi‑Fi panel) typecheck | Local, Kotlin JVM against android-all stubs | Pass (2026-10-20) |
 | Android release APK build (arm64-v8a, armeabi-v7a, x86_64) | GitHub ubuntu-24.04 runner | Pass (2026-10-20) |
 | macOS universal app (arm64 + x86_64), ad-hoc signature verified, DMG | GitHub macos-15 runner | Pass (2026-10-20) |
 
@@ -33,7 +35,8 @@ tested, not "expected to fail".
 | Insufficient storage | Not yet | Not yet |
 | Mac sleep/wake, Android background/foreground | Not yet | Not yet |
 | Share sheet entry, Quick Settings tile | Not yet | n/a |
-| TalkBack / VoiceOver, text scaling, reduced motion, dark mode | Not yet | Not yet |
+| TalkBack / VoiceOver, text scaling, reduced motion | Not yet | Not yet |
+| Mint Air UI on a phone and a Mac (layout on small/large screens, motion, haptics, done sound) | Not yet | Not yet |
 | Throughput, memory, battery | Not measured | Not measured |
 
 No performance numbers are claimed until they are measured on real hardware.

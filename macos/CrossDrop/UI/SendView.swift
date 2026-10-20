@@ -11,7 +11,9 @@ struct SendView: View {
 
     var body: some View {
         PageScroll {
-            PageTitle(title: "Send", subtitle: "Drop files, pick a nearby device. Straight there, encrypted, no cloud.")
+            PageTitle(title: "Send to your phone",
+                      subtitle: "Drop files below, then pick a device. Files never leave your Wi-Fi.",
+                      trailing: AnyView(StatusPill(text: nearbyText, dot: model.nearby.isEmpty ? Color(hex: 0x9AA8A0) : CDPalette.mint)))
             DropZone()
             if !model.selectedFiles.isEmpty {
                 SelectedFilesCard()
@@ -29,6 +31,14 @@ struct SendView: View {
         }
         .animation(CDMotion.layout(reduceMotion), value: model.selectedFiles)
     }
+
+    private var nearbyText: String {
+        switch model.nearby.count {
+        case 0: return "Looking nearby"
+        case 1: return "1 device nearby"
+        default: return "\(model.nearby.count) devices nearby"
+        }
+    }
 }
 
 // MARK: - Drop zone
@@ -41,27 +51,23 @@ struct DropZone: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let radius = compact ? CDRadius.card : CDRadius.panel
+        let radius = compact ? CDRadius.card : 32
         let lit = targeted || hovering
         VStack(spacing: compact ? CDSpacing.s : CDSpacing.m) {
             ZStack {
                 Circle()
-                    .fill(Color.white.opacity(targeted ? 0.3 : 0.16))
-                Circle()
-                    .strokeBorder(Color.white.opacity(0.5), lineWidth: 1)
-                Image(systemName: targeted ? "arrow.down" : "arrow.down.doc")
-                    .font(.system(size: compact ? 17 : 26, weight: .medium))
-                    .foregroundColor(.white)
+                    .fill(RadialGradient(colors: [Color(hex: 0xBEF5AA, opacity: targeted ? 0.8 : 0.55), Color(hex: 0xBEF5AA, opacity: 0)],
+                                         center: .center, startRadius: 0, endRadius: compact ? 50 : 120))
+                    .frame(width: compact ? 100 : 230, height: compact ? 100 : 230)
+                DripView(pose: targeted ? .incoming : .mac, size: compact ? 84 : 210, motion: .bob)
             }
-            .frame(width: compact ? 40 : 68, height: compact ? 40 : 68)
-            .shadow(color: Color.white.opacity(targeted ? 0.45 : 0.12), radius: targeted ? 22 : 10)
-            .scaleEffect(targeted && !reduceMotion ? 1.08 : 1)
+            .frame(height: compact ? 70 : 170)
+            .scaleEffect(targeted && !reduceMotion ? 1.06 : 1)
             .accessibilityHidden(true)
 
-            Text(targeted ? "Release to add" : "Drop files to send")
-                .font(compact ? Font.system(size: 14, weight: .semibold, design: .rounded) : CDFont.title)
-                .foregroundColor(.white)
-                .legibleText()
+            Text(targeted ? "Release to add" : (compact ? "Drop files to send" : "Drop files here"))
+                .font(compact ? CDFont.poppins(14, .semibold) : CDFont.poppins(22, .bold))
+                .foregroundColor(CDPalette.textPrimary)
 
             if !compact {
                 Text("Drag from Finder, or choose them. Folders aren't supported yet.")
@@ -74,9 +80,14 @@ struct DropZone: View {
                 Button {
                     model.chooseFiles()
                 } label: {
-                    Label("Choose Files…", systemImage: "plus")
+                    HStack(spacing: 8) {
+                        Text("Choose Files…")
+                        if !compact {
+                            Text("⌘O").foregroundColor(Color(hex: 0xA8B8AE))
+                        }
+                    }
                 }
-                .buttonStyle(GlassButtonStyle())
+                .buttonStyle(PrimaryButtonStyle(large: !compact))
                 .help("Choose files to send (⌘O)")
                 if !model.selectedFiles.isEmpty && !compact {
                     Chip(text: Format.files(model.selectedFiles.count), symbol: "doc.on.doc")
@@ -85,15 +96,15 @@ struct DropZone: View {
             }
             .padding(.top, compact ? 0 : 4)
         }
-        .padding(compact ? CDSpacing.l : 36)
-        .frame(maxWidth: .infinity, minHeight: compact ? 140 : 250)
+        .padding(compact ? CDSpacing.l : 30)
+        .frame(maxWidth: .infinity, minHeight: compact ? 140 : 300)
         .glassPanel(cornerRadius: radius)
         .overlay(
             RoundedRectangle(cornerRadius: radius - 10, style: .continuous)
-                .strokeBorder(style: StrokeStyle(lineWidth: targeted ? 2 : 1.25, lineCap: .round,
-                                                 dash: targeted ? [] : [6, 7]))
-                .foregroundColor(Color.white.opacity(targeted ? 0.85 : (lit ? 0.5 : 0.3)))
-                .padding(10)
+                .strokeBorder(style: StrokeStyle(lineWidth: 2, lineCap: .round,
+                                                 dash: targeted ? [] : [7, 7]))
+                .foregroundColor(CDPalette.mint.opacity(targeted ? 0.8 : (lit ? 0.45 : 0.28)))
+                .padding(compact ? 8 : 14)
                 .allowsHitTesting(false)
         )
         .scaleEffect(targeted && !reduceMotion ? 1.01 : 1)
@@ -130,7 +141,7 @@ struct SelectedFilesCard: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(file.name)
                                 .font(CDFont.body)
-                                .foregroundColor(.white)
+                                .foregroundColor(CDPalette.textPrimary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                             Text(Format.bytes(file.size))
@@ -188,9 +199,9 @@ struct NearbyCard: View {
     @ViewBuilder
     private var stateContent: some View {
         if !model.networkAvailable {
-            StateMessage(symbol: "wifi.slash", title: "Not connected to a network",
+            StateMessage(symbol: "wifi.slash", title: "No Wi-Fi",
                          message: "Connect this Mac to the same Wi-Fi network as your Android phone.",
-                         tint: CDPalette.coral)
+                         tint: CDPalette.coral, pose: .nowifi)
         } else if model.discoveryStatus == .localNetworkDenied {
             VStack(spacing: CDSpacing.s) {
                 StateMessage(symbol: "lock.shield", title: "Local Network access is off",
@@ -205,12 +216,15 @@ struct NearbyCard: View {
                          tint: CDPalette.coral)
         } else if model.nearby.isEmpty {
             HStack(spacing: CDSpacing.xl) {
-                RadarView(active: model.discoveryStatus == .browsing)
-                    .frame(width: 112, height: 112)
+                ZStack {
+                    RadarView(active: model.discoveryStatus == .browsing)
+                        .frame(width: 130, height: 130)
+                    DripView(pose: .searching, size: 120, motion: .bob)
+                }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Looking for nearby devices")
+                    Text("Drip is still looking")
                         .font(CDFont.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(CDPalette.textPrimary)
                     Text("Open CrossDrop on your phone and turn on Receiving. Both devices need the same Wi-Fi; guest networks often keep devices from seeing each other.")
                         .font(CDFont.callout)
                         .foregroundColor(CDPalette.textSecondary)
@@ -258,23 +272,23 @@ struct DeviceTile: View {
                 DeviceAvatar(platform: device.platform, size: 42)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
+                        .font(CDFont.poppins(13.5, .semibold))
+                        .foregroundColor(CDPalette.textPrimary)
                         .lineLimit(1)
-                    HStack(spacing: 4) {
-                        Image(systemName: trusted ? "checkmark.seal.fill" : "sparkles")
-                            .font(.system(size: 9, weight: .bold))
-                        Text(trusted ? "Paired" : "New · pair first")
+                    HStack(spacing: 5) {
+                        if trusted { Circle().fill(CDPalette.mint).frame(width: 6, height: 6) }
+                        Text(trusted ? "Paired" : "New · confirm a code")
                     }
                     .font(CDFont.caption)
-                    .foregroundColor(trusted ? CDPalette.mint : CDPalette.textSecondary)
+                    .foregroundColor(CDPalette.textSecondary)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: canSend ? "paperplane.fill" : "plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(canSend ? Color.black.opacity(0.8) : .white)
-                    .frame(width: 28, height: 28)
-                    .background(Circle().fill(canSend ? Color.white : Color.white.opacity(0.14)))
+                Text(canSend ? (trusted ? "Send" : "Pair & Send") : "Choose…")
+                    .font(CDFont.poppins(12.5, .semibold))
+                    .foregroundColor(canSend ? .white : CDPalette.ink)
+                    .padding(.horizontal, 14)
+                    .frame(height: 30)
+                    .background(Capsule().fill(canSend ? CDPalette.ink : Color(hex: 0xE9F4EC)))
             }
             .padding(12)
         }
@@ -284,7 +298,7 @@ struct DeviceTile: View {
     }
 }
 
-/// Inset glass tile that lifts slightly on hover.
+/// White tile that lifts slightly on hover.
 struct TileButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         TileBody(configuration: configuration)
@@ -298,8 +312,9 @@ struct TileButtonStyle: ButtonStyle {
         var body: some View {
             let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
             configuration.label
-                .background(shape.fill(Color.white.opacity(configuration.isPressed ? 0.2 : (hovering ? 0.15 : 0.09))))
-                .overlay(shape.strokeBorder(Color.white.opacity(hovering ? 0.45 : 0.22), lineWidth: 1))
+                .background(shape.fill(Color.white.opacity(configuration.isPressed ? 0.7 : (hovering ? 1 : 0.85))))
+                .overlay(shape.strokeBorder(Color.white.opacity(0.95), lineWidth: 1))
+                .shadow(color: Color(hex: 0x185434, opacity: hovering ? 0.12 : 0.05), radius: hovering ? 12 : 6, x: 0, y: 4)
                 .contentShape(shape)
                 .scaleEffect(hovering && !reduceMotion ? 1.015 : 1)
                 .animation(reduceMotion ? nil : CDMotion.quick, value: hovering)

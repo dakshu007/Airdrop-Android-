@@ -9,7 +9,9 @@ struct ReceiveView: View {
 
     var body: some View {
         PageScroll {
-            PageTitle(title: "Receive", subtitle: "Let nearby devices find this Mac and send you files.")
+            PageTitle(title: "Receive", subtitle: "Let nearby devices find this Mac and send you files.",
+                      trailing: AnyView(StatusPill(text: model.receivingEnabled ? "Visible nearby" : "Not visible",
+                                                   dot: ReceiverText.color(model.receiverStatus))))
             ReceiveToggleCard()
             HStack(alignment: .top, spacing: CDSpacing.l) {
                 DestinationCard()
@@ -33,23 +35,17 @@ struct ReceiveToggleCard: View {
 
     var body: some View {
         HStack(spacing: CDSpacing.l) {
-            ZStack {
-                Circle().fill(Color.white.opacity(model.receivingEnabled ? 0.2 : 0.1))
-                Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 1)
-                Image(systemName: model.receivingEnabled ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
-                    .font(.system(size: 22, weight: .regular))
-                    .foregroundColor(.white)
-            }
-            .frame(width: 56, height: 56)
-            .shadow(color: model.receivingEnabled ? CDPalette.mint.opacity(0.45) : .clear, radius: 16)
-            .accessibilityHidden(true)
+            // Drip naps while this Mac is hidden and waves while it's visible.
+            DripView(pose: model.receivingEnabled ? .welcome : .sleepy, size: 104, motion: .bob)
+                .id(model.receivingEnabled)
+                .frame(width: 104, height: 90)
 
             Toggle(isOn: Binding(get: { model.receivingEnabled }, set: { model.setReceiving($0) })) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        Text("Receiving")
+                        Text(model.receivingEnabled ? "Receiving" : "Drip is napping")
                             .font(CDFont.title)
-                            .foregroundColor(.white)
+                            .foregroundColor(CDPalette.textPrimary)
                         StatusDot(color: ReceiverText.color(model.receiverStatus))
                     }
                     Text(ReceiverText.detail(model))
@@ -87,7 +83,7 @@ struct DestinationCard: View {
         VStack(alignment: .leading, spacing: CDSpacing.m) {
             Label("Saved to", systemImage: "folder")
                 .font(CDFont.headline)
-                .foregroundColor(.white)
+                .foregroundColor(CDPalette.textPrimary)
             HStack(spacing: CDSpacing.m) {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: model.destination.path))
                     .resizable()
@@ -96,7 +92,7 @@ struct DestinationCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(model.destination.lastPathComponent)
                         .font(CDFont.body.weight(.medium))
-                        .foregroundColor(.white)
+                        .foregroundColor(CDPalette.textPrimary)
                     Text(model.destination.deletingLastPathComponent().path)
                         .font(CDFont.caption)
                         .foregroundColor(CDPalette.textTertiary)
@@ -126,7 +122,7 @@ struct PrivacyCard: View {
         VStack(alignment: .leading, spacing: CDSpacing.m) {
             Label("Private by design", systemImage: "lock.shield")
                 .font(CDFont.headline)
-                .foregroundColor(.white)
+                .foregroundColor(CDPalette.textPrimary)
             point("wifi", "Files travel directly over your local network. No cloud, no account.")
             point("number", "New devices confirm a matching 6-digit code on both screens.")
             point("checkmark.seal", "Every file is checked (SHA-256) before it appears.")
@@ -141,7 +137,7 @@ struct PrivacyCard: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(CDPalette.textPrimary)
                 .frame(width: 14)
             Text(text)
                 .font(CDFont.callout)

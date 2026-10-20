@@ -17,8 +17,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RES = os.path.join(ROOT, "android/android/app/src/main/res")
 MAC = os.path.join(ROOT, "macos/CrossDrop/Resources/Assets.xcassets/AppIcon.appiconset")
 
-TOP_LEFT = np.array([92, 140, 255], dtype=np.float32)
-BOTTOM_RIGHT = np.array([104, 52, 230], dtype=np.float32)
+TOP_LEFT = np.array([120, 214, 150], dtype=np.float32)
+BOTTOM_RIGHT = np.array([16, 128, 78], dtype=np.float32)
 
 
 def background(size: int) -> Image.Image:
@@ -29,7 +29,7 @@ def background(size: int) -> Image.Image:
     d1 = np.sqrt((x - 0.22) ** 2 + (y - 0.12) ** 2)
     d2 = np.sqrt((x - 0.9) ** 2 + (y - 0.95) ** 2)
     rgb += (np.exp(-(d1 / 0.38) ** 2) * 70)[..., None] * np.array([1.0, 1.0, 1.0])
-    rgb += (np.exp(-(d2 / 0.35) ** 2) * 40)[..., None] * np.array([0.2, 0.9, 1.0])
+    rgb += (np.exp(-(d2 / 0.35) ** 2) * 40)[..., None] * np.array([0.85, 1.0, 0.45])
     img = np.dstack([np.clip(rgb, 0, 255), np.full((size, size), 255, np.float32)]).astype(np.uint8)
     return Image.fromarray(img, "RGBA")
 
@@ -107,7 +107,7 @@ def glass_drop(size: int, scale: float = 1.0) -> Image.Image:
 
     # Arrows in the brand blue, slightly deeper at the bottom.
     t = y[..., None]
-    arrow_rgb = np.array([62, 98, 255], np.float32) * (1 - t) + np.array([108, 58, 235], np.float32) * t
+    arrow_rgb = np.array([20, 154, 91], np.float32) * (1 - t) + np.array([15, 29, 22], np.float32) * t
     arrow = np.dstack([arrow_rgb, np.array(arrows, dtype=np.float32)[..., None]]).astype(np.uint8)
     layer.alpha_composite(Image.fromarray(arrow, "RGBA"))
     return layer

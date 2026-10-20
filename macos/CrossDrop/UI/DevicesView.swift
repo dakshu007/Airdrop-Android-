@@ -17,7 +17,8 @@ struct DevicesView: View {
             if model.trustedDevices.isEmpty {
                 StateMessage(symbol: "checkmark.shield",
                              title: "No paired devices yet",
-                             message: "Send a file to a nearby device, or receive one, and confirm the 6-digit code on both screens. The device shows up here.")
+                             message: "Send a file to a nearby device, or receive one, and confirm the 6-digit code on both screens. The device shows up here.",
+                             pose: .pairing)
                     .glassPanel(cornerRadius: CDRadius.card)
             } else {
                 ForEach(model.trustedDevices) { device in
@@ -52,7 +53,7 @@ struct ThisDeviceCard: View {
                     .foregroundColor(CDPalette.textTertiary)
                 Text(model.deviceName)
                     .font(CDFont.title)
-                    .foregroundColor(.white)
+                    .foregroundColor(CDPalette.textPrimary)
                 Text(Format.fingerprint(model.identity.fingerprint))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(CDPalette.textSecondary)
@@ -88,7 +89,7 @@ struct TrustedDeviceRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(device.name)
                         .font(CDFont.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(CDPalette.textPrimary)
                     Text(subtitle)
                         .font(CDFont.caption)
                         .foregroundColor(CDPalette.textSecondary)
@@ -103,7 +104,7 @@ struct TrustedDeviceRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Accept files automatically")
                         .font(CDFont.callout.weight(.medium))
-                        .foregroundColor(.white)
+                        .foregroundColor(CDPalette.textPrimary)
                     Text("Files from this device are saved without asking. They're still verified.")
                         .font(CDFont.caption)
                         .foregroundColor(CDPalette.textTertiary)

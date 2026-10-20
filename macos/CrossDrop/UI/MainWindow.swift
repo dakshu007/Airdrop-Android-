@@ -9,7 +9,7 @@ struct MainWindow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        WallpaperCanvas(wallpaper: model.wallpaper) {
+        MintCanvas(mood: model.activeTransfers.isEmpty ? .idle : .active) {
             ZStack {
                 HStack(alignment: .top, spacing: CDSpacing.l) {
                     Sidebar()
@@ -22,6 +22,7 @@ struct MainWindow: View {
                 PromptLayer()
             }
             .overlay(alignment: .bottom) { NoticeToast() }
+            .overlay(alignment: .bottomTrailing) { CelebrationCard() }
         }
         .frame(minWidth: 900, minHeight: 620)
         .onAppear { model.beginDiscovery() }
@@ -79,8 +80,8 @@ struct Sidebar: View {
                     .frame(width: 30, height: 30)
                     .accessibilityHidden(true)
                 Text("CrossDrop")
-                    .font(CDFont.title)
-                    .foregroundColor(.white)
+                    .font(CDFont.poppins(18, .bold))
+                    .foregroundColor(CDPalette.textPrimary)
             }
             .legibleText()
             .padding(.top, 38) // clears the window buttons, which sit on the glass
@@ -96,15 +97,15 @@ struct Sidebar: View {
                             .font(.system(size: 15, weight: .medium))
                             .frame(width: 20)
                         Text(tab.title)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(CDFont.poppins(13.5, model.selectedTab == tab ? .semibold : .medium))
                         Spacer(minLength: 0)
                         if let count = badge(for: tab), count > 0 {
                             Text("\(count)")
                                 .font(.system(size: 10, weight: .bold).monospacedDigit())
-                                .foregroundColor(.black.opacity(0.8))
+                                .foregroundColor(.white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(Capsule().fill(Color.white))
+                                .background(Capsule().fill(CDPalette.mint))
                         }
                     }
                 }
@@ -131,8 +132,8 @@ struct Sidebar: View {
     }
 }
 
-/// 44pt row: dark pill when selected (slides between rows), soft highlight on hover,
-/// light-blue ring on keyboard focus.
+/// 42pt row: ink pill when selected (slides between rows), white on hover,
+/// green ring on keyboard focus.
 struct SidebarRowStyle: ButtonStyle {
     let selected: Bool
     let namespace: Namespace.ID
@@ -152,17 +153,16 @@ struct SidebarRowStyle: ButtonStyle {
         var body: some View {
             let shape = RoundedRectangle(cornerRadius: CDRadius.row, style: .continuous)
             configuration.label
-                .foregroundColor(.white.opacity(selected ? 1 : 0.86))
+                .foregroundColor(selected ? .white : Color(hex: 0x2B3D33))
                 .padding(.horizontal, 12)
-                .frame(height: 44)
+                .frame(height: 42)
                 .background(
                     ZStack {
                         if selected {
-                            shape.fill(Color.black.opacity(0.55))
-                                .overlay(shape.strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+                            shape.fill(CDPalette.ink)
                                 .matchedGeometryEffect(id: "sidebar.selection", in: namespace)
                         } else if hovering || configuration.isPressed {
-                            shape.fill(Color.white.opacity(configuration.isPressed ? 0.12 : 0.08))
+                            shape.fill(Color.white.opacity(configuration.isPressed ? 0.9 : 0.6))
                         }
                     }
                 )
@@ -179,36 +179,31 @@ struct SidebarRowStyle: ButtonStyle {
     }
 }
 
-/// Bottom of the sidebar: whether this Mac can receive right now. Clicking opens Receive.
+/// Bottom of the sidebar: whether this Mac can receive right now, with its switch.
 struct ReceivingPill: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        Button {
-            model.selectedTab = .receive
-        } label: {
-            HStack(spacing: 10) {
+        Toggle(isOn: Binding(get: { model.receivingEnabled }, set: { model.setReceiving($0) })) {
+            HStack(spacing: 8) {
                 StatusDot(color: ReceiverText.color(model.receiverStatus))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.receivingEnabled ? "Receiving" : "Not receiving")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white)
+                        .font(CDFont.poppins(12.5, .semibold))
+                        .foregroundColor(CDPalette.textPrimary)
                     Text(ReceiverText.detail(model))
-                        .font(.system(size: 10.5))
+                        .font(CDFont.poppins(11))
                         .foregroundColor(CDPalette.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .glassPanel(cornerRadius: 16, style: .inset)
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(model.receivingEnabled ? "Receiving on. \(ReceiverText.detail(model))" : "Receiving off")
-        .accessibilityHint("Opens Receive")
+        .toggleStyle(GlassToggleStyle())
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .glassPanel(cornerRadius: 16, style: .inset)
+        .accessibilityLabel("Receiving. \(ReceiverText.detail(model))")
     }
 }
 
@@ -217,7 +212,7 @@ enum ReceiverText {
         switch status {
         case .ready: return CDPalette.mint
         case .starting: return CDPalette.amber
-        case .off: return Color.white.opacity(0.4)
+        case .off: return Color(hex: 0x9AA8A0)
         case .noNetwork, .localNetworkDenied, .failed: return CDPalette.coral
         }
     }
@@ -236,7 +231,7 @@ enum ReceiverText {
 
 // MARK: - Prompts
 
-/// Pairing and incoming-offer prompts: a glass card over the blurred, dimmed wallpaper.
+/// Pairing and incoming-offer prompts: a glass card over a frosted, softly dimmed window.
 struct PromptLayer: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -245,20 +240,69 @@ struct PromptLayer: View {
         ZStack {
             if let prompt = model.prompts.first {
                 ZStack {
-                    FrostedFill()
-                    Color.black.opacity(0.3)
+                    Rectangle().fill(.ultraThinMaterial)
+                    Color(hex: 0x0F1D16, opacity: 0.12)
                 }
                 .ignoresSafeArea()
                 .transition(.opacity)
                 .accessibilityHidden(true)
 
                 PromptCard(prompt: prompt)
-                    .frame(width: 440)
+                    .frame(width: 460)
                     .id(prompt.id)
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.94).combined(with: .opacity))
             }
         }
         .animation(CDMotion.layout(reduceMotion), value: model.prompts.first?.id)
+    }
+}
+
+// MARK: - Celebration
+
+/// Drip pops in with confetti when files are verified; fades away by itself.
+struct CelebrationCard: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            if let celebration = model.celebration {
+                HStack(spacing: CDSpacing.m) {
+                    ZStack {
+                        ConfettiBurst()
+                        DripView(pose: .done, size: 96, motion: .pop)
+                    }
+                    .frame(width: 96, height: 96)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("All done!")
+                            .font(CDFont.poppins(20, .bold))
+                            .foregroundColor(CDPalette.textPrimary)
+                        Text(celebration.message)
+                            .font(CDFont.callout)
+                            .foregroundColor(CDPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Button {
+                        model.celebration = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(IconButtonStyle(size: 24))
+                    .accessibilityLabel("Dismiss")
+                }
+                .padding(.leading, 10)
+                .padding(.trailing, 14)
+                .padding(.vertical, 10)
+                .frame(width: 380)
+                .glassPanel(cornerRadius: 24)
+                .padding(22)
+                .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
+                .id(celebration.id)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("All done. \(celebration.message)")
+            }
+        }
+        .animation(CDMotion.layout(reduceMotion), value: model.celebration)
     }
 }
 
@@ -273,10 +317,10 @@ struct NoticeToast: View {
             if let notice = model.notice {
                 HStack(spacing: CDSpacing.m) {
                     Image(systemName: "info.circle.fill")
-                        .foregroundColor(.white)
+                        .foregroundColor(CDPalette.mint)
                     Text(notice.text)
                         .font(CDFont.callout)
-                        .foregroundColor(.white)
+                        .foregroundColor(CDPalette.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     Button {
                         model.notice = nil

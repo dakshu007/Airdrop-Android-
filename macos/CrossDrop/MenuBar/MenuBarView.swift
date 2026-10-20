@@ -4,13 +4,13 @@ import AppKit
 import CrossDropCore
 #endif
 
-/// Compact panel shown from the menu bar icon, on the same wallpaper as the main window.
+/// Compact panel shown from the menu bar icon, on the same mint backdrop as the main window.
 struct MenuBarView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        SizedWallpaper(wallpaper: model.wallpaper) {
+        Group {
             VStack(alignment: .leading, spacing: CDSpacing.m) {
                 header
                 DropZone(compact: true)
@@ -27,6 +27,8 @@ struct MenuBarView: View {
             .padding(CDSpacing.m)
             .frame(width: 360)
         }
+        .background(MintBackdrop(mood: model.activeTransfers.isEmpty ? .idle : .active))
+        .environment(\.colorScheme, .light)
         .onAppear { model.beginDiscovery() }
         .onDisappear { model.endDiscovery() }
     }
@@ -39,14 +41,13 @@ struct MenuBarView: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text("CrossDrop")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
+                    .font(CDFont.poppins(15, .bold))
+                    .foregroundColor(CDPalette.textPrimary)
                 Text(ReceiverText.detail(model))
-                    .font(.system(size: 10.5))
+                    .font(CDFont.poppins(10.5))
                     .foregroundColor(CDPalette.textSecondary)
                     .lineLimit(1)
             }
-            .legibleText()
             Toggle(isOn: Binding(get: { model.receivingEnabled }, set: { model.setReceiving($0) })) {
                 EmptyView()
             }
@@ -63,8 +64,8 @@ struct MenuBarView: View {
         VStack(alignment: .leading, spacing: CDSpacing.s) {
             HStack {
                 Text(model.selectedFiles.isEmpty ? "Nearby" : "Send \(Format.files(model.selectedFiles.count)) to")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white)
+                    .font(CDFont.poppins(12.5, .semibold))
+                    .foregroundColor(CDPalette.textPrimary)
                 Spacer()
                 if !model.selectedFiles.isEmpty {
                     Button("Clear") { model.clearSelection() }
@@ -72,14 +73,15 @@ struct MenuBarView: View {
                 }
             }
             if !model.networkAvailable {
-                hint("Not connected to Wi-Fi.", symbol: "wifi.slash")
+                HStack(spacing: CDSpacing.m) {
+                    DripView(pose: .nowifi, size: 56, motion: .still)
+                    hint("Not connected to Wi-Fi. Join the same network as your phone.", symbol: "wifi.slash")
+                }
             } else if model.discoveryStatus == .localNetworkDenied {
                 hint("Allow Local Network access in System Settings › Privacy & Security.", symbol: "lock.shield")
             } else if model.nearby.isEmpty {
                 HStack(spacing: CDSpacing.m) {
-                    RadarView(active: model.discoveryStatus == .browsing)
-                        .frame(width: 44, height: 44)
-                        .scaleEffect(0.7)
+                    DripView(pose: .searching, size: 56, motion: .bob)
                     Text("Looking for nearby devices. Turn on Receiving on your phone.")
                         .font(CDFont.caption)
                         .foregroundColor(CDPalette.textSecondary)
@@ -98,8 +100,8 @@ struct MenuBarView: View {
                         HStack(spacing: CDSpacing.s) {
                             DeviceAvatar(platform: device.platform, size: 28)
                             Text(device.name)
-                                .font(.system(size: 12.5, weight: .medium))
-                                .foregroundColor(.white)
+                                .font(CDFont.poppins(12.5, .medium))
+                                .foregroundColor(CDPalette.textPrimary)
                                 .lineLimit(1)
                             if model.isTrusted(device.deviceId) {
                                 Image(systemName: "checkmark.seal.fill")
@@ -110,9 +112,9 @@ struct MenuBarView: View {
                             Spacer()
                             Image(systemName: model.selectedFiles.isEmpty ? "plus" : "paperplane.fill")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(model.selectedFiles.isEmpty ? .white : Color.black.opacity(0.8))
+                                .foregroundColor(model.selectedFiles.isEmpty ? CDPalette.ink : .white)
                                 .frame(width: 24, height: 24)
-                                .background(Circle().fill(model.selectedFiles.isEmpty ? Color.white.opacity(0.14) : Color.white))
+                                .background(Circle().fill(model.selectedFiles.isEmpty ? Color(hex: 0xE9F4EC) : CDPalette.ink))
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
@@ -152,36 +154,5 @@ struct MenuBarView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
-    }
-}
-
-private struct CanvasSizeKey: PreferenceKey {
-    static let defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
-    }
-}
-
-/// Wallpaper sized to its content (for windows that size themselves, like the menu bar panel).
-struct SizedWallpaper<Content: View>: View {
-    let wallpaper: Wallpaper
-    @ViewBuilder let content: Content
-    @State private var size: CGSize = .zero
-
-    var body: some View {
-        content
-            .environment(\.wallpaperContext, WallpaperContext(wallpaper: wallpaper, canvasSize: size))
-            .background(
-                GeometryReader { proxy in
-                    ZStack {
-                        WallpaperImage(wallpaper: wallpaper, size: proxy.size, blurred: false)
-                        Color.black.opacity(wallpaper.scrim)
-                    }
-                    .preference(key: CanvasSizeKey.self, value: proxy.size)
-                }
-            )
-            .onPreferenceChange(CanvasSizeKey.self) { size = $0 }
-            .coordinateSpace(name: WallpaperSpace.name)
-            .environment(\.colorScheme, .dark)
     }
 }

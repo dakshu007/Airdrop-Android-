@@ -25,10 +25,6 @@ struct SettingsView: View {
         PageScroll {
             PageTitle(title: "Settings", subtitle: "Everything here stays on this Mac.")
 
-            SettingsSection(title: "Appearance", symbol: "photo.on.rectangle") {
-                WallpaperPicker()
-            }
-
             SettingsSection(title: "This Mac", symbol: "laptopcomputer") {
                 Text("Name shown to nearby devices")
                     .font(CDFont.caption)
@@ -37,7 +33,7 @@ struct SettingsView: View {
                     TextField("Device name", text: $nameDraft)
                         .textFieldStyle(.plain)
                         .font(CDFont.body)
-                        .foregroundColor(.white)
+                        .foregroundColor(CDPalette.textPrimary)
                         .padding(.horizontal, 12)
                         .frame(height: 32)
                         .glassPanel(cornerRadius: 10, style: .inset)
@@ -54,14 +50,14 @@ struct SettingsView: View {
                 Toggle(isOn: Binding(get: { model.receivingEnabled }, set: { model.setReceiving($0) })) {
                     Text("Let nearby devices send files to this Mac")
                         .font(CDFont.body)
-                        .foregroundColor(.white)
+                        .foregroundColor(CDPalette.textPrimary)
                 }
                 .toggleStyle(GlassToggleStyle())
                 GlassDivider()
                 HStack {
                     Text("Turn off automatically")
                         .font(CDFont.body)
-                        .foregroundColor(.white)
+                        .foregroundColor(CDPalette.textPrimary)
                     Spacer()
                     SegmentedGlass(choices: autoOffChoices.map { SegmentChoice(id: $0.minutes, label: $0.label) },
                                    selection: Binding(get: { model.autoOffMinutes },
@@ -73,12 +69,26 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            SettingsSection(title: "Feedback", symbol: "speaker.wave.2") {
+                Toggle(isOn: Binding(get: { model.soundOnDone }, set: { model.setSoundOnDone($0) })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sound when done")
+                            .font(CDFont.body)
+                            .foregroundColor(CDPalette.textPrimary)
+                        Text("A soft drop when files are verified. Follows your Mac's alert volume.")
+                            .font(CDFont.caption)
+                            .foregroundColor(CDPalette.textTertiary)
+                    }
+                }
+                .toggleStyle(GlassToggleStyle())
+            }
+
             SettingsSection(title: "Notifications", symbol: "bell") {
                 Toggle(isOn: Binding(get: { model.notificationsEnabled }, set: { model.setNotifications($0) })) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Requests and finished transfers")
                             .font(CDFont.body)
-                            .foregroundColor(.white)
+                            .foregroundColor(CDPalette.textPrimary)
                         Text("Notifications name the device, never the files.")
                             .font(CDFont.caption)
                             .foregroundColor(CDPalette.textTertiary)
@@ -106,7 +116,7 @@ struct SettingsView: View {
 
     private func bullet(_ text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Circle().fill(Color.white.opacity(0.6)).frame(width: 4, height: 4).offset(y: -2)
+            Circle().fill(CDPalette.mint).frame(width: 5, height: 5).offset(y: -2)
             Text(text)
                 .font(CDFont.callout)
                 .foregroundColor(CDPalette.textSecondary)
@@ -124,63 +134,13 @@ struct SettingsSection<Content: View>: View {
         VStack(alignment: .leading, spacing: CDSpacing.m) {
             Label(title, systemImage: symbol)
                 .font(CDFont.headline)
-                .foregroundColor(.white)
-                .legibleText()
+                .foregroundColor(CDPalette.textPrimary)
                 .accessibilityAddTraits(.isHeader)
             content
         }
         .padding(CDSpacing.l)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassPanel(cornerRadius: CDRadius.card)
-    }
-}
-
-/// Thumbnails of the built-in wallpapers; the choice cross-fades the whole app.
-struct WallpaperPicker: View {
-    @EnvironmentObject private var model: AppModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        HStack(spacing: CDSpacing.m) {
-            ForEach(Wallpaper.allCases) { wallpaper in
-                let selected = model.wallpaper == wallpaper
-                Button {
-                    model.setWallpaper(wallpaper)
-                } label: {
-                    VStack(spacing: 6) {
-                        Image(nsImage: WallpaperCache.shared.image(wallpaper))
-                            .resizable()
-                            .interpolation(.medium)
-                            .scaledToFill()
-                            .frame(width: 128, height: 80)
-                            .clipShape(RoundedRectangle(cornerRadius: CDRadius.row, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: CDRadius.row, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(selected ? 0.95 : 0.25), lineWidth: selected ? 2 : 1)
-                            )
-                            .overlay(alignment: .topTrailing) {
-                                if selected {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 9, weight: .heavy))
-                                        .foregroundColor(.black.opacity(0.8))
-                                        .frame(width: 18, height: 18)
-                                        .background(Circle().fill(Color.white))
-                                        .padding(6)
-                                }
-                            }
-                            .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
-                            .scaleEffect(selected && !reduceMotion ? 1.03 : 1)
-                        Text(wallpaper.title)
-                            .font(CDFont.caption.weight(selected ? .semibold : .regular))
-                            .foregroundColor(selected ? .white : CDPalette.textSecondary)
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(wallpaper.title) wallpaper")
-                .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-        }
-        .animation(reduceMotion ? nil : CDMotion.quick, value: model.wallpaper)
     }
 }
 
@@ -205,12 +165,12 @@ struct SegmentedGlass: View {
                 } label: {
                     Text(choice.label)
                         .font(.system(size: 11, weight: selected ? .semibold : .medium))
-                        .foregroundColor(selected ? Color.black.opacity(0.85) : .white.opacity(0.85))
+                        .foregroundColor(selected ? .white : CDPalette.textPrimary)
                         .padding(.horizontal, 10)
                         .frame(height: 26)
                         .background {
                             if selected {
-                                Capsule().fill(Color.white)
+                                Capsule().fill(CDPalette.ink)
                                     .matchedGeometryEffect(id: "segment", in: namespace)
                             }
                         }
@@ -221,7 +181,7 @@ struct SegmentedGlass: View {
             }
         }
         .padding(3)
-        .background(Capsule().fill(Color.white.opacity(0.1)))
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 1))
+        .background(Capsule().fill(Color.white.opacity(0.85)))
+        .overlay(Capsule().strokeBorder(Color(hex: 0xD5E7DB), lineWidth: 1))
     }
 }

@@ -20,8 +20,8 @@ struct TransferCard: View {
             VStack(alignment: .leading, spacing: compact ? 5 : 7) {
                 HStack(alignment: .firstTextBaseline, spacing: CDSpacing.s) {
                     Text(title)
-                        .font(.system(size: compact ? 12 : 13, weight: .semibold))
-                        .foregroundColor(.white)
+                        .font(CDFont.poppins(compact ? 12 : 13.5, .semibold))
+                        .foregroundColor(CDPalette.textPrimary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: CDSpacing.s)
@@ -33,7 +33,7 @@ struct TransferCard: View {
                     .lineLimit(1)
 
                 if showsProgress {
-                    CapsuleProgress(value: item.fraction, tint: outgoing ? .white : CDPalette.mint)
+                    CapsuleProgress(value: item.fraction)
                         .padding(.top, 2)
                     TimelineView(.periodic(from: Date(), by: 1)) { _ in
                         Text(progressText)
@@ -70,9 +70,9 @@ struct TransferCard: View {
             }
             Image(systemName: outgoing ? "arrow.up" : "arrow.down")
                 .font(.system(size: compact ? 7 : 9, weight: .heavy))
-                .foregroundColor(.black.opacity(0.8))
+                .foregroundColor(.white)
                 .frame(width: compact ? 13 : 17, height: compact ? 13 : 17)
-                .background(Circle().fill(outgoing ? Color.white : CDPalette.mint))
+                .background(Circle().fill(outgoing ? CDPalette.ink : CDPalette.mint))
                 .offset(x: 3, y: 3)
                 .accessibilityHidden(true)
         }
@@ -104,7 +104,7 @@ struct TransferCard: View {
             }
             Text(TransferText.status(snapshot))
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(CDFont.poppins(11, .medium))
         .foregroundColor(CDPalette.textSecondary)
         .lineLimit(1)
     }

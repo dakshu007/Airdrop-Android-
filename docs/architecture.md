@@ -70,20 +70,30 @@ runner for interop tests.
 
 ## Visual design
 
-Both apps use the same "liquid glass over a wallpaper" language:
+Both apps use the same "Mint Air" language, designed first on the Claude Design
+canvas (its source is kept in `design/canvas/`):
 
-* **Wallpapers** are original artwork rendered by `scripts/make_wallpapers.py`
-  (Dusk, Lagoon, Canopy, Midnight). No stock photos, so no licence questions.
-  Android "Auto" follows the system appearance (Lagoon in light, Dusk in dark).
-* **Frosted glass on Android** (`android/src/components/Frost.tsx`): React Native
-  has no cross-version backdrop blur, so each glass surface draws a small
-  pre-blurred copy of the wallpaper positioned exactly where the real wallpaper
-  sits behind it (and follows scrolling via an Animated scroll offset), then a
-  tint, a top sheen and a rim-lit hairline border. It looks like a live backdrop
-  blur, costs one extra image draw per surface and works on every Android version.
-* **Frosted glass on macOS**: the same aligned-blur technique in SwiftUI; on
-  macOS 26 built with Xcode 26 the system `.glassEffect` is used instead.
-* **Type**: Poppins on Android (bundled under the SIL Open Font License, see
-  `android/android/app/src/main/assets/fonts/OFL.txt`), SF Pro on macOS.
-* The DMG opens as a styled installer window (`scripts/make_dmg_background.py`,
-  `scripts/build-dmg.sh`).
+* **Backdrop**: a light radial mint gradient with soft green spheres. It follows
+  the moment: mint when idle, cooler when Receiving is off, lime while files move,
+  deeper green when they arrive, a warm blush on failure
+  (`android/src/theme/Backdrop.tsx`, `MintBackdrop` in `macos/CrossDrop/UI/Theme.swift`).
+* **Surfaces**: white glass (translucent white, a top sheen and a bright rim),
+  dark ink type, and a black pill for the one main action on a screen.
+* **Drip**, the CrossDrop character, is original 3D art rendered by
+  `scripts/render_illustrations.py` (a small NumPy ray marcher; no stock or
+  generated-elsewhere images). PNGs live in `design/illustrations/` and are
+  copied into both apps. Drip's poses double as state: waving (welcome),
+  holding a phone (devices nearby), binoculars (still looking), napping
+  (Receiving off), an unplugged cable (no Wi-Fi), a lock (pairing), a parcel
+  (incoming), a paper plane (sending), cheering (done) and worried (failed).
+* **Motion**: Drip bobs and blinks, device chips float and Drip leans toward
+  the one being pressed, pairing digits flip in, the progress ring has a light
+  sweep, and "done" pops in with confetti. Everything is static with Reduce
+  Motion. Optional haptics (Android) and a soft "done" sound
+  (`scripts/make_sounds.py`) can be switched off in Settings.
+* **Type**: Poppins in both apps, bundled under the SIL Open Font License
+  (`android/android/app/src/main/assets/fonts/OFL.txt`,
+  `macos/CrossDrop/Resources/Fonts/OFL.txt`).
+* Only a light appearance exists so far; a dark "night mint" variant is planned.
+* The DMG opens as a styled mint installer window with Drip on a paper plane
+  (`scripts/make_dmg_background.py`, `scripts/build-dmg.sh`).

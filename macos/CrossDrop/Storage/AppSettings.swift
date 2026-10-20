@@ -10,7 +10,7 @@ enum AppSettings {
         static let destinationPath = "destinationPath"
         static let autoOffMinutes = "autoOffMinutes"
         static let notificationsEnabled = "notificationsEnabled"
-        static let wallpaper = "wallpaper"
+        static let soundOnDone = "soundOnDone"
     }
 
     static var deviceName: String {
@@ -51,8 +51,9 @@ enum AppSettings {
         set { defaults.set(newValue, forKey: Key.notificationsEnabled) }
     }
 
-    static var wallpaper: String {
-        get { defaults.string(forKey: Key.wallpaper) ?? "dusk" }
-        set { defaults.set(newValue, forKey: Key.wallpaper) }
+    /// A soft drop sound when a transfer finishes and is verified.
+    static var soundOnDone: Bool {
+        get { defaults.object(forKey: Key.soundOnDone) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.soundOnDone) }
     }
 }
