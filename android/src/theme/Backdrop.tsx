@@ -100,20 +100,26 @@ export function Backdrop({ mood }: { mood: Mood }) {
       accessible={false}
       importantForAccessibility="no-hide-descendants"
     >
+      {/* Images are sized explicitly: with only edge insets, Android sizes an
+          Image to its picture (360 dp here) instead of stretching it. */}
       {previous ? (
+        <View style={StyleSheet.absoluteFill}>
+          <Image
+            source={BACKDROPS[previous]}
+            style={styles.full}
+            resizeMode="stretch"
+            fadeDuration={0}
+          />
+        </View>
+      ) : null}
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: fade }]}>
         <Image
-          source={BACKDROPS[previous]}
-          style={StyleSheet.absoluteFill}
+          source={BACKDROPS[shown]}
+          style={styles.full}
           resizeMode="stretch"
           fadeDuration={0}
         />
-      ) : null}
-      <Animated.Image
-        source={BACKDROPS[shown]}
-        style={[StyleSheet.absoluteFill, { opacity: fade }]}
-        resizeMode="stretch"
-        fadeDuration={0}
-      />
+      </Animated.View>
       <Animated.Image
         source={SPHERES[shown]}
         fadeDuration={0}
@@ -175,4 +181,5 @@ export function Backdrop({ mood }: { mood: Mood }) {
 const styles = StyleSheet.create({
   base: { backgroundColor: '#F1FAF3' },
   abs: { position: 'absolute' },
+  full: { width: '100%', height: '100%' },
 });

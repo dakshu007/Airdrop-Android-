@@ -31,18 +31,43 @@ def set_scales(value):
         adb("shell", "settings", "put", "global", key, value)
 
 
+def dump_once():
+    out = adb("shell", "uiautomator", "dump", "/sdcard/cd-ui.xml", check=False)
+    if "dumped" not in out.lower():
+        return None
+    try:
+        return ET.fromstring(adb("exec-out", "cat", "/sdcard/cd-ui.xml"))
+    except ET.ParseError:
+        return None
+
+
+def dismiss_system_dialogs(root):
+    """A system 'isn't responding' dialog (often the launcher on a busy emulator) blocks the app: wait it out."""
+    labels = {(t or d) for t, d, _ in nodes(root)}
+    if any("isn't responding" in (x or "") or "isn’t responding" in (x or "") for x in labels):
+        for text, desc, (x, y) in nodes(root):
+            if text.casefold() == "wait":
+                adb("shell", "input", "tap", str(x), str(y), check=False)
+                time.sleep(1.5)
+                return True
+    return False
+
+
 def dump():
-    for attempt in range(2):
-        if attempt == 1:
+    for attempt in range(4):
+        still = attempt >= 1
+        if still:
             set_scales("0")
-            time.sleep(1.2)
+            time.sleep(1.2 + attempt)
         try:
-            out = adb("shell", "uiautomator", "dump", "/sdcard/cd-ui.xml", check=False)
-            if "dumped" in out.lower():
-                return ET.fromstring(adb("exec-out", "cat", "/sdcard/cd-ui.xml"))
+            root = dump_once()
         finally:
-            if attempt == 1:
+            if still:
                 set_scales("1")
+        if root is not None:
+            if dismiss_system_dialogs(root):
+                continue
+            return root
     return None
 
 

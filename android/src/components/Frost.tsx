@@ -65,10 +65,7 @@ export function SoftShadow({
   spread?: number;
 }) {
   return (
-    <Image
-      source={SHADOW}
-      resizeMode="stretch"
-      fadeDuration={0}
+    <View
       pointerEvents="none"
       style={{
         position: 'absolute',
@@ -76,14 +73,22 @@ export function SoftShadow({
         right: -spread,
         top: offsetY - spread / 2,
         bottom: -(offsetY + spread),
-        tintColor: color,
         opacity,
       }}
-    />
+    >
+      {/* Sized explicitly: with only edge insets, Android sizes an Image to its picture. */}
+      <Image
+        source={SHADOW}
+        resizeMode="stretch"
+        fadeDuration={0}
+        style={[styles.full, { tintColor: color }]}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  full: { width: '100%', height: '100%' },
   sheen: {
     position: 'absolute',
     left: 0,

@@ -34,6 +34,8 @@ finish() {
   [ -n "${LOGCAT_PID:-}" ] && kill "$LOGCAT_PID" 2>/dev/null
   grep -E "FATAL EXCEPTION|ReactNativeJS|E ReactNative|F libc|F DEBUG|SIGSEGV|SIGABRT" "$OUT/logcat.txt" > "$OUT/logcat-problems.txt" 2>/dev/null || true
   echo "logcat problems: $(wc -l < "$OUT/logcat-problems.txt")" | tee -a "$LOG"
+  python3 "$HERE/check_shots.py" "$OUT/shots" > "$OUT/seams.txt" 2>&1 || true
+  sed 's/^/pixels: /' "$OUT/seams.txt" | tail -12 | tee -a "$LOG"
   grep -c '^FAIL' "$LOG" | sed 's/^/failed steps: /' | tee -a "$LOG"
   exit 0
 }
