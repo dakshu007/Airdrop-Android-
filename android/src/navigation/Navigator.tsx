@@ -25,13 +25,18 @@ import { DevicesScreen } from '../screens/DevicesScreen';
 import { nearbyMode, NearbyScreen } from '../screens/NearbyScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ShareScreen } from '../screens/ShareScreen';
-import { useSnapshot } from '../state/CrossDropProvider';
+import { FreezeWhileHidden, useSnapshot } from '../state/CrossDropProvider';
 import { useDiscovery } from '../state/useDiscovery';
 import { Backdrop, Mood } from '../theme/Backdrop';
 import { NavigationContext, TabKey } from './NavigationContext';
 import { TabBar } from './TabBar';
 
 const TAB_ORDER: TabKey[] = ['nearby', 'activity', 'devices', 'settings'];
+
+/** Re-renders only when the state it reads changes (hidden tabs read a frozen copy). */
+const MemoScreen = React.memo(function TabScreen({ tab }: { tab: TabKey }) {
+  return <ScreenFor tab={tab} />;
+});
 
 function ScreenFor({ tab }: { tab: TabKey }) {
   switch (tab) {
@@ -110,7 +115,9 @@ function TabLayer({
       ]}
     >
       <ScreenVisibleContext.Provider value={active}>
-        <ScreenFor tab={tab} />
+        <FreezeWhileHidden frozen={!active}>
+          <MemoScreen tab={tab} />
+        </FreezeWhileHidden>
       </ScreenVisibleContext.Provider>
     </Animated.View>
   );

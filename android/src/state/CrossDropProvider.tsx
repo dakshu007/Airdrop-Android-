@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import * as CrossDrop from '../native/crossdrop';
@@ -97,6 +98,28 @@ export function CrossDropProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <CrossDropContext.Provider value={value}>
+      {children}
+    </CrossDropContext.Provider>
+  );
+}
+
+/**
+ * Holds the state a screen sees still while `frozen`: a hidden tab keeps the
+ * last state it showed, so state updates (several a second during a
+ * transfer) only re-render the visible tab.
+ */
+export function FreezeWhileHidden({
+  frozen,
+  children,
+}: {
+  frozen: boolean;
+  children: React.ReactNode;
+}) {
+  const live = useContext(CrossDropContext);
+  const held = useRef(live);
+  if (!frozen) held.current = live;
+  return (
+    <CrossDropContext.Provider value={frozen ? held.current : live}>
       {children}
     </CrossDropContext.Provider>
   );
