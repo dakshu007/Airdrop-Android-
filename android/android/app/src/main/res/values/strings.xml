@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">CrossDrop</string>
+    <string name="share_label">CrossDrop</string>
+    <string name="tile_label">CrossDrop</string>
+    <string name="tile_subtitle_on">Receiving</string>
+    <string name="tile_subtitle_off">Off</string>
+</resources>

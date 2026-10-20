@@ -1,0 +1,4 @@
+<!-- Themed (Material You) launcher icon: the glyph inset into the adaptive safe zone. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_tile"
+    android:inset="27%" />

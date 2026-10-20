@@ -1,0 +1,8 @@
+pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+plugins { id("com.facebook.react.settings") }
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+rootProject.name = 'CrossDrop'
+include ':app'
+includeBuild('../node_modules/@react-native/gradle-plugin')
+// Platform-neutral protocol engine (pure Kotlin/JVM), shared with the CI interop tests.
+includeBuild('../core')
