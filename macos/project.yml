@@ -24,7 +24,6 @@ targets:
     sources:
       - path: CrossDrop
       - path: Sources/CrossDropCore
-        group: CrossDropCore
     settings:
       base:
         PRODUCT_NAME: CrossDrop

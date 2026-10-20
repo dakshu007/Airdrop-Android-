@@ -14,7 +14,8 @@ permissions:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  # Queue instead of cancelling so every pushed commit gets a full result.
+  cancel-in-progress: false
 
 jobs:
   core:
@@ -135,6 +136,7 @@ jobs:
       - name: Build CrossDrop.app (universal, ad-hoc signed)
         working-directory: macos
         run: |
+          set -o pipefail
           xcodebuild -project CrossDrop.xcodeproj -scheme CrossDrop -configuration Release \
             -derivedDataPath build \
             ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
