@@ -31,6 +31,7 @@ import kotlin.system.exitProcess
  * Interface shared with the Swift `crossdrop-cli`:
  *   receive --port <p> --dir <dir> --identity <file> [--name <n>] [--once]
  *   send --host <h> --port <p> --identity <file> [--name <n>] <file>...
+ * Optional: --platform macos to present as a Mac (the emulator UI run uses it).
  */
 fun main(args: Array<String>) {
     if (args.isEmpty()) usage()
@@ -51,7 +52,8 @@ fun main(args: Array<String>) {
         i++
     }
     val identity = loadIdentity(File(opts["identity"] ?: usage()))
-    val local = LocalInfo(opts["name"] ?: "JVM CLI", Platform.ANDROID, "0.1.0-cli")
+    val platform = if (opts["platform"] == "macos") Platform.MACOS else Platform.ANDROID
+    val local = LocalInfo(opts["name"] ?: "JVM CLI", platform, "0.1.0-cli")
     when (args[0]) {
         "receive" -> receive(identity, local, opts["port"]?.toInt() ?: usage(), File(opts["dir"] ?: usage()), opts.containsKey("once"))
         "send" -> send(identity, local, opts["host"] ?: usage(), opts["port"]?.toInt() ?: usage(), positional)
