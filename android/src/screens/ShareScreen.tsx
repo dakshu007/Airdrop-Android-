@@ -1,11 +1,10 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { FileRow } from '../components/FileRow';
-import { GlassCard } from '../components/GlassCard';
+import { Frost } from '../components/Frost';
 import { Icon } from '../components/Icon';
 import { NearbyDeviceList } from '../components/NearbyDeviceList';
 import { Screen } from '../components/Screen';
-import { SectionHeader } from '../components/SectionHeader';
 import { Text } from '../components/Text';
 import { formatBytes, pluralFiles, sumSizes } from '../format';
 import * as CrossDrop from '../native/crossdrop';
@@ -37,13 +36,24 @@ export function ShareScreen() {
       onPress={() => CrossDrop.clearSharedFiles()}
       accessibilityRole="button"
       accessibilityLabel="Cancel sharing"
-      style={[
-        styles.close,
-        { backgroundColor: t.glassFill, borderColor: t.glassBorder },
-      ]}
+      style={styles.close}
     >
+      <Frost radius={minTouch / 2} />
       <Icon name="x" size={22} color={t.textPrimary} />
     </Pressable>
+  );
+
+  const filesFooter = (
+    <View accessible accessibilityLabel={`${pluralFiles(files.length)}, ${sizeText}`}>
+      {files.slice(0, PREVIEW).map(f => (
+        <FileRow key={f.uri} name={f.name} size={f.size} mime={f.mime} />
+      ))}
+      {files.length > PREVIEW ? (
+        <Text variant="footnote" tone="tertiary" style={styles.more}>
+          and {files.length - PREVIEW} more
+        </Text>
+      ) : null}
+    </View>
   );
 
   return (
@@ -53,29 +63,15 @@ export function ShareScreen() {
       trailing={close}
       bottomSpace={spacing.xxl}
     >
-      <GlassCard
-        accessibilityLabel={`${pluralFiles(files.length)}, ${sizeText}`}
-      >
-        {files.slice(0, PREVIEW).map(f => (
-          <FileRow key={f.uri} name={f.name} size={f.size} mime={f.mime} />
-        ))}
-        {files.length > PREVIEW ? (
-          <Text variant="footnote" tone="tertiary" style={styles.more}>
-            and {files.length - PREVIEW} more
-          </Text>
-        ) : null}
-      </GlassCard>
-      <SectionHeader title="Nearby" />
-      <View>
-        <NearbyDeviceList
-          snapshot={snapshot}
-          busy={busy}
-          onSelect={onSelect}
-          actionHint={device =>
-            `Sends ${pluralFiles(files.length)} to ${device.name}`
-          }
-        />
-      </View>
+      <NearbyDeviceList
+        snapshot={snapshot}
+        busy={busy}
+        onSelect={onSelect}
+        heroFooter={filesFooter}
+        actionHint={device =>
+          `Sends ${pluralFiles(files.length)} to ${device.name}`
+        }
+      />
     </Screen>
   );
 }
@@ -85,9 +81,9 @@ const styles = StyleSheet.create({
     width: minTouch,
     height: minTouch,
     borderRadius: minTouch / 2,
-    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   more: { marginTop: spacing.xs },
 });

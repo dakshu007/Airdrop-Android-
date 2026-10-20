@@ -24,6 +24,7 @@ import { SettingsScreen } from '../screens/SettingsScreen';
 import { ShareScreen } from '../screens/ShareScreen';
 import { useSnapshot } from '../state/CrossDropProvider';
 import { useDiscovery } from '../state/useDiscovery';
+import { WallpaperFill } from '../theme/Wallpaper';
 import { NavigationContext, TabKey } from './NavigationContext';
 import { TabBar } from './TabBar';
 
@@ -56,25 +57,30 @@ export function Navigator() {
   const sharing = snapshot.shared.length > 0;
   useDiscovery(appActive && (tab === 'nearby' || sharing));
 
-  const navigate = useCallback(
-    (next: TabKey) => {
-      setTab(current => {
-        if (current !== next) {
-          enter.setValue(reduced ? 1 : 0);
-          if (!reduced) {
-            Animated.spring(enter, {
-              toValue: 1,
-              useNativeDriver: true,
-              speed: 16,
-              bounciness: 3,
-            }).start();
-          }
-        }
-        return next;
-      });
-    },
-    [enter, reduced],
-  );
+  const navigate = useCallback((next: TabKey) => setTab(next), []);
+
+  // Start the entrance animation after the new screen has mounted, so the
+  // animated node is attached before it runs (required by the native driver).
+  const firstTab = useRef(true);
+  useEffect(() => {
+    if (firstTab.current) {
+      firstTab.current = false;
+      return;
+    }
+    if (reduced) {
+      enter.setValue(1);
+      return;
+    }
+    enter.setValue(0);
+    const anim = Animated.spring(enter, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 16,
+      bounciness: 3,
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [tab, enter, reduced]);
 
   useEffect(() => {
     const to = sharing ? 1 : 0;
@@ -159,6 +165,7 @@ export function Navigator() {
             },
           ]}
         >
+          <WallpaperFill />
           <ShareScreen />
         </Animated.View>
       ) : null}

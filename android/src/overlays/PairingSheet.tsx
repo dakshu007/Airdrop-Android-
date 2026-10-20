@@ -2,7 +2,6 @@ import React from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Button } from '../components/Button';
 import { IconBubble } from '../components/IconBubble';
-import { Specular } from '../components/Specular';
 import { Text } from '../components/Text';
 import { platformLabel } from '../copy';
 import { countdown, formatPairingCode, spokenPairingCode } from '../format';
@@ -44,14 +43,10 @@ export function PairingSheetContent({
       </View>
 
       <View
-        style={[
-          styles.codeBox,
-          { backgroundColor: t.accentSoft, borderColor: t.glassBorder },
-        ]}
+        style={styles.codeBox}
         accessible
         accessibilityLabel={`Pairing code ${spokenPairingCode(prompt.code)}`}
       >
-        <Specular color={t.specular} />
         <Text variant="code" center tone="primary" style={styles.code}>
           {formatPairingCode(prompt.code)}
         </Text>
@@ -97,7 +92,9 @@ const styles = StyleSheet.create({
   header: { alignItems: 'center', gap: spacing.xs },
   codeBox: {
     borderRadius: radii.md,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(6,8,20,0.28)',
     paddingVertical: spacing.lg,
     paddingHorizontal: spacing.md,
     overflow: 'hidden',

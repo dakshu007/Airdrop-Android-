@@ -12,6 +12,11 @@ class Prefs(private val context: Context) {
         get() = sp.getString("deviceName", null)?.takeIf { it.isNotBlank() } ?: defaultName()
         set(value) = sp.edit().putString("deviceName", value.trim().take(64)).apply()
 
+    /** 'auto' (follows light/dark) or a wallpaper name known to the UI. */
+    var wallpaper: String
+        get() = sp.getString("wallpaper", null) ?: "auto"
+        set(value) = sp.edit().putString("wallpaper", value.take(32)).apply()
+
     var notificationPermissionAsked: Boolean
         get() = sp.getBoolean("notificationAsked", false)
         set(value) = sp.edit().putBoolean("notificationAsked", value).apply()

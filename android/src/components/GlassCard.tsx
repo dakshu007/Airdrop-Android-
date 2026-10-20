@@ -9,9 +9,8 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import { useTheme } from '../theme/ThemeProvider';
 import { radii, spacing } from '../theme/tokens';
-import { Specular } from './Specular';
+import { Frost } from './Frost';
 
 interface GlassCardProps {
   children: React.ReactNode;
@@ -50,24 +49,17 @@ export function GlassCard({
   accessibilityState,
   testID,
 }: GlassCardProps) {
-  const t = useTheme();
   const scale = useRef(new Animated.Value(1)).current;
 
   const surface = (
-    <View
-      style={[
-        styles.surface,
-        {
-          borderRadius: radius,
-          backgroundColor: strong ? t.glassFillStrong : t.glassFill,
-          borderColor: t.glassBorder,
-        },
-      ]}
-    >
+    <View style={[styles.surface, { borderRadius: radius }]}>
+      <Frost radius={radius} tint={strong ? 'rgba(255,255,255,0.08)' : undefined} />
       {tint ? (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: tint }]} />
+        <View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { backgroundColor: tint }]}
+        />
       ) : null}
-      <Specular color={t.specular} />
       <View style={[{ padding }, contentStyle]}>{children}</View>
     </View>
   );
@@ -112,7 +104,7 @@ export function GlassCard({
         accessibilityHint={accessibilityHint}
         accessibilityState={{ disabled: !!disabled, ...accessibilityState }}
         android_ripple={{
-          color: t.accentSoft,
+          color: 'rgba(255,255,255,0.14)',
           borderless: false,
           foreground: true,
         }}
@@ -130,6 +122,5 @@ const styles = StyleSheet.create({
   pressable: { overflow: 'hidden', minHeight: 48 },
   surface: {
     overflow: 'hidden',
-    borderWidth: 1,
   },
 });

@@ -11,6 +11,7 @@ import {
 import { useTheme } from '../theme/ThemeProvider';
 import { minTouch, radii, spacing } from '../theme/tokens';
 import { Icon, IconName } from './Icon';
+import { Frost } from './Frost';
 import { Specular } from './Specular';
 import { Text } from './Text';
 
@@ -55,15 +56,15 @@ export function Button({
 
   const palette = {
     primary: {
-      bg: t.accent,
+      bg: '#FFFFFF',
       fg: t.onAccent,
-      border: 'rgba(255,255,255,0.28)',
+      border: 'rgba(255,255,255,0.9)',
       tone: 'onAccent' as const,
     },
     secondary: {
-      bg: t.glassFill,
+      bg: 'transparent',
       fg: t.textPrimary,
-      border: t.glassBorder,
+      border: 'transparent',
       tone: 'primary' as const,
     },
     destructive: {
@@ -74,7 +75,7 @@ export function Button({
     },
     plain: {
       bg: 'transparent',
-      fg: t.scheme === 'dark' ? '#9DB8FF' : t.accent,
+      fg: '#A9CDFF',
       border: 'transparent',
       tone: 'accent' as const,
     },
@@ -94,7 +95,7 @@ export function Button({
         accessibilityLabel={accessibilityLabel ?? title}
         accessibilityHint={accessibilityHint}
         accessibilityState={{ disabled: !!inactive, busy: !!loading }}
-        android_ripple={{ color: 'rgba(255,255,255,0.18)', foreground: true }}
+        android_ripple={{ color: kind === 'primary' ? 'rgba(18,22,41,0.12)' : 'rgba(255,255,255,0.18)', foreground: true }}
         testID={testID}
         style={[
           styles.base,
@@ -102,8 +103,10 @@ export function Button({
           { backgroundColor: palette.bg, borderColor: palette.border },
         ]}
       >
-        {kind === 'primary' || kind === 'secondary' ? (
-          <Specular color="rgba(255,255,255,0.22)" />
+        {kind === 'secondary' ? (
+          <Frost radius={compact ? 20 : 24} tint="rgba(255,255,255,0.16)" />
+        ) : kind === 'primary' ? (
+          <Specular color="rgba(120,140,255,0.10)" />
         ) : null}
         <View style={styles.row}>
           {loading ? (

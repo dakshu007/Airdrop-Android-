@@ -4,7 +4,7 @@
  * glass in both appearances.
  */
 
-export const radii = { sm: 12, md: 20, lg: 28, pill: 999 } as const;
+export const radii = { sm: 14, md: 22, lg: 28, pill: 999 } as const;
 
 export const spacing = {
   xxs: 4,
@@ -47,90 +47,65 @@ export interface Palette {
   focus: string;
 }
 
-export const lightPalette: Palette = {
-  scheme: 'light',
-  background: '#EAEFF8',
-  aurora: ['#6F97FF', '#A98BFF', '#4FD6CD', '#FF9EBF'],
-  auroraOpacity: 0.55,
-  glassFill: 'rgba(255,255,255,0.58)',
-  glassFillStrong: 'rgba(255,255,255,0.82)',
-  glassBorder: 'rgba(255,255,255,0.9)',
-  glassShade: 'rgba(15,23,42,0.08)',
-  specular: 'rgba(255,255,255,0.75)',
-  textPrimary: '#0B1220',
-  textSecondary: '#3E4A5E',
-  textTertiary: '#56637A',
-  accent: '#2F5FEF',
-  onAccent: '#FFFFFF',
-  accentSoft: 'rgba(47,95,239,0.13)',
-  success: '#157A3C',
-  successSoft: 'rgba(21,122,60,0.13)',
-  danger: '#C2261F',
-  dangerSoft: 'rgba(194,38,31,0.12)',
-  warning: '#8F4A00',
-  warningSoft: 'rgba(196,110,0,0.14)',
-  track: 'rgba(15,23,42,0.10)',
-  scrim: 'rgba(8,12,22,0.38)',
-  focus: '#2F5FEF',
+/**
+ * One "glass on wallpaper" palette. Surfaces are frosted copies of the
+ * wallpaper with a white tint, so text is always light; the system
+ * appearance picks the default wallpaper instead (see Wallpaper.tsx).
+ */
+export const glassPalette: Palette = {
+  scheme: 'dark',
+  background: '#0B0D18',
+  aurora: ['#2D4FFF', '#7A3CEB', '#0FA3A0', '#C2367A'],
+  auroraOpacity: 0,
+  glassFill: 'rgba(255,255,255,0.13)',
+  glassFillStrong: 'rgba(255,255,255,0.2)',
+  glassBorder: 'rgba(255,255,255,0.3)',
+  glassShade: 'rgba(0,0,0,0.28)',
+  specular: 'rgba(255,255,255,0.2)',
+  textPrimary: '#FFFFFF',
+  textSecondary: 'rgba(255,255,255,0.8)',
+  textTertiary: 'rgba(255,255,255,0.62)',
+  accent: '#FFFFFF',
+  onAccent: '#121629',
+  accentSoft: 'rgba(255,255,255,0.16)',
+  success: '#86F0AE',
+  successSoft: 'rgba(110,235,160,0.2)',
+  danger: '#FFA59C',
+  dangerSoft: 'rgba(255,110,100,0.22)',
+  warning: '#FFDA8F',
+  warningSoft: 'rgba(255,214,130,0.2)',
+  track: 'rgba(255,255,255,0.2)',
+  scrim: 'rgba(4,5,14,0.5)',
+  focus: '#9CC8FF',
 };
 
-export const darkPalette: Palette = {
-  scheme: 'dark',
-  background: '#060A13',
-  aurora: ['#2D4FFF', '#7A3CEB', '#0FA3A0', '#C2367A'],
-  auroraOpacity: 0.42,
-  glassFill: 'rgba(255,255,255,0.075)',
-  glassFillStrong: 'rgba(28,34,50,0.92)',
-  glassBorder: 'rgba(255,255,255,0.16)',
-  glassShade: 'rgba(0,0,0,0.35)',
-  specular: 'rgba(255,255,255,0.14)',
-  textPrimary: '#F2F5FA',
-  textSecondary: '#B4BFD0',
-  textTertiary: '#94A1B6',
-  accent: '#2F5FEF',
-  onAccent: '#FFFFFF',
-  accentSoft: 'rgba(110,155,255,0.20)',
-  success: '#4ADE80',
-  successSoft: 'rgba(74,222,128,0.16)',
-  danger: '#FF7A72',
-  dangerSoft: 'rgba(255,122,114,0.16)',
-  warning: '#FBBF5A',
-  warningSoft: 'rgba(251,191,90,0.16)',
-  track: 'rgba(255,255,255,0.12)',
-  scrim: 'rgba(0,0,0,0.55)',
-  focus: '#8FB0FF',
-};
+/** Kept for code that still distinguishes appearances; both use the glass look. */
+export const lightPalette = glassPalette;
+export const darkPalette = glassPalette;
+
+/** Selected/active pill (like a pressed glass key). */
+export const selectedFill = 'rgba(8,10,22,0.5)';
+/** Light-blue accent for links and highlights on glass. */
+export const accentText = '#A9CDFF';
+
+/** Poppins (bundled, OFL). Android picks the face by family name, so weights are separate families. */
+export const fonts = {
+  regular: 'Poppins-Regular',
+  medium: 'Poppins-Medium',
+  semibold: 'Poppins-SemiBold',
+  bold: 'Poppins-Bold',
+} as const;
 
 export const typography = {
-  largeTitle: {
-    fontSize: 32,
-    lineHeight: 39,
-    fontWeight: '700' as const,
-    letterSpacing: -0.4,
-  },
-  title: {
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: '700' as const,
-    letterSpacing: -0.2,
-  },
-  headline: { fontSize: 17, lineHeight: 23, fontWeight: '600' as const },
-  body: { fontSize: 16, lineHeight: 22, fontWeight: '400' as const },
-  callout: { fontSize: 15, lineHeight: 21, fontWeight: '400' as const },
-  subhead: { fontSize: 14, lineHeight: 19, fontWeight: '500' as const },
-  footnote: { fontSize: 13, lineHeight: 18, fontWeight: '400' as const },
-  caption: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '500' as const,
-    letterSpacing: 0.2,
-  },
-  code: {
-    fontSize: 44,
-    lineHeight: 52,
-    fontWeight: '700' as const,
-    letterSpacing: 2,
-  },
+  largeTitle: { fontSize: 30, lineHeight: 40, fontFamily: fonts.semibold, letterSpacing: -0.3 },
+  title: { fontSize: 22, lineHeight: 30, fontFamily: fonts.semibold, letterSpacing: -0.2 },
+  headline: { fontSize: 16, lineHeight: 23, fontFamily: fonts.semibold },
+  body: { fontSize: 15, lineHeight: 22, fontFamily: fonts.regular },
+  callout: { fontSize: 14, lineHeight: 21, fontFamily: fonts.regular },
+  subhead: { fontSize: 13.5, lineHeight: 19, fontFamily: fonts.medium },
+  footnote: { fontSize: 12.5, lineHeight: 18, fontFamily: fonts.regular },
+  caption: { fontSize: 11.5, lineHeight: 16, fontFamily: fonts.medium, letterSpacing: 0.2 },
+  code: { fontSize: 46, lineHeight: 58, fontFamily: fonts.semibold, letterSpacing: 3 },
 } as const;
 
 export type TypographyVariant = keyof typeof typography;

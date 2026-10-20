@@ -1,6 +1,7 @@
-import React from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import React, { useMemo, useRef } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScrollOffsetContext } from '../theme/ScrollOffset';
 import { spacing } from '../theme/tokens';
 import { Text } from './Text';
 
@@ -23,9 +24,25 @@ export function Screen({
   bottomSpace = TAB_BAR_SPACE,
 }: ScreenProps) {
   const insets = useSafeAreaInsets();
+  const y = useRef(new Animated.Value(0)).current;
+  const offset = useMemo(() => ({ y, current: { value: 0 } }), [y]);
+  const onScroll = useMemo(
+    () =>
+      Animated.event([{ nativeEvent: { contentOffset: { y } } }], {
+        useNativeDriver: true,
+        listener: (e: { nativeEvent: { contentOffset: { y: number } } }) => {
+          offset.current.value = e.nativeEvent.contentOffset.y;
+        },
+      }),
+    [y, offset],
+  );
   return (
-    <ScrollView
+    <ScrollOffsetContext.Provider value={offset}>
+    <Animated.ScrollView
       style={styles.flex}
+      onScroll={onScroll}
+      scrollEventThrottle={16}
+      showsVerticalScrollIndicator={false}
       contentContainerStyle={{
         paddingTop: insets.top + spacing.lg,
         paddingBottom: insets.bottom + bottomSpace,
@@ -48,7 +65,8 @@ export function Screen({
         {trailing}
       </View>
       {children}
-    </ScrollView>
+    </Animated.ScrollView>
+    </ScrollOffsetContext.Provider>
   );
 }
 

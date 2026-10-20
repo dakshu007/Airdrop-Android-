@@ -152,6 +152,8 @@ class CrossDropModule(private val context: ReactApplicationContext) : NativeCros
 
     override fun clearHistory() = engine.clearHistory()
 
+    override fun setWallpaper(name: String) = engine.setWallpaper(name)
+
     override fun openFile(uri: String) {
         try {
             context.startActivity(engine.openFileIntent(uri))

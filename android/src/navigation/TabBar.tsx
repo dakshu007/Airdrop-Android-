@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, IconName } from '../components/Icon';
-import { Specular } from '../components/Specular';
+import { Frost } from '../components/Frost';
 import { Text } from '../components/Text';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { useTheme } from '../theme/ThemeProvider';
-import { minTouch, radii, spacing } from '../theme/tokens';
+import { minTouch, radii, selectedFill, spacing } from '../theme/tokens';
 import type { TabKey } from './NavigationContext';
 
 export const TABS: { key: TabKey; label: string; icon: IconName }[] = [
@@ -45,7 +45,6 @@ export function TabBar({ current, onSelect, badges }: TabBarProps) {
     }
   }, [index, position, reduced]);
 
-  const accent = t.scheme === 'dark' ? '#9DB8FF' : t.accent;
 
   return (
     <View
@@ -62,19 +61,16 @@ export function TabBar({ current, onSelect, badges }: TabBarProps) {
       <View
         accessibilityRole="tablist"
         onLayout={e => setWidth(e.nativeEvent.layout.width - 14)}
-        style={[
-          styles.bar,
-          { backgroundColor: t.glassFillStrong, borderColor: t.glassBorder },
-        ]}
+        style={styles.bar}
       >
-        <Specular color={t.specular} />
+        <Frost radius={radii.lg} tint="rgba(255,255,255,0.14)" />
         {width > 0 ? (
           <Animated.View
             style={[
               styles.lens,
               {
                 width: itemWidth,
-                backgroundColor: t.accentSoft,
+                backgroundColor: selectedFill,
                 transform: [
                   {
                     translateX: position.interpolate({
@@ -105,21 +101,20 @@ export function TabBar({ current, onSelect, badges }: TabBarProps) {
                 <Icon
                   name={tab.icon}
                   size={22}
-                  color={selected ? accent : t.textSecondary}
+                  color={selected ? '#FFFFFF' : t.textSecondary}
                 />
                 {badge > 0 ? (
                   <View
                     style={[
                       styles.badge,
                       {
-                        backgroundColor: t.accent,
-                        borderColor: t.glassFillStrong,
+                        backgroundColor: '#FF6B6B',
+                        borderColor: 'rgba(255,255,255,0.9)',
                       },
                     ]}
                   >
                     <Text
                       variant="caption"
-                      tone="onAccent"
                       maxFontSizeMultiplier={1.3}
                     >
                       {badge > 9 ? '9+' : badge}
@@ -129,7 +124,7 @@ export function TabBar({ current, onSelect, badges }: TabBarProps) {
               </View>
               <Text
                 variant="caption"
-                tone={selected ? 'accent' : 'secondary'}
+                tone={selected ? 'primary' : 'secondary'}
                 numberOfLines={1}
                 maxFontSizeMultiplier={1.4}
               >
@@ -148,7 +143,6 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     borderRadius: radii.lg,
-    borderWidth: 1,
     padding: 6,
     overflow: 'hidden',
   },
@@ -157,7 +151,7 @@ const styles = StyleSheet.create({
     top: 6,
     bottom: 6,
     left: 6,
-    borderRadius: radii.md,
+    borderRadius: radii.lg - 6,
   },
   item: {
     flex: 1,

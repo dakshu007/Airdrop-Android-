@@ -166,4 +166,6 @@ export interface Snapshot {
   destinationLabel: string;
   /** Native app version, e.g. "0.1.0". */
   appVersion: string;
+  /** Chosen wallpaper: 'auto' (follows light/dark) or a name from theme/Wallpaper.tsx. */
+  wallpaper: string;
 }

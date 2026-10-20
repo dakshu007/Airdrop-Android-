@@ -1,14 +1,14 @@
 import React from 'react';
-import { Alert, StyleSheet, Switch, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import { friendlyError } from '../copy';
 import { formatClock } from '../format';
 import * as CrossDrop from '../native/crossdrop';
 import type { Snapshot } from '../native/types';
-import { useTheme } from '../theme/ThemeProvider';
-import { spacing } from '../theme/tokens';
+import { radii, spacing } from '../theme/tokens';
 import { GlassCard } from './GlassCard';
 import { IconBubble } from './IconBubble';
 import { Text } from './Text';
+import { Toggle } from './Toggle';
 
 function askForNotificationsThen(next: () => void) {
   Alert.alert(
@@ -29,9 +29,8 @@ function askForNotificationsThen(next: () => void) {
   );
 }
 
-/** Receive-availability toggle. */
+/** Receive-availability control, styled like a control-centre tile. */
 export function ReceiveCard({ snapshot }: { snapshot: Snapshot }) {
-  const t = useTheme();
   const { receiving, local } = snapshot;
   const toggle = (value: boolean) => {
     if (value && snapshot.notificationPermission === 'undetermined') {
@@ -43,35 +42,36 @@ export function ReceiveCard({ snapshot }: { snapshot: Snapshot }) {
 
   let detail: string;
   if (!receiving.enabled) {
-    detail =
-      'Visible to nearby devices while on. Turns off after 10 minutes to save battery.';
+    detail = 'Off · nearby Macs can’t see this phone';
   } else if (receiving.autoOffAt !== null) {
-    detail = `Visible to nearby devices as “${
-      local.name
-    }”. Turns off at ${formatClock(receiving.autoOffAt)} to save battery.`;
+    detail = `Visible as “${local.name}” · until ${formatClock(receiving.autoOffAt)}`;
   } else {
-    detail = `Visible to nearby devices as “${local.name}”. Stays on while a transfer is running.`;
+    detail = `Visible as “${local.name}” · on while receiving`;
   }
+  const hint = receiving.enabled
+    ? 'Turns receiving off'
+    : 'Lets nearby devices send to this phone. Turns off by itself after 10 minutes.';
   const error = receiving.error ? friendlyError(receiving.error) : null;
 
   return (
-    <GlassCard tint={receiving.enabled ? t.accentSoft : undefined}>
+    <GlassCard radius={radii.lg} padding={spacing.sm + 2}>
       <View style={styles.row}>
-        <IconBubble name="download" size={44} />
+        <IconBubble
+          name="download"
+          size={48}
+          background={receiving.enabled ? 'rgba(76,217,128,0.45)' : undefined}
+        />
         <View style={styles.text}>
           <Text variant="headline">Receiving</Text>
-          <Text variant="footnote" tone="secondary">
+          <Text variant="footnote" tone="secondary" numberOfLines={2}>
             {detail}
           </Text>
         </View>
-        <Switch
+        <Toggle
           value={receiving.enabled}
           onValueChange={toggle}
           accessibilityLabel="Receiving"
-          accessibilityHint={detail}
-          trackColor={{ false: t.track, true: t.accent }}
-          thumbColor="#FFFFFF"
-          style={styles.switch}
+          accessibilityHint={hint}
         />
       </View>
       {error ? (
@@ -91,6 +91,5 @@ export function ReceiveCard({ snapshot }: { snapshot: Snapshot }) {
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   text: { flex: 1, gap: 2 },
-  switch: { minHeight: 48 },
-  error: { marginTop: spacing.sm, gap: 2 },
+  error: { marginTop: spacing.sm, gap: 2, paddingHorizontal: spacing.xxs },
 });

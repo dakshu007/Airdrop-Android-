@@ -21,6 +21,7 @@ export function emptySnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     notificationPermission: 'undetermined',
     destinationLabel: 'Download/CrossDrop',
     appVersion: '0.1.0',
+    wallpaper: 'auto',
     ...overrides,
   };
 }

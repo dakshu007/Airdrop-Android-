@@ -1,14 +1,14 @@
 import React, { createContext, useContext } from 'react';
-import { useColorScheme } from 'react-native';
-import { darkPalette, lightPalette, Palette } from './tokens';
+import { glassPalette, Palette } from './tokens';
 
-const ThemeContext = createContext<Palette>(lightPalette);
+const ThemeContext = createContext<Palette>(glassPalette);
 
+/** Provides the glass palette. Appearance (light/dark) only changes the default wallpaper. */
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const scheme = useColorScheme();
-  const palette = scheme === 'dark' ? darkPalette : lightPalette;
   return (
-    <ThemeContext.Provider value={palette}>{children}</ThemeContext.Provider>
+    <ThemeContext.Provider value={glassPalette}>
+      {children}
+    </ThemeContext.Provider>
   );
 }
 

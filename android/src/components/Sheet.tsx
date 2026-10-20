@@ -9,9 +9,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useReducedMotion } from '../hooks/useReducedMotion';
-import { useTheme } from '../theme/ThemeProvider';
-import { radii, spacing } from '../theme/tokens';
-import { Specular } from './Specular';
+import { spacing } from '../theme/tokens';
+import { Frost } from './Frost';
+
+const SHEET_RADIUS = 34;
 
 interface SheetProps {
   visible: boolean;
@@ -31,7 +32,6 @@ export function Sheet({
   accessibilityLabel,
   children,
 }: SheetProps) {
-  const t = useTheme();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const reduced = useReducedMotion();
@@ -77,7 +77,7 @@ export function Sheet({
       onRequestClose={onRequestClose}
     >
       <Animated.View
-        style={[styles.scrim, { backgroundColor: t.scrim, opacity: progress }]}
+        style={[styles.scrim, { backgroundColor: 'rgba(4,5,14,0.55)', opacity: progress }]}
       />
       <View style={styles.anchor} pointerEvents="box-none">
         <Animated.View
@@ -86,18 +86,15 @@ export function Sheet({
           style={[
             styles.sheet,
             {
-              backgroundColor: t.glassFillStrong,
-              borderColor: t.glassBorder,
-              paddingBottom: insets.bottom + spacing.lg,
-              marginHorizontal: spacing.xs,
+              marginBottom: insets.bottom + spacing.sm,
               maxHeight: height - insets.top - spacing.xl,
               opacity: sheetOpacity,
               transform: [{ translateY }],
             },
           ]}
         >
-          <Specular color={t.specular} height="30%" />
-          <View style={[styles.grabber, { backgroundColor: t.track }]} />
+          <Frost radius={SHEET_RADIUS} tint="rgba(8,10,26,0.16)" />
+          <View style={styles.grabber} />
           <ScrollView bounces={false} contentContainerStyle={styles.content}>
             {children}
           </ScrollView>
@@ -111,11 +108,8 @@ const styles = StyleSheet.create({
   scrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   anchor: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    borderBottomLeftRadius: radii.md,
-    borderBottomRightRadius: radii.md,
-    borderWidth: 1,
+    borderRadius: SHEET_RADIUS,
+    marginHorizontal: spacing.sm,
     overflow: 'hidden',
     paddingTop: spacing.xs,
   },
@@ -125,10 +119,12 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     alignSelf: 'center',
     marginBottom: spacing.xs,
+    backgroundColor: 'rgba(255,255,255,0.35)',
   },
   content: {
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.sm,
+    paddingBottom: spacing.xl,
     gap: spacing.md,
   },
 });

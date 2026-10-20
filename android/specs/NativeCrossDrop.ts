@@ -35,6 +35,8 @@ export interface Spec extends TurboModule {
   /** Resolves to a NotificationPermission value. */
   requestNotificationPermission(): Promise<string>;
   openAppSettings(): void;
+  /** Persists the wallpaper choice ('auto' or a wallpaper name). */
+  setWallpaper(name: string): void;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('CrossDrop');

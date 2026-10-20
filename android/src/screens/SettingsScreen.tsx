@@ -6,6 +6,7 @@ import { Icon, IconName } from '../components/Icon';
 import { Screen } from '../components/Screen';
 import { SectionHeader } from '../components/SectionHeader';
 import { Text } from '../components/Text';
+import { WallpaperPicker } from '../components/WallpaperPicker';
 import * as CrossDrop from '../native/crossdrop';
 import type { NotificationPermission } from '../native/types';
 import { useSnapshot } from '../state/CrossDropProvider';
@@ -77,6 +78,11 @@ export function SettingsScreen() {
 
   return (
     <Screen title="Settings">
+      <SectionHeader title="Wallpaper" />
+      <GlassCard>
+        <WallpaperPicker value={snapshot.wallpaper} />
+      </GlassCard>
+
       <SectionHeader title="This phone" />
       <GlassCard>
         <Text variant="subhead" tone="secondary" nativeID="deviceNameLabel">
@@ -105,7 +111,7 @@ export function SettingsScreen() {
             {
               color: t.textPrimary,
               borderColor: focused ? t.focus : t.glassBorder,
-              backgroundColor: t.track,
+              backgroundColor: 'rgba(6,8,20,0.22)',
             },
           ]}
         />
@@ -127,7 +133,7 @@ export function SettingsScreen() {
             />
           </View>
         </Row>
-        <View style={[styles.divider, { backgroundColor: t.track }]} />
+        <View style={styles.divider} />
         <Row
           icon="bell"
           title="Notifications"
@@ -158,7 +164,7 @@ export function SettingsScreen() {
             </View>
           ) : null}
         </Row>
-        <View style={[styles.divider, { backgroundColor: t.track }]} />
+        <View style={styles.divider} />
         <Row
           icon="tile"
           title="Quick Settings tile"
@@ -173,13 +179,13 @@ export function SettingsScreen() {
           title="Local network only"
           detail="Files go directly between your devices over your Wi-Fi, encrypted in transit. There are no accounts, no cloud storage and no analytics."
         />
-        <View style={[styles.divider, { backgroundColor: t.track }]} />
+        <View style={styles.divider} />
         <Row
           icon="shieldCheck"
           title="You approve new devices"
           detail="A device you haven’t paired with must match a 6-digit code on both screens, and you approve incoming files unless you turn on automatic acceptance for a paired device."
         />
-        <View style={[styles.divider, { backgroundColor: t.track }]} />
+        <View style={styles.divider} />
         <Row
           icon="info"
           title="What this doesn’t protect"
@@ -208,7 +214,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   inlineAction: { flexDirection: 'row', marginTop: spacing.xs },
-  divider: { height: StyleSheet.hairlineWidth, marginVertical: spacing.xs },
+  divider: { height: StyleSheet.hairlineWidth, marginVertical: spacing.xs, backgroundColor: 'rgba(255,255,255,0.22)' },
   input: {
     minHeight: minTouch,
     borderWidth: 1.5,

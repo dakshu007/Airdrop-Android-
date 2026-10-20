@@ -480,6 +480,12 @@ class Engine private constructor(private val app: Context) {
         changed()
     }
 
+    fun setWallpaper(name: String) {
+        if (!name.matches(Regex("^[a-z]{1,32}$"))) return
+        prefs.wallpaper = name
+        changed()
+    }
+
     fun clearHistory() {
         history.clear()
         changed()

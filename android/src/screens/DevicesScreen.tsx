@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, StyleSheet, Switch, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
@@ -8,6 +8,7 @@ import { IconBubble } from '../components/IconBubble';
 import { Screen } from '../components/Screen';
 import { SectionHeader } from '../components/SectionHeader';
 import { Text } from '../components/Text';
+import { Toggle } from '../components/Toggle';
 import { platformLabel } from '../copy';
 import { formatDate, groupFingerprint, relativeTime } from '../format';
 import { useNow } from '../hooks/useNow';
@@ -24,7 +25,6 @@ function TrustedDeviceCard({
   device: TrustedDevice;
   now: number;
 }) {
-  const t = useTheme();
   const forget = () =>
     Alert.alert(
       `Forget ${device.name}?`,
@@ -58,7 +58,7 @@ function TrustedDeviceCard({
         </View>
       </View>
       <View
-        style={[styles.fingerprint, { backgroundColor: t.track }]}
+        style={styles.fingerprint}
         accessible
         accessibilityLabel={`Security fingerprint ${device.fingerprint
           .split('')
@@ -79,12 +79,10 @@ function TrustedDeviceCard({
             notification.
           </Text>
         </View>
-        <Switch
+        <Toggle
           value={device.autoAccept}
           onValueChange={v => CrossDrop.setAutoAccept(device.deviceId, v)}
           accessibilityLabel={`Accept files automatically from ${device.name}`}
-          trackColor={{ false: t.track, true: t.accent }}
-          thumbColor="#FFFFFF"
         />
       </View>
       <View style={styles.actions}>
@@ -120,7 +118,7 @@ export function DevicesScreen() {
             <Badge label="This phone" tone="accent" />
           </View>
         </View>
-        <View style={[styles.fingerprint, { backgroundColor: t.track }]}>
+        <View style={styles.fingerprint}>
           <Text variant="caption" tone="tertiary">
             FINGERPRINT
           </Text>
@@ -155,8 +153,11 @@ const styles = StyleSheet.create({
   fingerprint: {
     marginTop: spacing.md,
     padding: spacing.sm,
-    borderRadius: 12,
+    borderRadius: 14,
     gap: 2,
+    backgroundColor: 'rgba(6,8,20,0.22)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.16)',
   },
   switchRow: {
     flexDirection: 'row',

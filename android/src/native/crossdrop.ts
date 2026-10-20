@@ -66,3 +66,4 @@ export const clearHistory = () => NativeCrossDrop.clearHistory();
 export const openFile = (uri: string) => NativeCrossDrop.openFile(uri);
 export const openDownloads = () => NativeCrossDrop.openDownloads();
 export const openAppSettings = () => NativeCrossDrop.openAppSettings();
+export const setWallpaper = (name: string) => NativeCrossDrop.setWallpaper(name);

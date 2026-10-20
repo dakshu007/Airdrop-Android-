@@ -1,14 +1,13 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { useTheme } from '../theme/ThemeProvider';
+import { Frost } from './Frost';
 import { Icon, IconName } from './Icon';
-import { Specular } from './Specular';
 
 /** An icon inside a small round glass lens. */
 export function IconBubble({
   name,
   size = 44,
-  color,
+  color = '#FFFFFF',
   background,
 }: {
   name: IconName;
@@ -16,26 +15,10 @@ export function IconBubble({
   color?: string;
   background?: string;
 }) {
-  const t = useTheme();
   return (
-    <View
-      style={[
-        styles.bubble,
-        {
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: background ?? t.accentSoft,
-          borderColor: t.glassBorder,
-        },
-      ]}
-    >
-      <Specular color={t.specular} />
-      <Icon
-        name={name}
-        size={size * 0.5}
-        color={color ?? (t.scheme === 'dark' ? '#9DB8FF' : t.accent)}
-      />
+    <View style={[styles.bubble, { width: size, height: size, borderRadius: size / 2 }]}>
+      <Frost radius={size / 2} tint={background ?? 'rgba(255,255,255,0.16)'} />
+      <Icon name={name} size={Math.round(size * 0.46)} color={color} />
     </View>
   );
 }
@@ -44,7 +27,6 @@ const styles = StyleSheet.create({
   bubble: {
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
     overflow: 'hidden',
   },
 });

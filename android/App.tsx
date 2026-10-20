@@ -7,7 +7,6 @@
 import React from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Aurora } from './src/components/Aurora';
 import { Button } from './src/components/Button';
 import { GlassCard } from './src/components/GlassCard';
 import { IconBubble } from './src/components/IconBubble';
@@ -16,6 +15,7 @@ import { Navigator } from './src/navigation/Navigator';
 import { CrossDropProvider, useCrossDrop } from './src/state/CrossDropProvider';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { spacing } from './src/theme/tokens';
+import { WallpaperBackdrop } from './src/theme/Wallpaper';
 
 function Root() {
   const t = useTheme();
@@ -64,13 +64,10 @@ function Root() {
   }
 
   return (
-    <View style={styles.flex}>
-      <StatusBar
-        barStyle={t.scheme === 'dark' ? 'light-content' : 'dark-content'}
-      />
-      <Aurora />
+    <WallpaperBackdrop choice={snapshot?.wallpaper}>
+      <StatusBar barStyle="light-content" />
       {content}
-    </View>
+    </WallpaperBackdrop>
   );
 }
 

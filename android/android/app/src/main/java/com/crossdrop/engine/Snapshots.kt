@@ -101,6 +101,7 @@ object Snapshots {
             "notificationPermission" to NotificationPermissions.status(engine.appContext, engine.prefs),
             "destinationLabel" to MediaStoreStorage.LABEL,
             "appVersion" to Engine.APP_VERSION,
+            "wallpaper" to engine.prefs.wallpaper,
         )
         return Json.write(map)
     }
