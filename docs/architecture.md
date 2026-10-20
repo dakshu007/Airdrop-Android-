@@ -67,3 +67,23 @@ runner for interop tests.
 | `share/` | Share sheet intents and picker results → file metadata |
 | `notifications/` | Channels; lock-screen-safe notifications |
 | `tiles/` | Optional Quick Settings tile |
+
+## Visual design
+
+Both apps use the same "liquid glass over a wallpaper" language:
+
+* **Wallpapers** are original artwork rendered by `scripts/make_wallpapers.py`
+  (Dusk, Lagoon, Canopy, Midnight). No stock photos, so no licence questions.
+  Android "Auto" follows the system appearance (Lagoon in light, Dusk in dark).
+* **Frosted glass on Android** (`android/src/components/Frost.tsx`): React Native
+  has no cross-version backdrop blur, so each glass surface draws a small
+  pre-blurred copy of the wallpaper positioned exactly where the real wallpaper
+  sits behind it (and follows scrolling via an Animated scroll offset), then a
+  tint, a top sheen and a rim-lit hairline border. It looks like a live backdrop
+  blur, costs one extra image draw per surface and works on every Android version.
+* **Frosted glass on macOS**: the same aligned-blur technique in SwiftUI; on
+  macOS 26 built with Xcode 26 the system `.glassEffect` is used instead.
+* **Type**: Poppins on Android (bundled under the SIL Open Font License, see
+  `android/android/app/src/main/assets/fonts/OFL.txt`), SF Pro on macOS.
+* The DMG opens as a styled installer window (`scripts/make_dmg_background.py`,
+  `scripts/build-dmg.sh`).
