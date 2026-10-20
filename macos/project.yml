@@ -1,0 +1,53 @@
+# XcodeGen spec for the CrossDrop macOS app.
+#   brew install xcodegen && xcodegen generate
+#
+# The protocol engine in Sources/CrossDropCore is compiled straight into the app
+# target (same sources the Swift package and its tests use). This avoids an
+# Xcode local-package reference to the directory that also holds the project.
+name: CrossDrop
+options:
+  bundleIdPrefix: app.crossdrop
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+targets:
+  CrossDrop:
+    type: application
+    platform: macOS
+    sources:
+      - path: CrossDrop
+      - path: Sources/CrossDropCore
+        group: CrossDropCore
+    settings:
+      base:
+        PRODUCT_NAME: CrossDrop
+        PRODUCT_BUNDLE_IDENTIFIER: app.crossdrop.mac
+        INFOPLIST_FILE: CrossDrop/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_ENTITLEMENTS: ""
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+        COMBINE_HIDPI_IMAGES: YES
+        SWIFT_STRICT_CONCURRENCY: minimal
+        DEAD_CODE_STRIPPING: YES
+schemes:
+  CrossDrop:
+    build:
+      targets:
+        CrossDrop: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -160,6 +160,8 @@ class Connection(val socket: Socket) {
                 }
                 queue.put(item)
             }
+            // Closed locally between records: waiters must still learn that the connection is gone.
+            fail(ProtocolException(ErrorCode.CONNECTION_LOST, "closed"))
         } catch (e: ProtocolException) {
             fail(e)
         } catch (e: IOException) {

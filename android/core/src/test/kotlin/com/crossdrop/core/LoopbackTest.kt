@@ -172,7 +172,7 @@ class LoopbackTest {
         assertTrue(failed.await(5, TimeUnit.SECONDS))
         assertEquals(ErrorCode.CANCELLED, failures.first())
         Thread.sleep(100)
-        assertTrue(dir.toFile().listFiles()!!.isEmpty())
+        assertTrue(dir.toFile().listFiles()!!.isEmpty(), "left: " + dir.toFile().listFiles()!!.joinToString { it.name + ":" + it.length() })
     }
 
     @Test
