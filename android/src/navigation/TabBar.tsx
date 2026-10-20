@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Image, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SoftShadow } from '../components/Frost';
 import { Icon, IconName } from '../components/Icon';
@@ -17,6 +17,9 @@ export const TABS: { key: TabKey; label: string; icon: IconName }[] = [
 ];
 
 const PAD = 10;
+const FADE = require('../assets/ui/fade.png');
+/** Bottom colour of the idle backdrop (scripts/make_ui_textures.py). */
+const BACKDROP_BOTTOM = '#DDF3E3';
 const LENS = 48;
 
 interface TabBarProps {
@@ -66,6 +69,16 @@ export function TabBar({ current, onSelect, badges }: TabBarProps) {
         },
       ]}
     >
+      {/* Scrolled content dissolves into the backdrop behind the bar instead
+          of being cut by its edge. */}
+      <View pointerEvents="none" style={styles.fade}>
+        <Image
+          source={FADE}
+          style={[styles.full, { tintColor: BACKDROP_BOTTOM }]}
+          resizeMode="stretch"
+          fadeDuration={0}
+        />
+      </View>
       <View>
         <SoftShadow offsetY={10} spread={10} opacity={0.16} />
         <View
@@ -130,6 +143,8 @@ export function TabBar({ current, onSelect, badges }: TabBarProps) {
 
 const styles = StyleSheet.create({
   anchor: { position: 'absolute', left: 0, right: 0, bottom: 0 },
+  fade: { position: 'absolute', left: 0, right: 0, bottom: 0, top: -36 },
+  full: { width: '100%', height: '100%' },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',

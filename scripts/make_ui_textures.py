@@ -9,6 +9,7 @@ android/src/assets/ui/:
   sphere-<tone>.png    soft glowing ball that fades out at its edge
   sheen.png            vertical white-to-clear highlight for glass tops
   shadow.png           soft white ellipse; the app tints it for drop shadows
+  fade.png             vertical clear-to-white ramp; tinted behind the tab bar
 
 Usage: python3 scripts/make_ui_textures.py
 """
@@ -97,6 +98,12 @@ def shadow(w=256, h=128):
     return np.dstack([np.full((h, w), 255), np.full((h, w), 255), np.full((h, w), 255), alpha])
 
 
+def fade(h=128):
+    t = np.linspace(0, 1, h, dtype=np.float32)
+    alpha = (t**1.4) * 255
+    return np.dstack([np.full((h, 4), 255), np.full((h, 4), 255), np.full((h, 4), 255), np.repeat(alpha[:, None], 4, 1)])
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     for mood, colors in MOODS.items():
@@ -105,6 +112,7 @@ def main():
         save(sphere(tone), f"sphere-{tone}.png", "RGBA")
     save(sheen(), "sheen.png", "RGBA")
     save(shadow(), "shadow.png", "RGBA")
+    save(fade(), "fade.png", "RGBA")
     print("wrote", OUT)
 
 
