@@ -66,6 +66,7 @@ internal object Pairing {
                 val remaining = deadline - System.currentTimeMillis()
                 if (remaining <= 0) {
                     runCatching { conn.sendControl(Message.build("pair.confirm", "accepted" to false)) }
+                    drainPeerAnswer(conn, remoteAccepted)
                     throw ProtocolException(ErrorCode.TIMEOUT, "pairing timed out")
                 }
                 when (val item = conn.next(remaining)) {
@@ -79,7 +80,10 @@ internal object Pairing {
                             // report its answer rather than the broken connection.
                             throw peerDecline(conn) ?: e
                         }
-                        if (!d.accept) throw ProtocolException(ErrorCode.PAIRING_REJECTED, "declined locally")
+                        if (!d.accept) {
+                            drainPeerAnswer(conn, remoteAccepted)
+                            throw ProtocolException(ErrorCode.PAIRING_REJECTED, "declined locally")
+                        }
                         localAccepted = true
                         if (!remoteAccepted) events.onPairingWaitingForPeer(prompt)
                     }
@@ -101,6 +105,26 @@ internal object Pairing {
         } finally {
             prompt.decision.complete(false)
             events.onPairingClosed(prompt, paired)
+        }
+    }
+
+    /**
+     * After declining, waits briefly for the peer's own answer before the
+     * connection is closed. Closing a TCP socket with unread data sends a reset,
+     * which can discard our decline before the peer reads it.
+     */
+    private fun drainPeerAnswer(conn: Connection, alreadyAnswered: Boolean) {
+        if (alreadyAnswered) return
+        val deadline = System.currentTimeMillis() + 1_500
+        while (true) {
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) return
+            val item = try {
+                conn.next(remaining)
+            } catch (e: ProtocolException) {
+                return
+            }
+            if ((item as? Connection.Incoming.Control)?.message?.type == "pair.confirm") return
         }
     }
 

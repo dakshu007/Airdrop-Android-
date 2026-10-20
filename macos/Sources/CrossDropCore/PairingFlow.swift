@@ -65,6 +65,7 @@ enum PairingFlow {
             }
         case .declined, .timedOut:
             try? await channel.sendControl(WireMessage.make("pair.confirm", ["accepted": false]))
+            await drainPeerAnswer(peerAnswer)
             throw CrossDropError.local(ErrorCode.pairingRejected, outcome == .timedOut ? "timed out" : "declined")
         case .cancelled:
             break
@@ -89,5 +90,18 @@ enum PairingFlow {
         }
         trust.storeTrust(for: peer)
         success = true
+    }
+
+    /// After declining, waits briefly for the peer's own answer before the
+    /// connection is closed. Closing a TCP socket with unread data sends a reset,
+    /// which can discard our decline before the peer reads it, so the peer would
+    /// report a lost connection instead of a declined pairing.
+    private static func drainPeerAnswer(_ peerAnswer: Task<WireMessage, Error>) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { _ = try? await peerAnswer.value }
+            group.addTask { try? await Task.sleep(nanoseconds: 1_500_000_000) }
+            _ = await group.next()
+            group.cancelAll()
+        }
     }
 }
