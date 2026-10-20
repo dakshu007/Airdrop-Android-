@@ -32,7 +32,13 @@ export type IconName =
   | 'arrowUp'
   | 'arrowDown'
   | 'tile'
-  | 'drop';
+  | 'drop'
+  | 'chevronDown'
+  | 'radar'
+  | 'swap'
+  | 'sound'
+  | 'vibrate'
+  | 'cloudOff';
 
 interface IconProps {
   name: IconName;
@@ -212,6 +218,47 @@ export function Icon({ name, size = 24, color, strokeWidth = 1.8 }: IconProps) {
       break;
     case 'plus':
       body = <Path d="M12 5v14M5 12h14" {...s} />;
+      break;
+    case 'chevronDown':
+      body = <Path d="M6 9.5l6 6 6-6" {...s} />;
+      break;
+    case 'radar':
+      body = (
+        <>
+          <Circle cx={12} cy={12} r={2} {...s} />
+          <Path
+            d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19 5a10 10 0 0 1 0 14M5 19A10 10 0 0 1 5 5"
+            {...s}
+          />
+        </>
+      );
+      break;
+    case 'swap':
+      body = <Path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4" {...s} />;
+      break;
+    case 'sound':
+      body = (
+        <Path
+          d="M11 5L6 9H3v6h3l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"
+          {...s}
+        />
+      );
+      break;
+    case 'vibrate':
+      body = (
+        <>
+          <Rect x={8} y={3} width={8} height={18} rx={2} {...s} />
+          <Path d="M4 8v8M20 8v8" {...s} />
+        </>
+      );
+      break;
+    case 'cloudOff':
+      body = (
+        <Path
+          d="M4 15a4 4 0 0 1 2-7.5 5.5 5.5 0 0 1 10.5 1.5A3.5 3.5 0 0 1 17 16H6M3 3l18 18"
+          {...s}
+        />
+      );
       break;
     case 'chevronRight':
       body = <Path d="M9.5 6l6 6-6 6" {...s} />;

@@ -1,13 +1,13 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Frost } from './Frost';
+import { useTheme } from '../theme/ThemeProvider';
 import { Icon, IconName } from './Icon';
 
-/** An icon inside a small round glass lens. */
+/** An icon on a soft mint tile. */
 export function IconBubble({
   name,
   size = 44,
-  color = '#FFFFFF',
+  color,
   background,
 }: {
   name: IconName;
@@ -15,18 +15,28 @@ export function IconBubble({
   color?: string;
   background?: string;
 }) {
+  const t = useTheme();
   return (
-    <View style={[styles.bubble, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Frost radius={size / 2} tint={background ?? 'rgba(255,255,255,0.16)'} />
-      <Icon name={name} size={Math.round(size * 0.46)} color={color} />
+    <View
+      style={[
+        styles.bubble,
+        {
+          width: size,
+          height: size,
+          borderRadius: Math.round(size * 0.32),
+          backgroundColor: background ?? '#E3F5E8',
+        },
+      ]}
+    >
+      <Icon
+        name={name}
+        size={Math.round(size * 0.46)}
+        color={color ?? t.link}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bubble: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
+  bubble: { alignItems: 'center', justifyContent: 'center' },
 });

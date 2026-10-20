@@ -19,12 +19,12 @@ import * as CrossDrop from '../native/crossdrop';
 import { Overlays } from '../overlays/Overlays';
 import { ActivityScreen } from '../screens/ActivityScreen';
 import { DevicesScreen } from '../screens/DevicesScreen';
-import { NearbyScreen } from '../screens/NearbyScreen';
+import { nearbyMode, NearbyScreen } from '../screens/NearbyScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ShareScreen } from '../screens/ShareScreen';
 import { useSnapshot } from '../state/CrossDropProvider';
 import { useDiscovery } from '../state/useDiscovery';
-import { WallpaperFill } from '../theme/Wallpaper';
+import { Backdrop, Mood } from '../theme/Backdrop';
 import { NavigationContext, TabKey } from './NavigationContext';
 import { TabBar } from './TabBar';
 
@@ -43,7 +43,8 @@ function ScreenFor({ tab }: { tab: TabKey }) {
 
 /**
  * Small state-based navigator: four tabs with a fade-and-rise transition, a
- * share-sheet layer that slides over them, and the decision overlays.
+ * share-sheet layer that slides over them, and the full-screen moments
+ * (pairing, incoming files, transfers) on top.
  */
 export function Navigator() {
   const snapshot = useSnapshot();
@@ -112,13 +113,15 @@ export function Navigator() {
   }, [sharing, tab, navigate]);
 
   const nav = useMemo(() => ({ tab, navigate }), [tab, navigate]);
-  const shareOpacity = reduced ? 1 : shareProgress;
   const activeCount =
     snapshot.transfers.filter(tr => !isFinal(tr.status)).length +
     snapshot.offers.length;
+  const mood: Mood =
+    tab === 'nearby' && nearbyMode(snapshot) === 'napping' ? 'off' : 'idle';
 
   return (
     <NavigationContext.Provider value={nav}>
+      <Backdrop mood={mood} />
       <View
         style={styles.flex}
         importantForAccessibility={sharing ? 'no-hide-descendants' : 'auto'}
@@ -153,7 +156,7 @@ export function Navigator() {
           style={[
             StyleSheet.absoluteFill,
             {
-              opacity: shareOpacity,
+              opacity: reduced ? 1 : shareProgress,
               transform: [
                 {
                   translateY: shareProgress.interpolate({
@@ -165,7 +168,7 @@ export function Navigator() {
             },
           ]}
         >
-          <WallpaperFill />
+          <Backdrop mood="idle" />
           <ShareScreen />
         </Animated.View>
       ) : null}

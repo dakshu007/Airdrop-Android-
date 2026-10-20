@@ -152,7 +152,21 @@ class CrossDropModule(private val context: ReactApplicationContext) : NativeCros
 
     override fun clearHistory() = engine.clearHistory()
 
-    override fun setWallpaper(name: String) = engine.setWallpaper(name)
+    override fun setPreference(key: String, value: Boolean) = engine.setPreference(key, value)
+
+    override fun feedback(kind: String) = engine.feedback.perform(kind, context.currentActivity)
+
+    override fun openWifiSettings() {
+        val panel = Intent(Settings.Panel.ACTION_WIFI).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(panel)
+        } catch (e: ActivityNotFoundException) {
+            try {
+                context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (e: ActivityNotFoundException) {
+            }
+        }
+    }
 
     override fun openFile(uri: String) {
         try {

@@ -12,10 +12,20 @@ class Prefs(private val context: Context) {
         get() = sp.getString("deviceName", null)?.takeIf { it.isNotBlank() } ?: defaultName()
         set(value) = sp.edit().putString("deviceName", value.trim().take(64)).apply()
 
-    /** 'auto' (follows light/dark) or a wallpaper name known to the UI. */
-    var wallpaper: String
-        get() = sp.getString("wallpaper", null) ?: "auto"
-        set(value) = sp.edit().putString("wallpaper", value.take(32)).apply()
+    /** Soft sound when a transfer finishes and is verified. */
+    var sound: Boolean
+        get() = sp.getBoolean("sound", true)
+        set(value) = sp.edit().putBoolean("sound", value).apply()
+
+    /** Light haptic ticks for pairing codes and finished transfers. */
+    var haptics: Boolean
+        get() = sp.getBoolean("haptics", true)
+        set(value) = sp.edit().putBoolean("haptics", value).apply()
+
+    /** True once the welcome screen has been dismissed. */
+    var welcomed: Boolean
+        get() = sp.getBoolean("welcomed", false)
+        set(value) = sp.edit().putBoolean("welcomed", value).apply()
 
     var notificationPermissionAsked: Boolean
         get() = sp.getBoolean("notificationAsked", false)

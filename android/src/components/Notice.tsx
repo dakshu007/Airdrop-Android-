@@ -26,7 +26,7 @@ export function Notice({
   const color = {
     warning: t.warning,
     danger: t.danger,
-    info: '#A9CDFF',
+    info: t.link,
   }[tone];
   const tint = {
     warning: t.warningSoft,

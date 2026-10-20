@@ -554,7 +554,25 @@ def render(scene, size=900, cam=(0, 1.3, 6.2), target=(0, 0.9, 0), fov=30.0, ss=
     a = img[..., 3:4]
     out = np.where(a > 1e-4, img[..., :3] / np.maximum(a, 1e-4), 0)
     out = np.concatenate([out, a], -1)
-    return Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8), "RGBA")
+    return soften_edges(Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8), "RGBA"))
+
+
+def soften_edges(img, band=0.16):
+    """Fade the translucent ground shadow out before it reaches the image edge.
+
+    The shadow catcher is an infinite plane, so a long shadow can run off the
+    canvas and show as a straight cut on the app background. Opaque pixels
+    (Drip and props) are left alone.
+    """
+    a = np.asarray(img).astype(np.float32) / 255
+    h, w = a.shape[:2]
+    y, x = np.mgrid[0:h, 0:w]
+    edge = np.minimum(np.minimum(x, w - 1 - x) / w, np.minimum(y, h - 1 - y) / h) / band
+    t = np.clip(edge, 0, 1)
+    fade = t * t * (3 - 2 * t)
+    shadow = a[..., 3] < 0.8
+    a[..., 3] = np.where(shadow, a[..., 3] * fade, a[..., 3])
+    return Image.fromarray((a * 255 + 0.5).astype(np.uint8), "RGBA")
 
 
 # ---------------------------------------------------------------- compositions
@@ -703,6 +721,12 @@ if __name__ == "__main__":
         size = int(sys.argv[sys.argv.index("--size") + 1])
         args = [a for a in args if a != str(size)]
     os.makedirs(OUT, exist_ok=True)
+    if "--soften" in sys.argv:
+        # Re-apply the edge fade to already rendered files: --soften a.png b.png
+        for path in args:
+            soften_edges(Image.open(path).convert("RGBA")).save(path, optimize=True)
+            print("softened", path)
+        sys.exit(0)
     for name in args or SCENES:
         scene, camargs = SCENES[name]()
         img = render(scene, size=size, ss=1 if preview else 2, preview=preview, **camargs)

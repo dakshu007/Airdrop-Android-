@@ -1,29 +1,21 @@
 import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { FileRow } from '../components/FileRow';
-import { Frost } from '../components/Frost';
-import { Icon } from '../components/Icon';
-import { NearbyDeviceList } from '../components/NearbyDeviceList';
-import { Screen } from '../components/Screen';
+import { StyleSheet, View } from 'react-native';
+import { RoundButton } from '../components/Chips';
+import { Logo } from '../components/Logo';
 import { Text } from '../components/Text';
-import { formatBytes, pluralFiles, sumSizes } from '../format';
+import { pluralFiles } from '../format';
 import * as CrossDrop from '../native/crossdrop';
 import type { NearbyDevice } from '../native/types';
 import { useSnapshot } from '../state/CrossDropProvider';
 import { useSendFiles } from '../state/useSendFiles';
-import { useTheme } from '../theme/ThemeProvider';
-import { minTouch, spacing } from '../theme/tokens';
+import { spacing } from '../theme/tokens';
+import { NearbyView, Tray } from './NearbyScreen';
 
-const PREVIEW = 5;
-
-/** Shown when files arrive from the Android share sheet. */
+/** Shown when files arrive from the Android share sheet: pick a device and they go. */
 export function ShareScreen() {
-  const t = useTheme();
   const snapshot = useSnapshot();
   const files = snapshot.shared;
   const { send, busy } = useSendFiles();
-  const { total, unknown } = sumSizes(files);
-  const sizeText = `${formatBytes(total)}${unknown ? '+' : ''}`;
 
   const onSelect = async (device: NearbyDevice) => {
     if (await send(device, files)) {
@@ -31,59 +23,52 @@ export function ShareScreen() {
     }
   };
 
-  const close = (
-    <Pressable
-      onPress={() => CrossDrop.clearSharedFiles()}
-      accessibilityRole="button"
-      accessibilityLabel="Cancel sharing"
-      style={styles.close}
-    >
-      <Frost radius={minTouch / 2} />
-      <Icon name="x" size={22} color={t.textPrimary} />
-    </Pressable>
-  );
-
-  const filesFooter = (
-    <View accessible accessibilityLabel={`${pluralFiles(files.length)}, ${sizeText}`}>
-      {files.slice(0, PREVIEW).map(f => (
-        <FileRow key={f.uri} name={f.name} size={f.size} mime={f.mime} />
-      ))}
-      {files.length > PREVIEW ? (
-        <Text variant="footnote" tone="tertiary" style={styles.more}>
-          and {files.length - PREVIEW} more
-        </Text>
-      ) : null}
+  const header = (
+    <View style={styles.header}>
+      <RoundButton
+        icon="x"
+        label="Cancel sharing"
+        onPress={() => CrossDrop.clearSharedFiles()}
+      />
+      <View style={styles.brand}>
+        <Logo size={24} />
+        <Text variant="headline">CrossDrop</Text>
+      </View>
+      <View style={styles.spacer} />
     </View>
   );
 
   return (
-    <Screen
-      title={`Send ${pluralFiles(files.length)}`}
-      subtitle={`${sizeText} · choose a device`}
-      trailing={close}
-      bottomSpace={spacing.xxl}
-    >
-      <NearbyDeviceList
-        snapshot={snapshot}
-        busy={busy}
-        onSelect={onSelect}
-        heroFooter={filesFooter}
-        actionHint={device =>
-          `Sends ${pluralFiles(files.length)} to ${device.name}`
-        }
-      />
-    </Screen>
+    <NearbyView
+      snapshot={snapshot}
+      files={files}
+      header={header}
+      readyTitle={`Send ${pluralFiles(files.length)}`}
+      onSelect={onSelect}
+      busy={busy}
+      actionHint={device =>
+        `Sends ${pluralFiles(files.length)} to ${device.name}`
+      }
+      footer={
+        <View style={styles.group}>
+          <Tray files={files} />
+          <Text variant="footnote" tone="secondary" center>
+            Tap a device to send
+          </Text>
+        </View>
+      }
+      bottomSpace={spacing.xl}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  close: {
-    width: minTouch,
-    height: minTouch,
-    borderRadius: minTouch / 2,
+  header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
+    justifyContent: 'space-between',
   },
-  more: { marginTop: spacing.xs },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  spacer: { width: 44 },
+  group: { gap: 10 },
 });

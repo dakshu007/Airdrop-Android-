@@ -30,8 +30,8 @@ interface GlassCardProps {
 }
 
 /**
- * Liquid-glass surface: translucent fill, hairline highlight border and a top
- * specular sheen. Pressable cards compress slightly with a spring.
+ * White glass card: translucent fill, bright rim and a top specular sheen.
+ * Pressable cards compress slightly with a spring.
  */
 export function GlassCard({
   children,
@@ -53,7 +53,10 @@ export function GlassCard({
 
   const surface = (
     <View style={[styles.surface, { borderRadius: radius }]}>
-      <Frost radius={radius} tint={strong ? 'rgba(255,255,255,0.08)' : undefined} />
+      <Frost
+        radius={radius}
+        tint={strong ? 'rgba(255,255,255,0.86)' : undefined}
+      />
       {tint ? (
         <View
           pointerEvents="none"
@@ -104,7 +107,7 @@ export function GlassCard({
         accessibilityHint={accessibilityHint}
         accessibilityState={{ disabled: !!disabled, ...accessibilityState }}
         android_ripple={{
-          color: 'rgba(255,255,255,0.14)',
+          color: 'rgba(20,154,91,0.10)',
           borderless: false,
           foreground: true,
         }}

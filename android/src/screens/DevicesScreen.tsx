@@ -133,6 +133,7 @@ export function DevicesScreen() {
         <GlassCard>
           <EmptyState
             icon="shieldCheck"
+            pose="pairing"
             title="No paired devices"
             detail="The first time two devices exchange files, both show the same 6-digit code to confirm. Paired devices appear here."
           />
@@ -155,9 +156,9 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
     borderRadius: 14,
     gap: 2,
-    backgroundColor: 'rgba(6,8,20,0.22)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(240,248,242,0.92)',
+    borderWidth: 1,
+    borderColor: '#E1EEE5',
   },
   switchRow: {
     flexDirection: 'row',

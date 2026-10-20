@@ -1,15 +1,13 @@
 import { useCallback, useState } from 'react';
 import { Alert } from 'react-native';
-import { useNavigation } from '../navigation/NavigationContext';
 import * as CrossDrop from '../native/crossdrop';
 import type { NearbyDevice, SharedFile } from '../native/types';
 
 /**
- * Starts a transfer and moves to Activity, where progress is shown.
+ * Starts a transfer; the transfer stage (overlays/Overlays.tsx) picks it up.
  * Returns `busy` while the native side is accepting the request.
  */
 export function useSendFiles() {
-  const { navigate } = useNavigation();
   const [busy, setBusy] = useState(false);
 
   const send = useCallback(
@@ -20,7 +18,6 @@ export function useSendFiles() {
       setBusy(true);
       try {
         await CrossDrop.sendFiles(device.deviceId, files);
-        navigate('activity');
         return true;
       } catch (e) {
         Alert.alert(
@@ -34,7 +31,7 @@ export function useSendFiles() {
         setBusy(false);
       }
     },
-    [navigate],
+    [],
   );
 
   return { send, busy };

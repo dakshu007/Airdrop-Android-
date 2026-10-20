@@ -8,66 +8,77 @@ import React from 'react';
 import { ActivityIndicator, StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Button } from './src/components/Button';
-import { GlassCard } from './src/components/GlassCard';
-import { IconBubble } from './src/components/IconBubble';
+import { Drip } from './src/components/Drip';
+import { Logo } from './src/components/Logo';
 import { Text } from './src/components/Text';
 import { Navigator } from './src/navigation/Navigator';
+import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { CrossDropProvider, useCrossDrop } from './src/state/CrossDropProvider';
+import { Backdrop } from './src/theme/Backdrop';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { spacing } from './src/theme/tokens';
-import { WallpaperBackdrop } from './src/theme/Wallpaper';
 
 function Root() {
   const t = useTheme();
   const { snapshot, loadError, reload } = useCrossDrop();
 
   let content: React.ReactNode;
-  if (snapshot) {
+  if (snapshot && !snapshot.prefs.welcomed) {
+    content = (
+      <>
+        <Backdrop mood="idle" />
+        <WelcomeScreen />
+      </>
+    );
+  } else if (snapshot) {
     content = <Navigator />;
   } else if (loadError) {
     content = (
-      <View style={styles.center}>
-        <GlassCard style={styles.card}>
-          <View style={styles.cardInner}>
-            <IconBubble
-              name="alert"
-              size={56}
-              color={t.danger}
-              background={t.dangerSoft}
-            />
-            <Text variant="title" center>
-              CrossDrop couldn’t start
-            </Text>
-            <Text variant="callout" tone="secondary" center>
-              The transfer engine didn’t respond. Try again; if it keeps
-              happening, restart the app.
-            </Text>
-            <Button title="Try again" icon="refresh" onPress={reload} />
-          </View>
-        </GlassCard>
-      </View>
+      <>
+        <Backdrop mood="failed" />
+        <View style={styles.center}>
+          <Drip pose="failed" size={220} motion="wobble" />
+          <Text variant="title" center accessibilityRole="header">
+            CrossDrop couldn’t start
+          </Text>
+          <Text variant="callout" tone="secondary" center>
+            The transfer engine didn’t respond. Try again; if it keeps
+            happening, restart the app.
+          </Text>
+          <Button
+            title="Try again"
+            icon="refresh"
+            large
+            onPress={reload}
+            style={styles.stretch}
+          />
+        </View>
+      </>
     );
   } else {
     content = (
-      <View
-        style={styles.center}
-        accessible
-        accessibilityLabel="Starting CrossDrop"
-      >
-        <IconBubble name="drop" size={72} />
-        <Text variant="title" center>
-          CrossDrop
-        </Text>
-        <ActivityIndicator color={t.textSecondary} />
-      </View>
+      <>
+        <Backdrop mood="idle" />
+        <View
+          style={styles.center}
+          accessible
+          accessibilityLabel="Starting CrossDrop"
+        >
+          <Logo size={64} />
+          <Text variant="title" center>
+            CrossDrop
+          </Text>
+          <ActivityIndicator color={t.link} />
+        </View>
+      </>
     );
   }
 
   return (
-    <WallpaperBackdrop choice={snapshot?.wallpaper}>
-      <StatusBar barStyle="light-content" />
+    <View style={[styles.flex, { backgroundColor: t.background }]}>
+      <StatusBar barStyle="dark-content" />
       {content}
-    </WallpaperBackdrop>
+    </View>
   );
 }
 
@@ -92,6 +103,5 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.xl,
   },
-  card: { alignSelf: 'stretch' },
-  cardInner: { alignItems: 'center', gap: spacing.md, padding: spacing.sm },
+  stretch: { alignSelf: 'stretch' },
 });

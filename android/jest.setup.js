@@ -48,5 +48,15 @@ jest.mock('./specs/NativeCrossDrop', () => ({
     openDownloads: jest.fn(),
     requestNotificationPermission: jest.fn(() => Promise.resolve('granted')),
     openAppSettings: jest.fn(),
+    openWifiSettings: jest.fn(),
+    setPreference: jest.fn(),
+    feedback: jest.fn(),
   },
 }));
+
+// Run with Reduce motion on: every animation takes its static path, so tests
+// don't depend on looping native-driver animations the test renderer can't drive.
+const { AccessibilityInfo } = require('react-native');
+jest
+  .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
+  .mockImplementation(() => Promise.resolve(true));

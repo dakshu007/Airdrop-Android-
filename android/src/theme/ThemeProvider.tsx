@@ -1,12 +1,12 @@
 import React, { createContext, useContext } from 'react';
-import { glassPalette, Palette } from './tokens';
+import { mintPalette, Palette } from './tokens';
 
-const ThemeContext = createContext<Palette>(glassPalette);
+const ThemeContext = createContext<Palette>(mintPalette);
 
-/** Provides the glass palette. Appearance (light/dark) only changes the default wallpaper. */
+/** Provides the Mint Air palette. A dark "night mint" variant is planned, not built yet. */
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   return (
-    <ThemeContext.Provider value={glassPalette}>
+    <ThemeContext.Provider value={mintPalette}>
       {children}
     </ThemeContext.Provider>
   );

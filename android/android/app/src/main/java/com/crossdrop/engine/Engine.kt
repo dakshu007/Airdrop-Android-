@@ -27,6 +27,7 @@ import com.crossdrop.core.fingerprint
 import com.crossdrop.discovery.DiscoveredDevice
 import com.crossdrop.discovery.NsdAdvertiser
 import com.crossdrop.discovery.NsdDiscovery
+import com.crossdrop.feedback.Feedback
 import com.crossdrop.identity.KeystoreIdentity
 import com.crossdrop.network.NetworkMonitor
 import com.crossdrop.notifications.Notifier
@@ -58,6 +59,7 @@ class Engine private constructor(private val app: Context) {
     private val workers = Executors.newCachedThreadPool { r -> Thread(r, "crossdrop-transfer").apply { isDaemon = true } }
 
     val prefs = Prefs(app)
+    val feedback = Feedback(app, prefs)
     val identity = KeystoreIdentity.loadOrCreate()
     val trust = TrustRepository(app)
     val history = HistoryRepository(app)
@@ -480,9 +482,14 @@ class Engine private constructor(private val app: Context) {
         changed()
     }
 
-    fun setWallpaper(name: String) {
-        if (!name.matches(Regex("^[a-z]{1,32}$"))) return
-        prefs.wallpaper = name
+    /** Known keys: 'sound', 'haptics', 'welcomed'. Unknown keys are ignored. */
+    fun setPreference(key: String, value: Boolean) {
+        when (key) {
+            "sound" -> prefs.sound = value
+            "haptics" -> prefs.haptics = value
+            "welcomed" -> prefs.welcomed = value
+            else -> return
+        }
         changed()
     }
 

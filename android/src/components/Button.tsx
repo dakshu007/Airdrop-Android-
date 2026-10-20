@@ -10,9 +10,8 @@ import {
 } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { minTouch, radii, spacing } from '../theme/tokens';
-import { Icon, IconName } from './Icon';
 import { Frost } from './Frost';
-import { Specular } from './Specular';
+import { Icon, IconName } from './Icon';
 import { Text } from './Text';
 
 type Kind = 'primary' | 'secondary' | 'destructive' | 'plain';
@@ -25,12 +24,18 @@ interface ButtonProps {
   disabled?: boolean;
   loading?: boolean;
   compact?: boolean;
+  /** The tall pill used for a screen's main action. */
+  large?: boolean;
   style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
   accessibilityHint?: string;
   testID?: string;
 }
 
+/**
+ * Primary is the black pill; secondary is white glass; plain is a green link.
+ * Buttons compress slightly with a spring when pressed.
+ */
 export function Button({
   title,
   onPress,
@@ -39,6 +44,7 @@ export function Button({
   disabled,
   loading,
   compact,
+  large,
   style,
   accessibilityLabel,
   accessibilityHint,
@@ -55,36 +61,26 @@ export function Button({
     }).start();
 
   const palette = {
-    primary: {
-      bg: '#FFFFFF',
-      fg: t.onAccent,
-      border: 'rgba(255,255,255,0.9)',
-      tone: 'onAccent' as const,
-    },
+    primary: { bg: t.accent, fg: t.onAccent, tone: 'onAccent' as const },
     secondary: {
       bg: 'transparent',
       fg: t.textPrimary,
-      border: 'transparent',
       tone: 'primary' as const,
     },
-    destructive: {
-      bg: t.dangerSoft,
-      fg: t.danger,
-      border: t.glassBorder,
-      tone: 'danger' as const,
-    },
-    plain: {
-      bg: 'transparent',
-      fg: '#A9CDFF',
-      border: 'transparent',
-      tone: 'accent' as const,
-    },
+    destructive: { bg: t.dangerSoft, fg: t.danger, tone: 'danger' as const },
+    plain: { bg: 'transparent', fg: t.link, tone: 'accent' as const },
   }[kind];
   const inactive = disabled || loading;
+  const height = large ? 58 : compact ? minTouch - 4 : 54;
 
   return (
     <Animated.View
-      style={[{ transform: [{ scale }] }, inactive && styles.disabled, style]}
+      style={[
+        { transform: [{ scale }] },
+        kind === 'primary' && !inactive && styles.lift,
+        inactive && styles.disabled,
+        style,
+      ]}
     >
       <Pressable
         onPress={onPress}
@@ -95,29 +91,37 @@ export function Button({
         accessibilityLabel={accessibilityLabel ?? title}
         accessibilityHint={accessibilityHint}
         accessibilityState={{ disabled: !!inactive, busy: !!loading }}
-        android_ripple={{ color: kind === 'primary' ? 'rgba(18,22,41,0.12)' : 'rgba(255,255,255,0.18)', foreground: true }}
+        android_ripple={{
+          color:
+            kind === 'primary'
+              ? 'rgba(255,255,255,0.14)'
+              : 'rgba(20,154,91,0.10)',
+          foreground: true,
+        }}
         testID={testID}
         style={[
           styles.base,
+          { minHeight: height, backgroundColor: palette.bg },
           compact ? styles.compact : styles.regular,
-          { backgroundColor: palette.bg, borderColor: palette.border },
         ]}
       >
-        {kind === 'secondary' ? (
-          <Frost radius={compact ? 20 : 24} tint="rgba(255,255,255,0.16)" />
-        ) : kind === 'primary' ? (
-          <Specular color="rgba(120,140,255,0.10)" />
-        ) : null}
+        {kind === 'secondary' ? <Frost radius={radii.pill} /> : null}
         <View style={styles.row}>
           {loading ? (
             <ActivityIndicator color={palette.fg} size="small" />
           ) : icon ? (
-            <Icon name={icon} size={compact ? 18 : 20} color={palette.fg} />
+            <Icon
+              name={icon}
+              size={compact ? 17 : 19}
+              color={palette.fg}
+              strokeWidth={2}
+            />
           ) : null}
           <Text
             variant={compact ? 'subhead' : 'headline'}
             tone={palette.tone}
             center
+            style={large ? styles.largeText : undefined}
           >
             {title}
           </Text>
@@ -129,19 +133,26 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: minTouch,
     borderRadius: radii.pill,
-    borderWidth: 1,
     overflow: 'hidden',
     justifyContent: 'center',
   },
-  regular: { paddingHorizontal: spacing.xl, paddingVertical: spacing.sm },
-  compact: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
+  regular: { paddingHorizontal: spacing.xl, paddingVertical: spacing.xs },
+  compact: { paddingHorizontal: spacing.md, paddingVertical: spacing.xxs },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.xs,
   },
-  disabled: { opacity: 0.5 },
+  largeText: { fontSize: 17 },
+  lift: {
+    borderRadius: radii.pill,
+    shadowColor: '#0F1D16',
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  disabled: { opacity: 0.45 },
 });

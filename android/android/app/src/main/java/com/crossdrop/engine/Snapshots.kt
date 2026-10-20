@@ -101,7 +101,11 @@ object Snapshots {
             "notificationPermission" to NotificationPermissions.status(engine.appContext, engine.prefs),
             "destinationLabel" to MediaStoreStorage.LABEL,
             "appVersion" to Engine.APP_VERSION,
-            "wallpaper" to engine.prefs.wallpaper,
+            "prefs" to linkedMapOf(
+                "sound" to engine.prefs.sound,
+                "haptics" to engine.prefs.haptics,
+                "welcomed" to engine.prefs.welcomed,
+            ),
         )
         return Json.write(map)
     }

@@ -6,7 +6,11 @@
 
 export type Platform = 'android' | 'macos';
 
-export type NotificationPermission = 'granted' | 'denied' | 'undetermined' | 'notRequired';
+export type NotificationPermission =
+  | 'granted'
+  | 'denied'
+  | 'undetermined'
+  | 'notRequired';
 
 export interface LocalDevice {
   deviceId: string;
@@ -121,7 +125,7 @@ export interface IncomingOffer {
   peerId: string;
   peerName: string;
   peerPlatform: Platform;
-  files: {name: string; size: number; mime: string | null}[];
+  files: { name: string; size: number; mime: string | null }[];
   totalBytes: number;
   expiresAt: number;
 }
@@ -132,7 +136,7 @@ export interface HistoryEntry {
   peerName: string;
   peerPlatform: Platform;
   status: 'completed' | 'failed' | 'cancelled' | 'rejected';
-  files: {name: string; size: number; uri: string | null}[];
+  files: { name: string; size: number; uri: string | null }[];
   totalBytes: number;
   finishedAt: number;
   errorCode: string | null;
@@ -145,6 +149,20 @@ export interface SharedFile {
   size: number | null;
   mime: string | null;
 }
+
+export interface Preferences {
+  /** Soft sound when a transfer finishes and is verified. */
+  sound: boolean;
+  /** Light haptic ticks for pairing codes and finished transfers. */
+  haptics: boolean;
+  /** True once the welcome screen has been dismissed. */
+  welcomed: boolean;
+}
+
+export type PreferenceKey = keyof Preferences;
+
+/** 'tick' when a code digit lands, 'confirm' for a confirmed code, 'done' and 'error' when a transfer ends. */
+export type FeedbackKind = 'tick' | 'confirm' | 'done' | 'error';
 
 export interface Snapshot {
   local: LocalDevice;
@@ -166,6 +184,6 @@ export interface Snapshot {
   destinationLabel: string;
   /** Native app version, e.g. "0.1.0". */
   appVersion: string;
-  /** Chosen wallpaper: 'auto' (follows light/dark) or a name from theme/Wallpaper.tsx. */
-  wallpaper: string;
+  /** Local preferences; nothing here leaves the device. */
+  prefs: Preferences;
 }

@@ -35,8 +35,12 @@ export interface Spec extends TurboModule {
   /** Resolves to a NotificationPermission value. */
   requestNotificationPermission(): Promise<string>;
   openAppSettings(): void;
-  /** Persists the wallpaper choice ('auto' or a wallpaper name). */
-  setWallpaper(name: string): void;
+  /** Persists a local preference: 'sound' | 'haptics' | 'welcomed'. */
+  setPreference(key: string, value: boolean): void;
+  /** 'tick' | 'confirm' | 'done' | 'error'. Honours the sound and haptics preferences. */
+  feedback(kind: string): void;
+  /** Opens the system Wi-Fi panel (or Wi-Fi settings). */
+  openWifiSettings(): void;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('CrossDrop');

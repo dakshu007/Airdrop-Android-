@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { Animated, Pressable, StyleSheet, View } from 'react-native';
 import { platformLabel } from '../copy';
 import type { NearbyDevice } from '../native/types';
-import { radii, selectedFill, spacing } from '../theme/tokens';
+import { green, radii, spacing } from '../theme/tokens';
 import { Icon } from './Icon';
 import { IconBubble } from './IconBubble';
 import { Text } from './Text';
@@ -15,12 +15,23 @@ interface DeviceRowProps {
   disabled?: boolean;
 }
 
-/** A nearby device as a row in a glass panel; pressing darkens it like a pressed glass key. */
-export function DeviceRow({ device, onPress, actionHint, disabled }: DeviceRowProps) {
+/** A nearby device as a row; pressing tints it mint. */
+export function DeviceRow({
+  device,
+  onPress,
+  actionHint,
+  disabled,
+}: DeviceRowProps) {
   const pressed = useRef(new Animated.Value(0)).current;
   const to = (v: number) =>
-    Animated.timing(pressed, { toValue: v, duration: v ? 90 : 220, useNativeDriver: true }).start();
-  const status = device.trusted ? 'Paired · tap to send' : 'New · you’ll confirm a code';
+    Animated.timing(pressed, {
+      toValue: v,
+      duration: v ? 90 : 220,
+      useNativeDriver: true,
+    }).start();
+  const status = device.trusted
+    ? 'Paired · tap to send'
+    : 'New · you’ll confirm a code';
   return (
     <Pressable
       onPress={onPress}
@@ -35,8 +46,14 @@ export function DeviceRow({ device, onPress, actionHint, disabled }: DeviceRowPr
       accessibilityState={{ disabled: !!disabled }}
       style={styles.row}
     >
-      <Animated.View pointerEvents="none" style={[styles.pressed, { opacity: pressed }]} />
-      <IconBubble name={device.platform === 'macos' ? 'laptop' : 'phone'} size={46} />
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.pressed, { opacity: pressed }]}
+      />
+      <IconBubble
+        name={device.platform === 'macos' ? 'laptop' : 'phone'}
+        size={46}
+      />
       <View style={styles.text}>
         <Text variant="headline" numberOfLines={1}>
           {device.name}
@@ -49,7 +66,7 @@ export function DeviceRow({ device, onPress, actionHint, disabled }: DeviceRowPr
         </View>
       </View>
       <View style={styles.go}>
-        <Icon name="send" size={18} color="#121629" strokeWidth={2} />
+        <Icon name="send" size={18} color="#FFFFFF" strokeWidth={2} />
       </View>
     </Pressable>
   );
@@ -72,16 +89,16 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     borderRadius: radii.sm + 2,
-    backgroundColor: selectedFill,
+    backgroundColor: 'rgba(20,154,91,0.10)',
   },
   text: { flex: 1, gap: 1 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#6EEBA0' },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: green },
   go: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0F1D16',
     alignItems: 'center',
     justifyContent: 'center',
   },

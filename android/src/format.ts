@@ -63,6 +63,23 @@ export function formatEta(seconds: number): string {
   return m === 0 ? `About ${h} h left` : `About ${h} h ${m} min left`;
 }
 
+/** Compact estimate for a small stat tile: "<5 s", "~9 s", "~3 min", "~1 h 20 min". */
+export function formatEtaShort(seconds: number): string {
+  if (seconds < 5) {
+    return '<5 s';
+  }
+  if (seconds < 60) {
+    return `~${Math.round(seconds)} s`;
+  }
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `~${minutes} min`;
+  }
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `~${h} h` : `~${h} h ${m} min`;
+}
+
 const MONTHS = [
   'Jan',
   'Feb',

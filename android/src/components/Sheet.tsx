@@ -23,7 +23,7 @@ interface SheetProps {
 }
 
 /**
- * Bottom sheet for decisions (pairing, incoming files). It slides up with a
+ * Bottom sheet (e.g. the full list of nearby devices). It slides up with a
  * spring; reduced motion shows it with a plain fade.
  */
 export function Sheet({
@@ -76,9 +76,7 @@ export function Sheet({
       navigationBarTranslucent
       onRequestClose={onRequestClose}
     >
-      <Animated.View
-        style={[styles.scrim, { backgroundColor: 'rgba(4,5,14,0.55)', opacity: progress }]}
-      />
+      <Animated.View style={[styles.scrim, { opacity: progress }]} />
       <View style={styles.anchor} pointerEvents="box-none">
         <Animated.View
           accessibilityViewIsModal
@@ -93,7 +91,7 @@ export function Sheet({
             },
           ]}
         >
-          <Frost radius={SHEET_RADIUS} tint="rgba(8,10,26,0.16)" />
+          <Frost radius={SHEET_RADIUS} tint="rgba(255,255,255,0.94)" />
           <View style={styles.grabber} />
           <ScrollView bounces={false} contentContainerStyle={styles.content}>
             {children}
@@ -105,7 +103,14 @@ export function Sheet({
 }
 
 const styles = StyleSheet.create({
-  scrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  scrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15,29,22,0.32)',
+  },
   anchor: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
     borderRadius: SHEET_RADIUS,
@@ -119,7 +124,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     alignSelf: 'center',
     marginBottom: spacing.xs,
-    backgroundColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: '#C7DDCD',
   },
   content: {
     paddingHorizontal: spacing.xl,

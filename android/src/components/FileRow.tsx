@@ -18,8 +18,8 @@ export function FileRow({ name, size, mime, onRemove }: FileRowProps) {
   const sizeText = size === null ? 'Size unknown' : formatBytes(size);
   return (
     <View style={styles.row}>
-      <View style={[styles.thumb, { backgroundColor: t.track }]}>
-        <Icon name={iconForMime(mime)} size={20} color={t.textSecondary} />
+      <View style={styles.thumb}>
+        <Icon name={iconForMime(mime)} size={20} color={t.link} />
       </View>
       <View
         style={styles.text}
@@ -56,9 +56,10 @@ const styles = StyleSheet.create({
     minHeight: minTouch,
   },
   thumb: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },

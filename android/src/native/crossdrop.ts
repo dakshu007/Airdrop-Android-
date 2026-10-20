@@ -1,6 +1,12 @@
 import { DeviceEventEmitter, EmitterSubscription } from 'react-native';
 import NativeCrossDrop from '../../specs/NativeCrossDrop';
-import type { NotificationPermission, SharedFile, Snapshot } from './types';
+import type {
+  FeedbackKind,
+  NotificationPermission,
+  PreferenceKey,
+  SharedFile,
+  Snapshot,
+} from './types';
 
 /** Typed wrapper around the CrossDrop TurboModule. */
 
@@ -66,4 +72,8 @@ export const clearHistory = () => NativeCrossDrop.clearHistory();
 export const openFile = (uri: string) => NativeCrossDrop.openFile(uri);
 export const openDownloads = () => NativeCrossDrop.openDownloads();
 export const openAppSettings = () => NativeCrossDrop.openAppSettings();
-export const setWallpaper = (name: string) => NativeCrossDrop.setWallpaper(name);
+export const openWifiSettings = () => NativeCrossDrop.openWifiSettings();
+export const setPreference = (key: PreferenceKey, value: boolean) =>
+  NativeCrossDrop.setPreference(key, value);
+/** Haptics and the done sound; the engine applies the user's preferences. */
+export const feedback = (kind: FeedbackKind) => NativeCrossDrop.feedback(kind);

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { useTheme } from '../theme/ThemeProvider';
+import { green } from '../theme/tokens';
 
 interface ProgressBarProps {
   /** 0…1 */
@@ -61,7 +62,7 @@ export function ProgressBar({
         style={[
           styles.fill,
           {
-            backgroundColor: color ?? t.accent,
+            backgroundColor: color ?? green,
             opacity: fillOpacity,
             transform: [{ translateX }],
           },

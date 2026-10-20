@@ -135,6 +135,7 @@ export function ActivityScreen() {
         <GlassCard>
           <EmptyState
             icon="inbox"
+            pose="welcome"
             title="No transfers yet"
             detail="Files you send or receive appear here. The history is stored only on this phone."
           />

@@ -1,17 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, View } from 'react-native';
+import React from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Icon, IconName } from '../components/Icon';
 import { Frost } from '../components/Frost';
+import { Icon, IconName } from '../components/Icon';
 import { Text } from '../components/Text';
-import { useReducedMotion } from '../hooks/useReducedMotion';
 import { useTheme } from '../theme/ThemeProvider';
-import { minTouch, radii, selectedFill, spacing } from '../theme/tokens';
+import { spacing } from '../theme/tokens';
 import type { TabKey } from './NavigationContext';
 
 export const TABS: { key: TabKey; label: string; icon: IconName }[] = [
-  { key: 'nearby', label: 'Nearby', icon: 'send' },
-  { key: 'activity', label: 'Activity', icon: 'inbox' },
+  { key: 'nearby', label: 'Nearby', icon: 'radar' },
+  { key: 'activity', label: 'Activity', icon: 'swap' },
   { key: 'devices', label: 'Devices', icon: 'devices' },
   { key: 'settings', label: 'Settings', icon: 'settings' },
 ];
@@ -22,30 +21,10 @@ interface TabBarProps {
   badges: Partial<Record<TabKey, number>>;
 }
 
-/** Floating glass pill with a sliding selection lens. */
+/** Floating white glass pill; the current tab sits in a mint circle with its name beneath. */
 export function TabBar({ current, onSelect, badges }: TabBarProps) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const reduced = useReducedMotion();
-  const [width, setWidth] = useState(0);
-  const index = TABS.findIndex(tab => tab.key === current);
-  const position = useRef(new Animated.Value(index)).current;
-  const itemWidth = width / TABS.length;
-
-  useEffect(() => {
-    if (reduced) {
-      position.setValue(index);
-    } else {
-      Animated.spring(position, {
-        toValue: index,
-        useNativeDriver: true,
-        speed: 18,
-        bounciness: 7,
-      }).start();
-    }
-  }, [index, position, reduced]);
-
-
   return (
     <View
       pointerEvents="box-none"
@@ -53,36 +32,13 @@ export function TabBar({ current, onSelect, badges }: TabBarProps) {
         styles.anchor,
         {
           paddingBottom: Math.max(insets.bottom, spacing.sm) + spacing.xs,
-          paddingLeft: insets.left + spacing.lg,
-          paddingRight: insets.right + spacing.lg,
+          paddingLeft: insets.left + spacing.xl,
+          paddingRight: insets.right + spacing.xl,
         },
       ]}
     >
-      <View
-        accessibilityRole="tablist"
-        onLayout={e => setWidth(e.nativeEvent.layout.width - 14)}
-        style={styles.bar}
-      >
-        <Frost radius={radii.lg} tint="rgba(255,255,255,0.14)" />
-        {width > 0 ? (
-          <Animated.View
-            style={[
-              styles.lens,
-              {
-                width: itemWidth,
-                backgroundColor: selectedFill,
-                transform: [
-                  {
-                    translateX: position.interpolate({
-                      inputRange: [0, TABS.length - 1],
-                      outputRange: [0, itemWidth * (TABS.length - 1)],
-                    }),
-                  },
-                ],
-              },
-            ]}
-          />
-        ) : null}
+      <View accessibilityRole="tablist" style={styles.bar}>
+        <Frost radius={26} tint="rgba(255,255,255,0.96)" />
         {TABS.map(tab => {
           const selected = tab.key === current;
           const badge = badges[tab.key] ?? 0;
@@ -97,39 +53,31 @@ export function TabBar({ current, onSelect, badges }: TabBarProps) {
               accessibilityState={{ selected }}
               style={styles.item}
             >
-              <View>
+              <View
+                style={[
+                  styles.lens,
+                  selected && { backgroundColor: t.accentSoft },
+                ]}
+              >
                 <Icon
                   name={tab.icon}
                   size={22}
-                  color={selected ? '#FFFFFF' : t.textSecondary}
+                  color={selected ? t.textPrimary : t.textTertiary}
+                  strokeWidth={selected ? 2 : 1.8}
                 />
                 {badge > 0 ? (
-                  <View
-                    style={[
-                      styles.badge,
-                      {
-                        backgroundColor: '#FF6B6B',
-                        borderColor: 'rgba(255,255,255,0.9)',
-                      },
-                    ]}
-                  >
+                  <View style={styles.badge}>
                     <Text
                       variant="caption"
+                      tone="onAccent"
                       maxFontSizeMultiplier={1.3}
+                      style={styles.badgeText}
                     >
                       {badge > 9 ? '9+' : badge}
                     </Text>
                   </View>
                 ) : null}
               </View>
-              <Text
-                variant="caption"
-                tone={selected ? 'primary' : 'secondary'}
-                numberOfLines={1}
-                maxFontSizeMultiplier={1.4}
-              >
-                {tab.label}
-              </Text>
             </Pressable>
           );
         })}
@@ -142,33 +90,43 @@ const styles = StyleSheet.create({
   anchor: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   bar: {
     flexDirection: 'row',
-    borderRadius: radii.lg,
-    padding: 6,
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    height: 64,
+    borderRadius: 26,
+    paddingHorizontal: 10,
     overflow: 'hidden',
-  },
-  lens: {
-    position: 'absolute',
-    top: 6,
-    bottom: 6,
-    left: 6,
-    borderRadius: radii.lg - 6,
+    shadowColor: '#185434',
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
   },
   item: {
     flex: 1,
-    minHeight: minTouch + 8,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
-    paddingVertical: spacing.xxs,
+    minHeight: 56,
+  },
+  lens: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   badge: {
     position: 'absolute',
-    top: -6,
-    right: -12,
+    top: 4,
+    right: 2,
     minWidth: 18,
+    height: 18,
     paddingHorizontal: 4,
     borderRadius: 9,
+    backgroundColor: '#149A5B',
     borderWidth: 1.5,
+    borderColor: '#FFFFFF',
     alignItems: 'center',
+    justifyContent: 'center',
   },
+  badgeText: { fontSize: 10.5, lineHeight: 13 },
 });

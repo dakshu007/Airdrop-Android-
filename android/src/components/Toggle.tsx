@@ -6,7 +6,7 @@ const W = 54;
 const H = 32;
 const KNOB = 26;
 
-/** Glass switch: frosted track when off, soft green when on, white knob with a spring. */
+/** Switch: soft grey-green track when off, brand green when on, white knob with a spring. */
 export function Toggle({
   value,
   onValueChange,
@@ -53,11 +53,11 @@ export function Toggle({
           {
             backgroundColor: v.interpolate({
               inputRange: [0, 1],
-              outputRange: ['rgba(255,255,255,0.16)', 'rgba(76,217,128,0.95)'],
+              outputRange: ['#D5E2D9', '#149A5B'],
             }),
             borderColor: v.interpolate({
               inputRange: [0, 1],
-              outputRange: ['rgba(255,255,255,0.38)', 'rgba(170,255,200,0.7)'],
+              outputRange: ['#C4D6CA', '#149A5B'],
             }),
           },
         ]}
