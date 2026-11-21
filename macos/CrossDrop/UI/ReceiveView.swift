@@ -77,6 +77,7 @@ struct ReceiveToggleCard: View {
             }
             .legibleText()
             Spacer(minLength: 0)
+        }
         .padding(CDSpacing.xl)
         .glassPanel(cornerRadius: CDRadius.panel)
         .overlay(alignment: .bottomLeading) {
