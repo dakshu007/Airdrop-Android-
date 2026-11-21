@@ -218,7 +218,11 @@ class CrossDropServer(
                     "pair.request" -> {
                         val mine = msg.optString("token", 64)?.let { pairingTokens.redeem(it) }
                         if (untrusted && mine == null && privateMode()) throw ProtocolException(ErrorCode.NOT_RECEIVING, "paired devices only")
-                        Pairing.run(conn, hs, Role.RECEIVER, events, trust, mine?.let { AutoPair(it) })
+                        // Already paired with this exact key (the sender forgot us): confirm without asking
+                        // again, keeping the existing auto-accept choice. The sender still compares codes.
+                        val known = trust.get(hs.peer.deviceId)?.takeIf { it.identityKey.contentEquals(hs.peer.identityKey) }
+                        val auto = mine?.let { AutoPair(it) } ?: known?.let { AutoPair(it.autoAccept) }
+                        Pairing.run(conn, hs, Role.RECEIVER, events, trust, auto)
                         paired = true
                     }
                     "transfer.offer" -> {

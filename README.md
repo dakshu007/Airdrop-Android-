@@ -22,16 +22,28 @@ unless a release key is configured; see [docs/release-process.md](docs/release-p
 
 ## How it works
 
-1. Turn on **Receiving** on the device that should get files.
-2. On the other device, pick files (Android share sheet, or drag onto the Mac
-   window) and choose the receiver from the nearby list.
-3. The first time, both screens show the same 6-digit code. Check that it
-   matches and confirm on both devices.
-4. The receiver accepts the files. Each file is checked with SHA-256 before it
-   appears in Downloads; nothing is ever overwritten.
+1. Pair once: on the Mac choose **Pair a phone** and scan the QR code with
+   CrossDrop on the phone, or send something and compare the 6-digit code on
+   both screens. Tick **This is my device** and its files arrive without asking.
+2. Choose who can send to you: **My devices** (always ready for paired devices,
+   invisible to everyone else), **Everyone** (anyone nearby, for 10 minutes on
+   Android) or **Off**.
+3. Send: Android share sheet (recent devices appear right in it), drag onto the
+   Mac window or onto the menu bar icon, Finder › Services › Send with CrossDrop,
+   or pick files and folders in the app. Send to several devices at once.
+4. Each file is checked with SHA-256 before it appears in Downloads; nothing is
+   ever overwritten. A transfer that drops mid-way continues where it stopped
+   when you send it again.
+
+Beyond files: send a **link** and it opens on the Mac (on the phone, one tap
+opens it); send the **clipboard** from the Mac panel, the app, or the "Send
+clipboard" Quick Settings tile. Optional: a notification offering to send each
+new screenshot to the device you used last.
 
 Both devices must be on the same Wi-Fi network and that network must allow
-devices to talk to each other (many guest networks don't).
+devices to talk to each other (many guest networks don't). QR pairing carries
+the Mac's address, and paired devices remember the last address that worked,
+so they can often still connect where discovery is blocked.
 [More on network limitations](docs/macos-networking-limitations.md).
 
 ## Repository

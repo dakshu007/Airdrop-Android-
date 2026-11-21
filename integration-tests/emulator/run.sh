@@ -261,9 +261,9 @@ if [ -n "$PORT" ]; then
   "$CLI" send --host 127.0.0.1 --port 47123 --identity "$WORK/id" --name "Daksh’s MacBook Pro" --platform macos \
     "$WORK/Holiday-Video.mp4" > "$OUT/cli-send-2.log" 2>&1 &
   CLI_PID=$!
-  # The CLI keeps no trust between runs, so it pairs again first.
-  ui tap "Codes match" 30 >/dev/null && ok "codes match (second)" || fail "codes match (second)"
-  ui tap "Accept" 30 >/dev/null && ok "accept second" || fail "accept second"
+  # The CLI keeps no trust between runs, so it asks to pair again; the phone already
+  # trusts its key and confirms without a prompt.
+  ui tap "Accept" 40 >/dev/null && ok "accept second (no new pairing prompt)" || fail "accept second"
   sleep 2
   kill "$CLI_PID" 2>/dev/null
   ui wait "That didn’t go through" 40 >/dev/null && ok "failed screen" || fail "failed screen"
@@ -275,6 +275,82 @@ if [ -n "$PORT" ]; then
   [ -n "${TAB[Activity]:-}" ] && tap_xy ${TAB[Activity]}
   sleep 2
   shot 16-activity-after
+  # shellcheck disable=SC2086
+  [ -n "${TAB[Nearby]:-}" ] && tap_xy ${TAB[Nearby]}
+  sleep 2
+
+  # ---------------------------------------------------------------- v1 extensions (§9)
+  step "resume (same file again continues where it stopped)"
+  "$CLI" send --host 127.0.0.1 --port 47123 --identity "$WORK/id" --name "Daksh’s MacBook Pro" --platform macos \
+    "$WORK/Holiday-Video.mp4" > "$OUT/cli-send-3.log" 2>&1 &
+  CLI_PID=$!
+  ui tap "Accept" 40 >/dev/null && ok "accept resumed" || fail "accept resumed"
+  ui wait "All done!" 120 >/dev/null && ok "resumed done" || fail "resumed done"
+  timeout 60 tail --pid="$CLI_PID" -f /dev/null
+  check "sender skipped the bytes the phone kept" grep -q '^RESUMED ' "$OUT/cli-send-3.log"
+  grep '^RESUMED' "$OUT/cli-send-3.log" | tee -a "$LOG"
+  shot 17-resumed-done
+  ui tap "Done" 10 >/dev/null
+  sleep 2
+
+  step "link from the Mac"
+  "$CLI" send --host 127.0.0.1 --port 47123 --identity "$WORK/id" --name "Daksh’s MacBook Pro" --platform macos \
+    --kind link --text "https://example.com/crossdrop" > "$OUT/cli-send-4.log" 2>&1 &
+  CLI_PID=$!
+  ui wait "wants to send you a link" 40 >/dev/null && ok "link offer" || fail "link offer"
+  shot 18-link-offer
+  ui tap "Accept" 10 >/dev/null && ok "accept link" || fail "accept link"
+  ui wait "Open link" 30 >/dev/null && ok "link arrived (not opened by itself)" || fail "link arrived"
+  shot 19-link-received
+  timeout 30 tail --pid="$CLI_PID" -f /dev/null
+  ui tap "Done" 10 >/dev/null
+  sleep 2
+
+  step "folder from the Mac keeps its structure"
+  mkdir -p "$WORK/small"; printf 'day one notes' > "$WORK/small/notes.txt"
+  "$CLI" send --host 127.0.0.1 --port 47123 --identity "$WORK/id" --name "Daksh’s MacBook Pro" --platform macos \
+    --path "Trip/Day 1" "$WORK/small/notes.txt" > "$OUT/cli-send-5.log" 2>&1 &
+  CLI_PID=$!
+  ui tap "Accept" 40 >/dev/null && ok "accept folder" || fail "accept folder"
+  ui wait "All done!" 60 >/dev/null && ok "folder done" || fail "folder done"
+  timeout 30 tail --pid="$CLI_PID" -f /dev/null
+  check "saved under Download/CrossDrop/Trip/Day 1" adb shell ls "'/sdcard/Download/CrossDrop/Trip/Day 1/notes.txt'"
+  ui tap "Done" 10 >/dev/null
+  sleep 2
+
+  step "shared link (share sheet text)"
+  adb shell am start -a android.intent.action.SEND -t text/plain \
+    --es android.intent.extra.TEXT "https://example.com/recipe" -n "$PKG/$ACTIVITY" >/dev/null
+  sleep 4
+  ui wait "Send this link" 10 >/dev/null && ok "link share screen" || fail "link share screen"
+  shot 20-share-link
+  ui tap "Cancel sharing" 8 >/dev/null && ok "cancel link share" || fail "cancel link share"
+  sleep 2
+
+  step "who can send: My devices"
+  xy=$(ui find "Receiving: Receiving from everyone") || xy=$(ui find "Receiving: Everyone") || true
+  if [ -z "${xy:-}" ]; then
+    # The pill label carries the auto-off time; find it by prefix through the text dump.
+    xy=$(python3 "$HERE/ui.py" find-prefix "Receiving: " 2>>"$OUT/ui.log") || true
+  fi
+  # shellcheck disable=SC2086
+  [ -n "${xy:-}" ] && tap_xy $xy
+  ui wait "Who can send to you" 10 >/dev/null && ok "receive mode sheet" || fail "receive mode sheet"
+  shot 21-receive-modes
+  ui tap "My devices" 8 >/dev/null && ok "my devices" || fail "my devices"
+  sleep 3
+  shot 22-home-my-devices
+  "$CLI" send --host 127.0.0.1 --port 47123 --identity "$WORK/stranger" --name "Stranger" --platform macos \
+    "$WORK/small/notes.txt" > "$OUT/cli-send-6.log" 2>&1
+  check "a stranger is refused (not_receiving)" grep -q 'not_receiving' "$OUT/cli-send-6.log"
+  "$CLI" send --host 127.0.0.1 --port 47123 --identity "$WORK/id" --name "Daksh’s MacBook Pro" --platform macos \
+    "$WORK/small/notes.txt" > "$OUT/cli-send-7.log" 2>&1 &
+  CLI_PID=$!
+  ui tap "Accept" 40 >/dev/null && ok "paired device still gets through" || fail "paired device in my-devices mode"
+  ui wait "All done!" 60 >/dev/null || true
+  timeout 30 tail --pid="$CLI_PID" -f /dev/null
+  ui tap "Done" 10 >/dev/null
+  sleep 1
 else
   fail "find listening port"
 fi

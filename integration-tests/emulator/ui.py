@@ -6,6 +6,8 @@
                                 (exit 1 if none)
   ui.py tap   <text> [timeout]  wait for <text>, then tap it
   ui.py wait  <text> [timeout]  wait until <text> is on screen
+  ui.py find-prefix <text>      like find, for the first node whose text or
+                                content-desc starts with <text>
   ui.py texts                   print every visible text / content-desc (debugging)
 
 uiautomator can only dump an idle window, and CrossDrop animates all the time
@@ -84,13 +86,14 @@ def nodes(root):
         yield text, desc, ((x1 + x2) // 2, (y1 + y2) // 2)
 
 
-def find(label):
+def find(label, prefix=False):
     root = dump()
     if root is None:
         return None
     want = label.casefold()
     for text, desc, centre in nodes(root):
-        if want in (text.casefold(), desc.casefold()):
+        values = (text.casefold(), desc.casefold())
+        if (prefix and any(v.startswith(want) for v in values)) or (not prefix and want in values):
             return centre
     return None
 
@@ -119,6 +122,8 @@ def main():
     timeout = float(sys.argv[3]) if len(sys.argv) > 3 else 30.0
     if cmd == "find":
         centre = find(label)
+    elif cmd == "find-prefix":
+        centre = find(label, prefix=True)
     else:
         centre = wait(label, timeout)
     if not centre:
