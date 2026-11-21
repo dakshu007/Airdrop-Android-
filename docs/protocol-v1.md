@@ -77,6 +77,8 @@ be reviewed by a cryptographer before a 1.0 release**. See
   Optional: `m=1` means the device is in "My devices only" mode (§9.5); its
   instance name is then random and browsers should list it only when its `id`
   belongs to a paired device.
+  Optional: `r=<hint>[,<hint>…]` lists up to 4 Drip Room hints (§9.9) for the
+  rooms the device is in. A hint is not a secret and not proof of anything.
 
 * No secrets, no account data and no file metadata are ever put in DNS-SD records.
 * Discovery is **not** authentication. A device that advertises a trusted
@@ -513,6 +515,8 @@ paired with, or from a device presenting a valid QR token (§9.4).
 
 ### 9.6 Limits added by this section
 
+Covers §9.1–§9.9.
+
 | item | limit |
 |---|---|
 | link / text payload | 64 KiB |
@@ -520,3 +524,128 @@ paired with, or from a device presenting a valid QR token (§9.4).
 | `path` depth | 16 folders |
 | QR pairing token lifetime | 5 minutes, single use |
 | kept partial file for resume | 24 hours |
+| capture `requestId` | 8–64 chars of `[A-Za-z0-9-]` |
+| outstanding capture request | 10 minutes, single use, one device |
+| requester waiting for `capture.ack` | human decision timeout (120 s) + 5 s |
+| `expiresAfter` | 60 s – 2 592 000 s (30 days) |
+| Drip Room lifetime | at most 4 hours (+ 5 minutes clock skew when checking a code) |
+| room code URI | 2048 bytes, at most 8 hosts |
+| room hints in TXT `r` | 4 |
+| room joiner waiting for the room-proved `pair.confirm` | 5 s, then codes |
+
+### 9.7 Capture requests ("Take a photo with your phone")
+
+A device can ask a paired device to take a photo (or pick files) and send the
+result back. Typical use: the Mac asks the phone.
+
+* The requester connects as a client, completes the handshake (§4) and, instead
+  of `pair.request` or `transfer.offer`, sends:
+
+  ```json
+  {"type":"capture.request","v":1,"requestId":"<id>","kind":"photo","port":47100}
+  ```
+
+  `requestId` follows the `transferId` rules (8–64 chars of `[A-Za-z0-9-]`);
+  `kind` is `"photo"` (take a new photo) or `"pick"` (choose existing items);
+  the optional `port` (1–65535) is the requester's own listening port for the
+  answer. Anything else in those fields is `bad_message`.
+* The receiver answers `{"type":"capture.ack","v":1,"requestId":"<id>","accepted":true|false}`
+  and the connection closes. Its app decides (it may ask the user first; the
+  requester waits up to the human decision timeout).
+* No pairing happens in this flow. A client the receiver does not trust gets
+  `error{code:"pairing_required"}` and the connection closes; in "My devices
+  only" mode (§9.5) it gets `not_receiving` as usual. The reference requester
+  also refuses to send a capture request to a device it does not trust itself.
+* The answer is a normal transfer (§6) from the phone to the requester, sent to
+  the address the request came from (the remote IP of that connection) and
+  `port` (or wherever discovery finds the requester when `port` is absent). Its
+  `transfer.offer` carries the optional `"requestId": "<id>"`.
+* The requester keeps the set of requestIds it issued, each bound to the
+  `deviceId` it was sent to, valid for 10 minutes and usable once. An offer
+  whose `requestId` matches one of them **from that same device** is accepted
+  without a prompt, even when that device is not set to auto-accept. A
+  `requestId` that does not match (unknown, expired, used, or presented by a
+  different device) is ignored: the offer follows the normal rules. A
+  mismatched presentation does not use the entry up. Apps only see `requestId`
+  on an incoming transfer when it matched.
+* An unpaired device still cannot send anything: `transfer.offer` from an
+  untrusted client gets `pairing_required` before `requestId` is looked at.
+
+### 9.8 Expiring drops
+
+`transfer.offer` may carry `expiresAfter`: an integer number of seconds, 60 to
+2 592 000 (30 days). Any other value or type is `bad_message`.
+
+* It is the sender's request that the receiver delete what it saved from this
+  transfer that long after it was received. The protocol only carries the
+  number; both cores expose it on the incoming offer/transfer and do nothing
+  else.
+* Deleting is the receiving **app's** job: it records what it saved and when,
+  and removes those files once the time is up. Approval and verification work
+  exactly as for any other offer.
+* This is a courtesy, not a security feature. The receiver can copy, forward or
+  back up the items before they are deleted, and an app that ignores the field
+  keeps them forever. Senders must not treat it as a guarantee.
+
+### 9.9 Drip Rooms (temporary group trust)
+
+A room lets everyone at a meeting pair with each other without comparing codes,
+for a limited time. One device creates the room and shows its QR code; others
+scan it.
+
+* A room is `{roomId, roomKey, name, expiresAt}`: `roomId` is 16 random bytes
+  and `roomKey` 32 random bytes, both base64url without padding (canonical
+  encoding only), `name` is display text, and `expiresAt` is unix seconds, at
+  most 4 hours after creation. The QR code holds:
+
+  ```
+  crossdrop://room?v=1&id=<roomId>&k=<roomKey>&n=<name>&exp=<unix>&h=<host1>,<host2>&p=<port>&fp=<fingerprint>
+  ```
+
+  `h`, `p` and `fp` (lowercase hex SHA-256 of the showing device's identity
+  key) let a joiner reach the device that shows the code where DNS-SD is
+  blocked, like §9.4. Values are percent-encoded (everything except RFC 3986
+  unreserved characters); `+` decodes as a space. Parsers reject: a URI over
+  2048 bytes, a duplicate key, a malformed escape, invalid UTF-8, `v` ≠ 1, a bad
+  `id`/`k`, `exp` not in the future or more than 4 hours + 5 minutes ahead, a
+  missing or invalid host list (1–8 entries of `[0-9A-Za-z.:%_-]`, 1–64 chars
+  each), a port outside 1–65535, or a bad `fp`. Unknown keys are ignored; a
+  missing name becomes "Room".
+* Devices in an active room may advertise
+  `r = hex(SHA-256("CrossDrop/1 room|" || roomId)[0:8])` (16 hex chars, §2).
+  It only helps a joiner pick which room to use with which device; discovery
+  remains a hint.
+* **Pairing by room.** A client that holds the room sends
+  `pair.request` with `"room": {"id": "<roomId>", "proof": "<b64>"}` where
+  `proof = HMAC-SHA256(roomKey, "CrossDrop/1 room|" || TH)` and `TH` is the
+  handshake transcript hash (§4.4). The receiver looks the id up among its
+  active rooms and compares the proof in constant time. A malformed `room`
+  object is `bad_message`; an unknown room or a wrong proof is not an error:
+  pairing simply falls back to the normal code comparison (§5).
+* If the proof is valid, the receiver answers at once, without a prompt, with
+  `{"type":"pair.confirm","v":1,"accepted":true,"room":{"id":"<roomId>","proof":"<b64>"}}`,
+  `proof = HMAC-SHA256(roomKey, "CrossDrop/1 room-confirm|" || TH)`. The client
+  accepts without a prompt only if that proof is valid, so **both** sides have
+  shown they hold the room key. A client that sees no such answer within 5
+  seconds, or a `pair.confirm` without a valid room proof, shows the normal
+  code comparison instead. Each side then stores **temporary** trust that ends
+  at the room's `expiresAt`; once it has passed, the device is untrusted again
+  and the next connection pairs again (with codes, or with a new room). Room
+  trust never sets auto-accept.
+* A receiver that already holds permanent trust for the client keeps it (it
+  still sends its room proof, so the client can skip codes). A QR token (§9.4)
+  takes precedence over a room proof.
+* "My devices only" receivers (§9.5) accept a valid room proof like a QR token.
+* Only trust stores that can expire trust take part: an implementation whose
+  store cannot honour `expiresAt` must not send or accept room proofs (the
+  reference cores check `supportsTrustExpiry`), so a room can never silently
+  create permanent trust.
+* Security notes: the proofs bind the room key to this exact handshake (`TH`
+  covers both ephemeral keys and both identities), so a captured proof cannot be
+  replayed on another connection, and a device in the middle cannot pass the
+  check without the key. Anyone who holds the room code — a photo of the screen
+  is enough — can join until it expires; treat the code like a meeting
+  password and keep rooms short. Trust from a room is temporary by design.
+  Transfers between room members still go through the normal approval rules
+  (no auto-accept).
+

@@ -11,15 +11,18 @@ public struct DiscoveredDevice: Identifiable, Equatable {
     public let isPrivate: Bool
     /// Not found by discovery: a paired device at the address that last worked.
     public let isRemembered: Bool
+    /// Drip Room hints from TXT `r` (§9.9); match them with `Rooms.room(forHint:)`. A hint only.
+    public let roomHints: [String]
 
     public init(deviceId: String, name: String, platform: String, endpoint: NWEndpoint,
-                isPrivate: Bool = false, isRemembered: Bool = false) {
+                isPrivate: Bool = false, isRemembered: Bool = false, roomHints: [String] = []) {
         self.deviceId = deviceId
         self.name = name
         self.platform = platform
         self.endpoint = endpoint
         self.isPrivate = isPrivate
         self.isRemembered = isRemembered
+        self.roomHints = roomHints
     }
 }
 
@@ -92,7 +95,7 @@ public final class BonjourBrowser {
                   let platform = entries["p"], platform == "android" || platform == "macos",
                   let version = entries["v"].flatMap({ Int($0) }), version >= 1 else { continue }
             devices[id] = DiscoveredDevice(deviceId: id, name: name, platform: platform, endpoint: result.endpoint,
-                                           isPrivate: entries["m"] == "1")
+                                           isPrivate: entries["m"] == "1", roomHints: Rooms.parseHints(entries["r"]))
         }
         let sorted = devices.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         onDevicesChanged?(sorted)

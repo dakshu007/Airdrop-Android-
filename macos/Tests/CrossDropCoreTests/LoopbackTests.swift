@@ -8,12 +8,15 @@ final class LoopbackTests: XCTestCase {
         /// nil = never answer.
         var acceptPairing: Bool? = true
         var acceptOffer: Bool? = true
+        var acceptCapture = true
         var onUpdate: ((TransferSnapshot) -> Void)?
 
         private let lock = NSLock()
         private(set) var codes: [String] = []
         private(set) var finished: [TransferSnapshot] = []
         private(set) var offersFinished: [String] = []
+        private var offers: [String] = []
+        private var captureLog: [CaptureRequest] = []
 
         func crossDropPairingRequested(_ prompt: PairingPrompt, decision: Decision) {
             lock.lock()
@@ -25,7 +28,30 @@ final class LoopbackTests: XCTestCase {
         func crossDropPairingFinished(id: String, success: Bool) {}
 
         func crossDropOfferReceived(_ offer: OfferPrompt, decision: Decision) {
+            lock.lock()
+            offers.append(offer.transferId)
+            lock.unlock()
             if let accept = acceptOffer { decision.resolve(accept) }
+        }
+
+        func crossDropCaptureRequested(_ request: CaptureRequest) -> Bool {
+            lock.lock()
+            captureLog.append(request)
+            lock.unlock()
+            return acceptCapture
+        }
+
+        /// Offers that reached the user (prompted).
+        var offersReceived: [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return offers
+        }
+
+        var captures: [CaptureRequest] {
+            lock.lock()
+            defer { lock.unlock() }
+            return captureLog
         }
 
         func crossDropOfferFinished(transferId: String) {
@@ -138,13 +164,66 @@ final class LoopbackTests: XCTestCase {
     }
 
     private func transfer(_ rig: Rig, outgoing: [OutgoingFile], kind: OfferKind = .files, qr: QrPairing? = nil,
-                          identity: DeviceIdentity? = nil) -> OutgoingTransfer {
+                          identity: DeviceIdentity? = nil, expiresAfter: Int64? = nil, room: Room? = nil) -> OutgoingTransfer {
         OutgoingTransfer(endpoint: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: rig.port)!),
                          peerName: "server", peerId: nil, peerPlatform: nil,
                          files: outgoing,
                          identity: identity ?? rig.clientIdentity, local: LocalInfo(name: "Test Client", appVersion: "test"),
                          trust: identity == nil ? rig.clientTrust : InMemoryTrustStore(), delegate: rig.clientDelegate,
-                         kind: kind, qr: qr)
+                         kind: kind, qr: qr, expiresAfter: expiresAfter, room: room)
+    }
+
+    /// The requester's own receiver (same identity and trust as the rig's client), which
+    /// gets the answer to a capture request (§9.7). It declines anything it is asked about.
+    private struct Requester {
+        let server: CrossDropServer
+        let delegate: TestDelegate
+        let port: UInt16
+    }
+
+    private func makeRequester(_ rig: Rig) async throws -> Requester {
+        let folder = workDir.appendingPathComponent("requester")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let delegate = TestDelegate()
+        delegate.acceptOffer = false
+        let server = CrossDropServer(configuration: .init(identity: rig.clientIdentity,
+                                                          local: LocalInfo(name: "Test Requester", appVersion: "test"),
+                                                          trust: rig.clientTrust, destination: { folder }))
+        server.delegate = delegate
+        let port = try await startServer(server)
+        return Requester(server: server, delegate: delegate, port: port)
+    }
+
+    private func requestCapture(_ rig: Rig, _ requester: Requester, kind: CaptureKind = .photo) async throws -> String {
+        try await CaptureClient.request(endpoint: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: rig.port)!),
+                                        expectedDeviceId: rig.serverIdentity.deviceId,
+                                        identity: rig.clientIdentity, local: LocalInfo(name: "Test Client", appVersion: "test"),
+                                        trust: rig.clientTrust, kind: kind, replyPort: requester.port,
+                                        registry: requester.server.captureRequests)
+    }
+
+    /// The phone (rig server identity, or `identity`) sends a small file to the requester, answering `requestId`.
+    private func answer(_ rig: Rig, _ requester: Requester, requestId: String?,
+                        identity: DeviceIdentity? = nil, trust: InMemoryTrustStore? = nil) async throws -> TransferSnapshot {
+        let file = try makeFile("photo-\(UUID().uuidString.prefix(6)).jpg", bytes: 3)
+        return await OutgoingTransfer(endpoint: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: requester.port)!),
+                                      peerName: "requester", peerId: nil, peerPlatform: nil,
+                                      files: [OutgoingFile(url: file)],
+                                      identity: identity ?? rig.serverIdentity, local: LocalInfo(name: "Phone", platform: "android", appVersion: "test"),
+                                      trust: trust ?? rig.serverTrust, delegate: TestDelegate(),
+                                      requestId: requestId).run()
+    }
+
+    private func pairClientWithServer(_ rig: Rig) async throws {
+        let file = try makeFile("warmup.txt", bytes: 1)
+        let warmup = await transfer(rig, files: [file]).run()
+        XCTAssertEqual(warmup.phase, .completed, "error: \(String(describing: warmup.error))")
+        _ = try await rig.serverDelegate.waitForFinished()
+    }
+
+    private func clientPeer(_ rig: Rig) -> PeerInfo {
+        PeerInfo(deviceId: rig.clientIdentity.deviceId, name: "Test Client", platform: "macos", appVersion: nil,
+                 identityKey: rig.clientIdentity.publicKey)
     }
 
     func testPairAndTransferTwoFiles() async throws {
@@ -341,5 +420,241 @@ final class LoopbackTests: XCTestCase {
         XCTAssertNotNil(rig.serverTrust.trustedIdentityKey(for: rig.clientIdentity.deviceId))
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertEqual(rig.serverDelegate.finished.count, 0)
+    }
+
+    // MARK: §9.7 capture requests
+
+    func testCaptureRequestIsAcceptedAndItsAnswerArrivesWithoutPromptOnce() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        try await pairClientWithServer(rig)
+        let requester = try await makeRequester(rig)
+        defer { requester.server.stop() }
+
+        let id = try await requestCapture(rig, requester)
+        let seen = rig.serverDelegate.captures
+        XCTAssertEqual(seen.count, 1)
+        XCTAssertEqual(seen.first?.requestId, id)
+        XCTAssertEqual(seen.first?.kind, .photo)
+        XCTAssertEqual(seen.first?.peer.deviceId, rig.clientIdentity.deviceId)
+        XCTAssertEqual(seen.first?.replyHost, "127.0.0.1")
+        XCTAssertEqual(seen.first?.replyPort, requester.port)
+        XCTAssertEqual(requester.server.captureRequests.outstanding, 1)
+
+        // The phone answers: accepted without a prompt (the requester would decline one).
+        let answered = try await answer(rig, requester, requestId: id)
+        XCTAssertEqual(answered.phase, .completed, "error: \(String(describing: answered.error))")
+        let incoming = try await requester.delegate.waitForFinished()
+        XCTAssertEqual(incoming.phase, .completed)
+        XCTAssertEqual(incoming.requestId, id)
+        XCTAssertEqual(requester.delegate.offersReceived.count, 0)
+
+        // Single use: the same requestId again is a normal offer, which is prompted (and declined).
+        let again = try await answer(rig, requester, requestId: id)
+        XCTAssertEqual(again.phase, .rejected)
+        XCTAssertEqual(again.rejectReason, "declined")
+        XCTAssertEqual(requester.delegate.offersReceived.count, 1)
+    }
+
+    func testCaptureAnswerOnlyCountsFromTheDeviceItWasSentTo() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        try await pairClientWithServer(rig)
+        let requester = try await makeRequester(rig)
+        defer { requester.server.stop() }
+
+        // Another device the requester has also paired with.
+        let other = DeviceIdentity.generate()
+        let otherTrust = InMemoryTrustStore()
+        requester.delegate.acceptOffer = true
+        let warm = try await answer(rig, requester, requestId: nil, identity: other, trust: otherTrust)
+        XCTAssertEqual(warm.phase, .completed, "error: \(String(describing: warm.error))")
+        requester.delegate.acceptOffer = false
+        let promptsBefore = requester.delegate.offersReceived.count
+
+        let id = try await requestCapture(rig, requester)
+        let foreign = try await answer(rig, requester, requestId: id, identity: other, trust: otherTrust)
+        XCTAssertEqual(foreign.phase, .rejected, "a foreign requestId is ignored, so the offer is prompted")
+        XCTAssertEqual(requester.delegate.offersReceived.count, promptsBefore + 1)
+        // The real device still gets its answer through.
+        let real = try await answer(rig, requester, requestId: id)
+        XCTAssertEqual(real.phase, .completed, "error: \(String(describing: real.error))")
+        XCTAssertEqual(requester.delegate.offersReceived.count, promptsBefore + 1)
+    }
+
+    func testDeclinedCaptureRequestIsForgotten() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        try await pairClientWithServer(rig)
+        rig.serverDelegate.acceptCapture = false
+        let requester = try await makeRequester(rig)
+        defer { requester.server.stop() }
+        do {
+            _ = try await requestCapture(rig, requester, kind: .pick)
+            XCTFail("the capture request should be declined")
+        } catch let error as CrossDropError {
+            XCTAssertEqual(error.code, ErrorCode.declined)
+        }
+        XCTAssertEqual(rig.serverDelegate.captures.first?.kind, .pick)
+        XCTAssertEqual(requester.server.captureRequests.outstanding, 0)
+    }
+
+    func testCaptureRequestFromUnpairedDeviceIsRefused() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        let requester = try await makeRequester(rig)
+        defer { requester.server.stop() }
+        // Not paired on either side: the client refuses to ask.
+        do {
+            _ = try await requestCapture(rig, requester)
+            XCTFail("an unpaired device must not be asked")
+        } catch let error as CrossDropError {
+            XCTAssertEqual(error.code, ErrorCode.pairingRequired)
+            XCTAssertFalse(error.fromPeer)
+        }
+        // The client trusts the server, but the server doesn't know the client: pairing_required, no pairing.
+        rig.clientTrust.storeTrust(for: PeerInfo(deviceId: rig.serverIdentity.deviceId, name: "Test Mac", platform: "macos",
+                                                 appVersion: nil, identityKey: rig.serverIdentity.publicKey))
+        do {
+            _ = try await requestCapture(rig, requester)
+            XCTFail("the server must refuse an unpaired requester")
+        } catch let error as CrossDropError {
+            XCTAssertEqual(error.code, ErrorCode.pairingRequired)
+            XCTAssertTrue(error.fromPeer)
+        }
+        XCTAssertEqual(rig.serverDelegate.captures.count, 0)
+        XCTAssertNil(rig.serverTrust.trustedIdentityKey(for: rig.clientIdentity.deviceId))
+        XCTAssertEqual(rig.serverDelegate.seenCodes, [])
+        XCTAssertEqual(requester.server.captureRequests.outstanding, 0)
+    }
+
+    func testCaptureRequestsExpireAndAreBoundToOneDevice() {
+        let requests = CaptureRequests()
+        let a = String(repeating: "a", count: 32)
+        let b = String(repeating: "b", count: 32)
+        XCTAssertTrue(requests.expect("request-0001", deviceId: a))
+        XCTAssertFalse(requests.redeem("request-0001", deviceId: b))
+        XCTAssertTrue(requests.redeem("request-0001", deviceId: a))
+        XCTAssertFalse(requests.redeem("request-0001", deviceId: a))
+        XCTAssertTrue(requests.expect("request-0002", deviceId: a, ttl: -1))
+        XCTAssertFalse(requests.redeem("request-0002", deviceId: a))
+        XCTAssertFalse(requests.expect("bad id!", deviceId: a))
+    }
+
+    // MARK: §9.8 expiring drops
+
+    func testExpiresAfterRoundTripsAndOutOfRangeIsRejected() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        let file = try makeFile("a.txt", bytes: 10)
+        let result = await transfer(rig, outgoing: [OutgoingFile(url: file)], expiresAfter: 3600).run()
+        XCTAssertEqual(result.phase, .completed, "error: \(String(describing: result.error))")
+        let incoming = try await rig.serverDelegate.waitForFinished()
+        XCTAssertEqual(incoming.expiresAfter, 3600)
+
+        let tooShort = await transfer(rig, outgoing: [OutgoingFile(url: file)], expiresAfter: 59).run()
+        XCTAssertEqual(tooShort.phase, .failed)
+
+        let sha = String(repeating: "a", count: 64)
+        func offer(_ extra: [String: Any]) -> WireMessage {
+            var fields: [String: Any] = [
+                "transferId": "abcdefgh-1234",
+                "files": [["fileId": 0, "name": "t", "size": 1, "sha256": sha]],
+            ]
+            for (key, value) in extra { fields[key] = value }
+            return WireMessage(type: "transfer.offer", version: 1, fields: fields)
+        }
+        XCTAssertEqual(try TransferOffer.parse(offer(["expiresAfter": 60])).expiresAfter, 60)
+        XCTAssertEqual(try TransferOffer.parse(offer(["requestId": "request-0001"])).requestId, "request-0001")
+        XCTAssertNil(try TransferOffer.parse(offer([:])).expiresAfter)
+        let badValues: [Any] = [59, 2_592_001, "3600", 60.5]
+        for bad in badValues {
+            XCTAssertThrowsError(try TransferOffer.parse(offer(["expiresAfter": bad])))
+        }
+        XCTAssertThrowsError(try TransferOffer.parse(offer(["requestId": "no spaces allowed"])))
+        let encoded = TransferOffer(transferId: "abcdefgh-1234", files: [], requestId: "request-0001", expiresAfter: 600).toMessage()
+        XCTAssertEqual(encoded["requestId"] as? String, "request-0001")
+        XCTAssertEqual(encoded["expiresAfter"] as? Int64, 600)
+    }
+
+    // MARK: §9.9 Drip Rooms
+
+    func testRoomPairsWithoutPromptsAndTrustIsTemporary() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        let room = try XCTUnwrap(rig.server.rooms.create(name: "Standup", ttl: 3600))
+        // Neither side may ask its user.
+        rig.serverDelegate.acceptPairing = false
+        rig.clientDelegate.acceptPairing = false
+        let file = try makeFile("slides.pdf", bytes: 10)
+        let result = await transfer(rig, outgoing: [OutgoingFile(url: file)], room: room).run()
+        XCTAssertEqual(result.phase, .completed, "error: \(String(describing: result.error))")
+        XCTAssertEqual(rig.serverDelegate.seenCodes, [])
+        XCTAssertEqual(rig.clientDelegate.seenCodes, [])
+        XCTAssertEqual(rig.serverTrust.trustExpiry(for: rig.clientIdentity.deviceId), room.expiryDate)
+        XCTAssertEqual(rig.clientTrust.trustExpiry(for: rig.serverIdentity.deviceId), room.expiryDate)
+        XCTAssertFalse(rig.serverTrust.isAutoAccept(deviceId: rig.clientIdentity.deviceId))
+
+        // When the room ends, so does the trust: the next transfer has to pair again, with codes.
+        rig.serverTrust.storeTrust(for: clientPeer(rig), autoAccept: false, expiresAt: Date().addingTimeInterval(-1))
+        XCTAssertNil(rig.serverTrust.trustedIdentityKey(for: rig.clientIdentity.deviceId))
+        rig.serverDelegate.acceptPairing = true
+        rig.clientDelegate.acceptPairing = true
+        let again = await transfer(rig, outgoing: [OutgoingFile(url: file)]).run()
+        XCTAssertEqual(again.phase, .completed, "error: \(String(describing: again.error))")
+        XCTAssertEqual(rig.serverDelegate.seenCodes.count, 1, "expired room trust means comparing codes again")
+        XCTAssertNotNil(rig.serverTrust.trustedIdentityKey(for: rig.clientIdentity.deviceId))
+        XCTAssertNil(rig.serverTrust.trustExpiry(for: rig.clientIdentity.deviceId))
+    }
+
+    func testWrongRoomKeyFallsBackToCodeComparison() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        let room = try XCTUnwrap(rig.server.rooms.create(name: "Standup", ttl: 3600))
+        let forged = try XCTUnwrap(Room(id: room.id, key: Data(repeating: 9, count: 32), name: room.name,
+                                        expiresAt: room.expiresAt))
+        let file = try makeFile("a.txt", bytes: 10)
+        let result = await transfer(rig, outgoing: [OutgoingFile(url: file)], room: forged).run()
+        XCTAssertEqual(result.phase, .completed, "error: \(String(describing: result.error))")
+        XCTAssertEqual(rig.serverDelegate.seenCodes.count, 1)
+        XCTAssertEqual(rig.serverDelegate.seenCodes, rig.clientDelegate.seenCodes)
+        XCTAssertNotNil(rig.serverTrust.trustedIdentityKey(for: rig.clientIdentity.deviceId))
+        XCTAssertNil(rig.serverTrust.trustExpiry(for: rig.clientIdentity.deviceId), "code-compared trust is permanent")
+    }
+
+    func testPrivateModeAcceptsRoomProofAndRoomCodeNamesTheHost() async throws {
+        let rig = try await makeRig(privateMode: true)
+        defer { rig.server.stop() }
+        let room = try XCTUnwrap(rig.server.rooms.create(name: "Standup", ttl: 3600))
+        let invite = try XCTUnwrap(RoomInvite(room: room, hosts: ["127.0.0.1"], port: rig.port,
+                                              fingerprint: rig.serverIdentity.fingerprint))
+        let parsed = try XCTUnwrap(RoomInvite.parse(invite.uri))
+        let local = LocalInfo(name: "Test Client", appVersion: "test")
+
+        // A code naming another device's key is refused before pairing.
+        let wrongHost = try XCTUnwrap(RoomInvite(room: parsed.room, hosts: parsed.hosts, port: parsed.port,
+                                                 fingerprint: String(repeating: "0", count: 64)))
+        do {
+            _ = try await RoomPairingClient.pairOnly(invite: wrongHost, identity: rig.clientIdentity, local: local,
+                                                    trust: rig.clientTrust, delegate: rig.clientDelegate)
+            XCTFail("a code for another device must be refused")
+        } catch let error as CrossDropError {
+            XCTAssertEqual(error.code, ErrorCode.authFailed)
+        }
+
+        rig.serverDelegate.acceptPairing = false
+        rig.clientDelegate.acceptPairing = false
+        let peer = try await RoomPairingClient.pairOnly(invite: parsed, identity: rig.clientIdentity, local: local,
+                                                        trust: rig.clientTrust, delegate: rig.clientDelegate)
+        XCTAssertEqual(peer.deviceId, rig.serverIdentity.deviceId)
+        for _ in 0..<150 where rig.serverTrust.trustedIdentityKey(for: rig.clientIdentity.deviceId) == nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(rig.serverTrust.trustExpiry(for: rig.clientIdentity.deviceId), room.expiryDate)
+        // Now a (temporary) paired device, it gets through "My devices only".
+        let file = try makeFile("a.txt", bytes: 10)
+        let result = await transfer(rig, outgoing: [OutgoingFile(url: file)]).run()
+        XCTAssertEqual(result.phase, .completed, "error: \(String(describing: result.error))")
+        XCTAssertEqual(rig.serverDelegate.seenCodes, [])
     }
 }

@@ -47,6 +47,10 @@ object Protocol {
     const val ROOM_ANSWER_WAIT_MS = 5_000L
     /** Room hints advertised in one TXT record (§9.9). */
     const val MAX_ROOM_HINTS = 4
+    /** Most connections one Turbo transfer may use, the main one included (§9.10). */
+    const val MAX_TURBO_STREAMS = 4
+    /** How long a Turbo sender gives its extra connections to join before streaming starts (§9.10). */
+    const val TURBO_JOIN_WAIT_MS = 1_000L
 
     val LABEL_TRANSCRIPT = "CrossDrop/1 transcript".toByteArray(Charsets.US_ASCII)
     val LABEL_CLIENT_PROOF = "CrossDrop/1 client-proof".toByteArray(Charsets.US_ASCII)
@@ -60,10 +64,13 @@ object Protocol {
     private val TRANSFER_ID = Regex("^[A-Za-z0-9-]{8,64}$")
     private val HEX64 = Regex("^[0-9a-f]{64}$")
     private val HEX32 = Regex("^[0-9a-f]{32}$")
+    private val JOIN_TOKEN = Regex("^[A-Za-z0-9_-]{22}$")
 
     fun isValidTransferId(id: String) = TRANSFER_ID.matches(id)
     fun isValidSha256Hex(s: String) = HEX64.matches(s)
     fun isValidDeviceId(s: String) = HEX32.matches(s)
+    /** A Turbo join token (§9.10): 16 bytes, base64url without padding. */
+    fun isValidJoinToken(s: String) = JOIN_TOKEN.matches(s)
 }
 
 enum class Platform(val wire: String) {

@@ -228,6 +228,9 @@ class Connection(val socket: Socket) {
     fun inject(value: Any) {
         queue.offer(Incoming.Local(value), 1, TimeUnit.SECONDS)
     }
+
+    /** Like [inject], without waiting: false when the queue is full (the caller then closes instead). */
+    fun tryInject(value: Any): Boolean = queue.offer(Incoming.Local(value))
 }
 
 /** Converts I/O failures to protocol errors for uniform handling. */

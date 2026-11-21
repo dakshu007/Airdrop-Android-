@@ -23,11 +23,16 @@ func usage() -> Never {
     usage:
       crossdrop-cli receive --port <p> --dir <dir> --identity <file> [--name <n>] [--once]
                             [--private] [--token-out <file>]      (writes "<token> <fingerprint>")
+                            [--room-out <file>]                   (creates a Drip Room, writes its URI)
+                            [--capture-file <file>]               (answers capture requests with this file)
       crossdrop-cli send --host <h> --port <p> --identity <file> [--name <n>] <file>...
                          [--path <a/b>] [--kind link|text --text <s>] [--qr <token>:<fingerprint>]
                          [--die-after <bytes>]                    (exit abruptly mid-transfer)
+                         [--expires-after <seconds>] [--room <crossdrop://room URI>] [--request-id <id>]
+      crossdrop-cli capture --host <h> --port <p> --identity <file> --listen <port> --dir <dir> [--kind photo|pick]
     output: SAS <code>, RECEIVED <name> <sha256>, TEXT <kind> <base64>, RESUMED <bytes>,
-            COMPLETE <id>, LISTENING <port>; errors go to stderr.
+            COMPLETE <id>, LISTENING <port>, PROMPT <id>, CAPTURE <kind> <requestId>,
+            ACK <requestId>, REPLY <requestId>, EXPIRES <seconds>; errors go to stderr.
 
     """.utf8))
     exit(2)
@@ -65,6 +70,8 @@ final class CLIDelegate: CrossDropDelegate {
     let once: Bool
     private let lock = NSLock()
     private var reported: Set<String> = []
+    /// Called after a capture request was printed and accepted (sends the answer back).
+    var onCapture: ((CaptureRequest) -> Void)?
 
     init(once: Bool) {
         self.once = once
@@ -78,7 +85,14 @@ final class CLIDelegate: CrossDropDelegate {
     func crossDropPairingFinished(id: String, success: Bool) {}
 
     func crossDropOfferReceived(_ offer: OfferPrompt, decision: Decision) {
+        emit("PROMPT \(offer.transferId)")
         decision.resolve(true)
+    }
+
+    func crossDropCaptureRequested(_ request: CaptureRequest) -> Bool {
+        emit("CAPTURE \(request.kind.rawValue) \(request.requestId)")
+        onCapture?(request)
+        return true
     }
 
     func crossDropOfferFinished(transferId: String) {}
@@ -96,6 +110,8 @@ final class CLIDelegate: CrossDropDelegate {
             for file in snapshot.files where snapshot.kind == .files {
                 emit("RECEIVED \(file.savedURL?.lastPathComponent ?? file.name) \(file.sha256 ?? "")")
             }
+            if let seconds = snapshot.expiresAfter { emit("EXPIRES \(seconds)") }
+            if let requestId = snapshot.requestId { emit("REPLY \(requestId)") }
             emit("COMPLETE \(snapshot.id)")
             if once {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { exit(0) }
@@ -124,7 +140,7 @@ do {
 }
 let local = LocalInfo(name: options.values["name"] ?? "crossdrop-cli", platform: "macos", appVersion: "0.1.0-cli")
 let trust = InMemoryTrustStore()
-let delegate = CLIDelegate(once: options.flags.contains("once"))
+let delegate = CLIDelegate(once: options.flags.contains("once") || options.command == "capture")
 
 switch options.command {
 case "receive":
@@ -141,12 +157,42 @@ case "receive":
             fail(ErrorCode.internalError)
         }
     }
+    if let capturePath = options.values["capture-file"] {
+        // Like the phone app once the photo is taken: send it back, answering the request.
+        let captureURL = URL(fileURLWithPath: capturePath)
+        delegate.onCapture = { request in
+            guard let endpoint = request.replyEndpoint else { return }
+            let reply = OutgoingTransfer(endpoint: endpoint, peerName: request.peer.name, peerId: request.peer.deviceId,
+                                         peerPlatform: request.peer.platform,
+                                         files: [OutgoingFile(url: captureURL, mime: mimeType(for: captureURL))],
+                                         identity: identity, local: local, trust: trust, delegate: delegate,
+                                         requestId: request.requestId)
+            Task {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                let result = await reply.run()
+                if result.phase == .completed {
+                    emit("REPLIED \(request.requestId)")
+                } else {
+                    let code = result.error?.code ?? result.rejectReason ?? result.phase.rawValue
+                    FileHandle.standardError.write(Data("ERROR reply:\(code)\n".utf8))
+                }
+            }
+        }
+    }
     var announced = false
     server.onStateChange = { state in
         switch state {
         case .ready(let boundPort):
             if !announced {
                 announced = true
+                if let roomOut = options.values["room-out"] {
+                    guard let room = server.rooms.create(name: "Interop room", ttl: 3600),
+                          let invite = RoomInvite(room: room, hosts: ["127.0.0.1"], port: boundPort,
+                                                  fingerprint: identity.fingerprint),
+                          (try? (invite.uri + "\n").write(toFile: roomOut, atomically: true, encoding: .utf8)) != nil else {
+                        fail(ErrorCode.internalError)
+                    }
+                }
                 emit("LISTENING \(boundPort)")
             }
         case .failed:
@@ -192,10 +238,23 @@ case "send":
         guard parts.count == 2 else { usage() }
         qr = QrPairing(token: parts[0], fingerprint: parts[1], mine: false)
     }
+    var room: Room? = nil
+    if let code = options.values["room"] {
+        guard let invite = RoomInvite.parse(code.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            fail("bad room code")
+        }
+        room = invite.room
+    }
+    var expiresAfter: Int64? = nil
+    if let text = options.values["expires-after"] {
+        guard let value = Int64(text) else { usage() }
+        expiresAfter = value
+    }
     let transfer = OutgoingTransfer(endpoint: .hostPort(host: NWEndpoint.Host(host), port: port),
                                     peerName: host, peerId: nil, peerPlatform: nil, files: files,
                                     identity: identity, local: local, trust: trust, delegate: delegate,
-                                    kind: kind, qr: qr)
+                                    kind: kind, qr: qr, requestId: options.values["request-id"],
+                                    expiresAfter: expiresAfter, room: room)
     if let limit = options.values["die-after"].flatMap(Int64.init) {
         // Simulates a sender that vanishes mid-transfer (resume test).
         transfer.onChunkSent = { sent in if sent >= limit { _exit(3) } }
@@ -210,6 +269,59 @@ case "send":
         fail(result.error?.code ?? result.rejectReason ?? result.phase.rawValue)
     }
     dispatchMain()
+
+case "capture":
+    // Asks the receiver for a photo (§9.7), then waits for the answer on our own server.
+    guard let host = options.values["host"], let portText = options.values["port"],
+          let portValue = UInt16(portText), let port = NWEndpoint.Port(rawValue: portValue),
+          let listenText = options.values["listen"], let listenPort = UInt16(listenText),
+          let dir = options.values["dir"] else { usage() }
+    let kind: CaptureKind
+    switch options.values["kind"] ?? "photo" {
+    case "photo": kind = .photo
+    case "pick": kind = .pick
+    default: usage()
+    }
+    let directory = URL(fileURLWithPath: dir, isDirectory: true)
+    let server = CrossDropServer(configuration: .init(identity: identity, local: local, trust: trust,
+                                                      destination: { directory }))
+    server.delegate = delegate
+    let registry = server.captureRequests
+    var asked = false
+    server.onStateChange = { state in
+        switch state {
+        case .ready(let boundPort):
+            guard !asked else { return }
+            asked = true
+            emit("LISTENING \(boundPort)")
+            Task {
+                do {
+                    let id = try await CaptureClient.request(endpoint: .hostPort(host: NWEndpoint.Host(host), port: port),
+                                                             identity: identity, local: local, trust: trust,
+                                                             kind: kind, replyPort: boundPort, registry: registry,
+                                                             pairingDelegate: delegate)
+                    emit("ACK \(id)")
+                } catch let error as CrossDropError {
+                    fail(error.code)
+                } catch {
+                    fail(ErrorCode.internalError)
+                }
+            }
+        case .failed:
+            fail(ErrorCode.internalError)
+        default:
+            break
+        }
+    }
+    do {
+        try server.start(port: listenPort, advertise: false)
+    } catch {
+        fail(ErrorCode.internalError)
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 60) { fail("no answer") }
+    withExtendedLifetime(server) {
+        dispatchMain()
+    }
 
 default:
     usage()

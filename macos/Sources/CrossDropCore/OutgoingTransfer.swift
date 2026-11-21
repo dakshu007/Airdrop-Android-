@@ -39,6 +39,10 @@ public final class OutgoingTransfer {
     public let files: [OutgoingFile]
     public let endpoint: NWEndpoint
     public let kind: OfferKind
+    /// The capture request this transfer answers (§9.7); the requester accepts it without asking.
+    public let requestId: String?
+    /// Asks the receiver to delete what it saved after this many seconds (§9.8).
+    public let expiresAfter: Int64?
 
     private let identity: DeviceIdentity
     private let local: LocalInfo
@@ -52,6 +56,8 @@ public final class OutgoingTransfer {
     private var pendingDecision: Decision?
     private var offerSent = false
     private let qr: QrPairing?
+    /// A Drip Room shared with the receiver (§9.9): pairing proves membership instead of comparing codes.
+    private let room: Room?
     /// Bytes the receiver already holds per file, from `transfer.accept` (§9.3).
     private var resumeAt: [Int64: Int64] = [:]
     /// The numeric address that answered, once connected (for "last address that worked", §9.5).
@@ -62,12 +68,16 @@ public final class OutgoingTransfer {
     public init(endpoint: NWEndpoint, peerName: String, peerId: String?, peerPlatform: String?,
                 files: [OutgoingFile], identity: DeviceIdentity, local: LocalInfo, trust: TrustProvider,
                 delegate: CrossDropDelegate?, id: String = UUID().uuidString,
-                kind: OfferKind = .files, qr: QrPairing? = nil) {
+                kind: OfferKind = .files, qr: QrPairing? = nil,
+                requestId: String? = nil, expiresAfter: Int64? = nil, room: Room? = nil) {
         self.id = id
         self.endpoint = endpoint
         self.files = files
         self.kind = kind
         self.qr = qr
+        self.requestId = requestId
+        self.expiresAfter = expiresAfter
+        self.room = room
         self.identity = identity
         self.local = local
         self.trust = trust
@@ -79,6 +89,8 @@ public final class OutgoingTransfer {
         var initial = TransferSnapshot(id: id, direction: .outgoing, peerId: peerId, peerName: peerName,
                                        peerPlatform: peerPlatform, phase: .preparing, files: states)
         initial.kind = kind
+        initial.requestId = requestId
+        initial.expiresAfter = expiresAfter
         self.publisher = SnapshotPublisher(initial, delegate: delegate)
     }
 
@@ -122,6 +134,13 @@ public final class OutgoingTransfer {
         publisher.update(force: true) { _ in }
         var channel: SecureChannel?
         do {
+            if let requestId = requestId, !TransferOffer.isValidTransferId(requestId) {
+                throw CrossDropError.local(ErrorCode.internalError, "bad requestId")
+            }
+            if let seconds = expiresAfter,
+               !(ProtocolConstants.minExpiresAfter...ProtocolConstants.maxExpiresAfter).contains(seconds) {
+                throw CrossDropError.local(ErrorCode.internalError, "expiresAfter out of range")
+            }
             let offerFiles = try prepare()
             try checkCancelled()
 
@@ -150,11 +169,12 @@ public final class OutgoingTransfer {
 
             var paired = false
             if trust.trustedIdentityKey(for: peer.deviceId) != peer.identityKey {
-                try await pair(secure, peer: peer, sas: handshake.sas)
+                try await pair(secure, peer: peer, sas: handshake.sas, transcriptHash: handshake.transcriptHash, room: room)
                 paired = true
             }
 
-            let offer = TransferOffer(transferId: id, files: offerFiles, kind: kind)
+            let offer = TransferOffer(transferId: id, files: offerFiles, kind: kind,
+                                      requestId: requestId, expiresAfter: expiresAfter)
             try await waitForAcceptance(secure, offer: offer, peer: peer, sas: handshake.sas, alreadyPaired: paired)
             if publisher.current.phase == .rejected { secure.transport.close(); return publisher.current }
 
@@ -224,11 +244,13 @@ public final class OutgoingTransfer {
         return (size, hash.finalizeHex())
     }
 
-    private func pair(_ channel: SecureChannel, peer: PeerInfo, sas: String) async throws {
+    private func pair(_ channel: SecureChannel, peer: PeerInfo, sas: String,
+                      transcriptHash: Data = Data(), room: Room? = nil) async throws {
         publisher.update(force: true) { $0.phase = .pairing }
         try await QrPairingClient.pair(channel: channel, peer: peer, sas: sas, qr: qr, trust: trust,
                                        delegate: delegate,
-                                       onDecision: { [weak self] decision in self?.setPending(decision) })
+                                       onDecision: { [weak self] decision in self?.setPending(decision) },
+                                       transcriptHash: transcriptHash, room: room)
         setPending(nil)
     }
 
@@ -404,7 +426,13 @@ public final class OutgoingTransfer {
 /// skip its prompt. Without a code it is the usual compare-the-numbers pairing.
 public enum QrPairingClient {
     static func pair(channel: SecureChannel, peer: PeerInfo, sas: String, qr: QrPairing?, trust: TrustProvider,
-                     delegate: CrossDropDelegate?, onDecision: ((Decision) -> Void)?) async throws {
+                     delegate: CrossDropDelegate?, onDecision: ((Decision) -> Void)?,
+                     transcriptHash: Data = Data(), room: Room? = nil) async throws {
+        if qr == nil, let room = room, room.isActive(), trust.supportsTrustExpiry, !transcriptHash.isEmpty {
+            try await RoomPairingClient.pair(channel: channel, peer: peer, sas: sas, transcriptHash: transcriptHash,
+                                             room: room, trust: trust, delegate: delegate, onDecision: onDecision)
+            return
+        }
         guard let qr = qr else {
             try await channel.sendControl(WireMessage.make("pair.request"))
             try await PairingFlow.run(channel: channel, peer: peer, sas: sas, role: .sender, autoConfirm: false,
@@ -437,6 +465,121 @@ public enum QrPairingClient {
             do {
                 let handshake = try await Handshake.runClient(channel: channel, identity: identity, local: local, trust: trust)
                 try await pair(channel: channel, peer: handshake.peer, sas: handshake.sas, qr: qr, trust: trust,
+                               delegate: delegate, onDecision: nil)
+                transport.close()
+                return handshake.peer
+            } catch let error as CrossDropError {
+                await channel.abort(with: error)
+                throw error
+            }
+        }
+        throw lastError
+    }
+}
+
+/// Pairing inside a Drip Room (§9.9). The sender proves it holds the room key over this
+/// exact handshake; a receiver in the same room answers at once with its own proof, and
+/// both store trust that ends with the room. Without that answer (unknown room, wrong
+/// key, or an older receiver) it falls back to the normal code comparison.
+public enum RoomPairingClient {
+    static func pair(channel: SecureChannel, peer: PeerInfo, sas: String, transcriptHash: Data, room: Room,
+                     trust: TrustProvider, delegate: CrossDropDelegate?,
+                     onDecision: ((Decision) -> Void)?) async throws {
+        let proof = room.proof(transcriptHash: transcriptHash).base64EncodedString()
+        try await channel.sendControl(WireMessage.make("pair.request", ["room": ["id": room.id, "proof": proof]]))
+        // One read of the receiver's first answer; PairingFlow keeps waiting on it if it is slow.
+        let answer = Task<WireMessage, Error> {
+            try await channel.receiveControl(timeout: ProtocolConstants.humanTimeout + 15)
+        }
+        // A receiver that accepts the proof answers without a human; anything slower means codes.
+        let early = await firstResult(of: answer, within: ProtocolConstants.roomAnswerWait)
+        guard let result = early else {
+            try await PairingFlow.run(channel: channel, peer: peer, sas: sas, role: .sender, autoConfirm: false,
+                                      pendingAnswer: answer, trust: trust, delegate: delegate, onDecision: onDecision)
+            return
+        }
+        let message: WireMessage
+        switch result {
+        case .success(let value): message = value
+        case .failure(let error): throw error
+        }
+        switch message.type {
+        case "pair.confirm":
+            guard try message.requireBool("accepted") else { throw CrossDropError.peer(ErrorCode.pairingRejected) }
+        case "error":
+            throw message.peerError()
+        case "transfer.cancel":
+            throw CrossDropError.peer(ErrorCode.cancelled)
+        default:
+            throw CrossDropError.violation(ErrorCode.unexpectedMessage)
+        }
+        if confirmProofIsValid(message, room: room, transcriptHash: transcriptHash) {
+            try await PairingFlow.run(channel: channel, peer: peer, sas: sas, role: .sender, autoConfirm: false,
+                                      autoMine: false, autoExpiresAt: room.expiryDate, pendingAnswer: answer,
+                                      trust: trust, delegate: delegate, onDecision: onDecision)
+        } else {
+            // The receiver confirmed without proving the room (it already trusted us): compare codes here.
+            try await PairingFlow.run(channel: channel, peer: peer, sas: sas, role: .sender, autoConfirm: false,
+                                      pendingAnswer: answer, trust: trust, delegate: delegate, onDecision: onDecision)
+        }
+    }
+
+    /// The task's outcome if it finishes within `seconds`, otherwise nil (the task keeps
+    /// running, and a later `task.value` still gets its result). Not a task group: a group
+    /// would wait for its child awaiting `task.value`, which cancellation does not end.
+    static func firstResult(of task: Task<WireMessage, Error>, within seconds: TimeInterval) async -> Result<WireMessage, Error>? {
+        let outcome = try? await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Result<WireMessage, Error>?, Error>) in
+            let box = ContinuationBox(continuation)
+            Task {
+                do {
+                    let value = try await task.value
+                    box.resume(returning: .success(value))
+                } catch {
+                    box.resume(returning: .failure(error))
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
+                box.resume(returning: nil)
+            }
+        }
+        return outcome ?? nil
+    }
+
+    static func confirmProofIsValid(_ message: WireMessage, room: Room, transcriptHash: Data) -> Bool {
+        guard let entry = message.fields["room"] as? [String: Any],
+              let id = entry["id"] as? String, id == room.id,
+              let text = entry["proof"] as? String, text.utf8.count <= 128,
+              let proof = Data(base64Encoded: text) else { return false }
+        return Room.constantTimeEqual(room.confirmProof(transcriptHash: transcriptHash), proof)
+    }
+
+    /// Connects to the device that showed a room code, pairs through the room, and closes.
+    /// The device must hold the key named by the code's fingerprint. Returns the paired peer.
+    public static func pairOnly(invite: RoomInvite, identity: DeviceIdentity, local: LocalInfo,
+                                trust: TrustProvider, delegate: CrossDropDelegate?) async throws -> PeerInfo {
+        guard trust.supportsTrustExpiry else {
+            throw CrossDropError.local(ErrorCode.internalError, "room pairing needs a trust store that can expire trust")
+        }
+        var lastError = CrossDropError.local(ErrorCode.unreachable, "no address")
+        for host in invite.hosts {
+            guard let port = NWEndpoint.Port(rawValue: invite.port) else { break }
+            let transport = NWTransport.connect(to: .hostPort(host: NWEndpoint.Host(host), port: port))
+            let channel = SecureChannel(transport: transport)
+            do {
+                try await transport.start(timeout: ProtocolConstants.connectTimeout)
+            } catch {
+                transport.close()
+                lastError = CrossDropError.local(ErrorCode.unreachable, "connect failed")
+                continue
+            }
+            do {
+                let handshake = try await Handshake.runClient(channel: channel, identity: identity, local: local, trust: trust)
+                guard handshake.peer.fingerprint == invite.fingerprint else {
+                    throw CrossDropError.violation(ErrorCode.authFailed, "not the device in the room code")
+                }
+                try await pair(channel: channel, peer: handshake.peer, sas: handshake.sas,
+                               transcriptHash: handshake.transcriptHash, room: invite.room, trust: trust,
                                delegate: delegate, onDecision: nil)
                 transport.close()
                 return handshake.peer

@@ -21,14 +21,18 @@ public final class CrossDropServer {
         /// "My devices only" (§9.5): unpaired devices are refused unless they show a QR
         /// token. Read per connection; advertising follows it on the next `start`.
         public var privateMode: () -> Bool
+        /// Drip Rooms this device is in (§9.9); pass the same registry to outgoing transfers.
+        /// Their hints are advertised (TXT `r`) on the next `start` / `refreshAdvertisement`.
+        public var rooms: Rooms
 
         public init(identity: DeviceIdentity, local: LocalInfo, trust: TrustProvider, destination: @escaping () -> URL,
-                    privateMode: @escaping () -> Bool = { false }) {
+                    privateMode: @escaping () -> Bool = { false }, rooms: Rooms = Rooms()) {
             self.identity = identity
             self.local = local
             self.trust = trust
             self.destination = destination
             self.privateMode = privateMode
+            self.rooms = rooms
         }
     }
 
@@ -36,6 +40,10 @@ public final class CrossDropServer {
     public var onStateChange: ((State) -> Void)?
     /// One-time tokens for pairing QR codes (§9.4).
     public let pairingTokens = PairingTokens()
+    /// Capture requests this device sent and expects an answer to (§9.7).
+    public let captureRequests = CaptureRequests()
+    /// Drip Rooms this device is in (§9.9).
+    public var rooms: Rooms { configuration.rooms }
 
     private let configuration: Configuration
     private let queue = DispatchQueue(label: "app.crossdrop.listener")
@@ -109,7 +117,8 @@ public final class CrossDropServer {
         return NWListener.Service(name: name, type: ProtocolConstants.serviceType, domain: nil,
                                   txtRecord: Self.txtRecord(deviceId: configuration.identity.deviceId,
                                                             platform: configuration.local.platform,
-                                                            privateMode: isPrivate))
+                                                            privateMode: isPrivate,
+                                                            roomHints: configuration.rooms.hints()))
     }
 
     /// Re-announces after the private mode changed, without dropping connections.
@@ -175,7 +184,8 @@ public final class CrossDropServer {
                                       trust: config.trust, delegate: delegate,
                                       destination: config.destination,
                                       isReceiving: { [weak self] in self?.isRunning() ?? false },
-                                      privateMode: config.privateMode, pairingTokens: pairingTokens)
+                                      privateMode: config.privateMode, pairingTokens: pairingTokens,
+                                      rooms: config.rooms, captureRequests: captureRequests)
         lock.lock()
         sessions[session.id] = session
         lock.unlock()
@@ -201,10 +211,13 @@ public final class CrossDropServer {
     }
 
     /// DNS-SD TXT wire format: each entry is a length byte followed by "key=value".
-    static func txtRecord(deviceId: String, platform: String, privateMode: Bool = false) -> Data {
+    /// `roomHints` become `r=<hint>,<hint>` (§9.9).
+    static func txtRecord(deviceId: String, platform: String, privateMode: Bool = false, roomHints: [String] = []) -> Data {
         var data = Data()
         var entries = ["v=\(ProtocolConstants.version)", "id=\(deviceId)", "p=\(platform)"]
         if privateMode { entries.append("m=1") }
+        let hints = Rooms.parseHints(roomHints.joined(separator: ","))
+        if !hints.isEmpty { entries.append("r=\(hints.joined(separator: ","))") }
         for entry in entries {
             let bytes = Data(entry.utf8)
             data.append(UInt8(bytes.count))
