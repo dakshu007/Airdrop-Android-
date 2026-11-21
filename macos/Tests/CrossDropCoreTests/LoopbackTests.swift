@@ -334,8 +334,12 @@ final class LoopbackTests: XCTestCase {
             trust: rig.clientTrust, delegate: rig.clientDelegate)
         XCTAssertEqual(peer.deviceId, rig.serverIdentity.deviceId)
         XCTAssertNotNil(rig.clientTrust.trustedIdentityKey(for: rig.serverIdentity.deviceId))
-        try await Task.sleep(nanoseconds: 300_000_000)
+        // The server stores trust when it reads our confirmation, just after we return.
+        for _ in 0..<150 where rig.serverTrust.trustedIdentityKey(for: rig.clientIdentity.deviceId) == nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
         XCTAssertNotNil(rig.serverTrust.trustedIdentityKey(for: rig.clientIdentity.deviceId))
+        try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertEqual(rig.serverDelegate.finished.count, 0)
     }
 }

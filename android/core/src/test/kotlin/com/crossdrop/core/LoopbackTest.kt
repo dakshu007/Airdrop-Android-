@@ -286,6 +286,10 @@ class LoopbackTest {
         assertEquals(serverIdentity.deviceId, peer.deviceId)
         assertEquals(null, serverSas)
         assertEquals(true, clientTrust.get(serverIdentity.deviceId)?.autoAccept)
+        // The client returns once it has the server's confirmation; the server stores
+        // trust when it reads the client's, a moment later.
+        val deadline = System.currentTimeMillis() + 3000
+        while (serverTrust.get(clientIdentity.deviceId) == null && System.currentTimeMillis() < deadline) Thread.sleep(20)
         assertEquals(true, serverTrust.get(clientIdentity.deviceId)?.autoAccept)
         Thread.sleep(300)
         assertTrue(failures.isEmpty(), "a pairing-only session ends quietly: $failures")
