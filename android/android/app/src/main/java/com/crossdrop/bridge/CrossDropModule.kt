@@ -11,6 +11,8 @@ import android.os.Build
 import android.provider.Settings
 import com.crossdrop.engine.Engine
 import com.crossdrop.engine.NotificationPermissions
+import com.crossdrop.pairing.ScanActivity
+import com.crossdrop.screenshots.ScreenshotWatcher
 import com.crossdrop.share.SharedFile
 import com.crossdrop.share.SharedFiles
 import com.crossdrop.specs.NativeCrossDropSpec
@@ -29,6 +31,8 @@ class CrossDropModule(private val context: ReactApplicationContext) : NativeCros
     private val engine = Engine.get(context)
     private val io = Executors.newSingleThreadExecutor { r -> Thread(r, "crossdrop-bridge").apply { isDaemon = true } }
     private var pickPromise: Promise? = null
+    private var folderPromise: Promise? = null
+    private var scanPromise: Promise? = null
 
     init {
         context.addActivityEventListener(this)
@@ -55,6 +59,100 @@ class CrossDropModule(private val context: ReactApplicationContext) : NativeCros
 
     override fun setReceiving(enabled: Boolean) = engine.setReceiving(enabled)
 
+    override fun setReceiveMode(mode: String) {
+        if (mode in setOf("off", "mine", "everyone")) engine.setReceiveMode(mode)
+    }
+
+    override fun pickFolder(promise: Promise) {
+        val activity = context.currentActivity ?: return promise.reject("no_activity", "CrossDrop is not in the foreground")
+        folderPromise?.resolve("[]")
+        folderPromise = promise
+        try {
+            activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), FOLDER_REQUEST)
+        } catch (e: ActivityNotFoundException) {
+            folderPromise = null
+            promise.reject("no_picker", "No folder picker is available")
+        }
+    }
+
+    override fun scanPairingCode(promise: Promise) {
+        val activity = context.currentActivity ?: return promise.reject("no_activity", "CrossDrop is not in the foreground")
+        scanPromise?.resolve("")
+        scanPromise = promise
+        activity.startActivityForResult(Intent(activity, ScanActivity::class.java), SCAN_REQUEST)
+    }
+
+    override fun pairWithCode(code: String, mine: Boolean, promise: Promise) {
+        io.execute {
+            try {
+                promise.resolve(engine.pairWithCode(code, mine))
+            } catch (e: IllegalArgumentException) {
+                promise.reject("bad_code", "That isn't a CrossDrop pairing code")
+            } catch (e: com.crossdrop.core.ProtocolException) {
+                promise.reject(e.code.wire, e.code.wire)
+            } catch (e: Exception) {
+                promise.reject("internal", e.javaClass.simpleName)
+            }
+        }
+    }
+
+    override fun sendSharedText(deviceId: String, promise: Promise) {
+        io.execute {
+            try {
+                promise.resolve(engine.sendSharedText(deviceId))
+            } catch (e: IllegalStateException) {
+                promise.reject("unreachable", "That device is no longer nearby")
+            } catch (e: Exception) {
+                promise.reject("internal", e.javaClass.simpleName)
+            }
+        }
+    }
+
+    override fun takeClipboard(promise: Promise) {
+        // Must run on the main thread while CrossDrop has focus, or Android hides the clipboard.
+        context.runOnUiQueueThread { promise.resolve(engine.takeClipboard()) }
+    }
+
+    override fun resendHistory(historyId: String, deviceId: String, promise: Promise) {
+        io.execute {
+            try {
+                promise.resolve(engine.resend(historyId, deviceId.ifBlank { null }))
+            } catch (e: java.io.FileNotFoundException) {
+                promise.reject("file_unreadable", "Those files can no longer be read")
+            } catch (e: IllegalStateException) {
+                promise.reject("unreachable", "That device is no longer nearby")
+            } catch (e: Exception) {
+                promise.reject("internal", e.javaClass.simpleName)
+            }
+        }
+    }
+
+    override fun openLink(url: String) {
+        engine.openLink(url)
+    }
+
+    override fun copyText(text: String) = engine.copyText(text)
+
+    override fun setScreenshotOffer(enabled: Boolean, promise: Promise) {
+        if (!enabled) {
+            engine.setScreenshotOffer(false)
+            return promise.resolve(false)
+        }
+        val permission = ScreenshotWatcher.permission()
+        if (context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+            engine.setScreenshotOffer(true)
+            return promise.resolve(true)
+        }
+        val activity = context.currentActivity as? PermissionAwareActivity ?: return promise.resolve(false)
+        activity.requestPermissions(arrayOf(permission), PHOTOS_REQUEST) { requestCode, _, results ->
+            if (requestCode != PHOTOS_REQUEST) return@requestPermissions false
+            val granted = results.firstOrNull() == PackageManager.PERMISSION_GRANTED
+            engine.setScreenshotOffer(granted)
+            promise.resolve(granted)
+            true
+        }
+    }
+
     override fun pickFiles(promise: Promise) {
         val activity = context.currentActivity
         if (activity == null) {
@@ -76,6 +174,24 @@ class CrossDropModule(private val context: ReactApplicationContext) : NativeCros
     }
 
     override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == SCAN_REQUEST) {
+            val promise = scanPromise ?: return
+            scanPromise = null
+            promise.resolve(if (resultCode == Activity.RESULT_OK) data?.getStringExtra(ScanActivity.EXTRA_CODE) ?: "" else "")
+            return
+        }
+        if (requestCode == FOLDER_REQUEST) {
+            val promise = folderPromise ?: return
+            folderPromise = null
+            val tree = data?.data
+            if (resultCode != Activity.RESULT_OK || tree == null) return promise.resolve("[]")
+            io.execute {
+                runCatching { context.contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                val files = runCatching { SharedFiles.fromTree(context, tree) }.getOrDefault(emptyList())
+                promise.resolve(SharedFiles.listToJson(files))
+            }
+            return
+        }
         if (requestCode != PICK_REQUEST) return
         val promise = pickPromise ?: return
         pickPromise = null
@@ -120,7 +236,7 @@ class CrossDropModule(private val context: ReactApplicationContext) : NativeCros
         }
     }
 
-    override fun respondToPairing(sessionId: String, accept: Boolean) = engine.respondToPairing(sessionId, accept)
+    override fun respondToPairing(sessionId: String, accept: Boolean, mine: Boolean) = engine.respondToPairing(sessionId, accept, mine)
 
     override fun respondToOffer(transferId: String, accept: Boolean) = engine.respondToOffer(transferId, accept)
 
@@ -224,5 +340,8 @@ class CrossDropModule(private val context: ReactApplicationContext) : NativeCros
         const val EVENT = "CrossDropState"
         private const val PICK_REQUEST = 4207
         private const val PERMISSION_REQUEST = 4208
+        private const val FOLDER_REQUEST = 4209
+        private const val SCAN_REQUEST = 4210
+        private const val PHOTOS_REQUEST = 4211
     }
 }

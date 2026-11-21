@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
 import { RoundButton } from '../components/Chips';
@@ -7,14 +7,21 @@ import { DeviceRow } from '../components/DeviceRow';
 import { DripStage } from '../components/DripStage';
 import { FileRow } from '../components/FileRow';
 import { Frost } from '../components/Frost';
+import { Icon } from '../components/Icon';
 import { Logo } from '../components/Logo';
+import { ReceiveModeSheet } from '../components/ReceiveModeSheet';
 import { TAB_BAR_SPACE } from '../components/Screen';
 import { Sheet } from '../components/Sheet';
 import { Text } from '../components/Text';
 import { friendlyError } from '../copy';
 import { formatBytes, formatClock, pluralFiles, sumSizes } from '../format';
 import * as CrossDrop from '../native/crossdrop';
-import type { NearbyDevice, SharedFile, Snapshot } from '../native/types';
+import type {
+  NearbyDevice,
+  SharedFile,
+  SharedText,
+  Snapshot,
+} from '../native/types';
 import { useNavigation } from '../navigation/NavigationContext';
 import { useCrossDrop, useSnapshot } from '../state/CrossDropProvider';
 import { useReceivingToggle } from '../state/useReceiving';
@@ -58,32 +65,180 @@ function MiniSwitch({ on }: { on: boolean }) {
 }
 
 function ReceivingPill({ snapshot }: { snapshot: Snapshot }) {
-  const toggle = useReceivingToggle(snapshot);
-  const { receiving, local } = snapshot;
-  const label = receiving.enabled
-    ? receiving.autoOffAt !== null
-      ? `Receiving · until ${formatClock(receiving.autoOffAt)}`
-      : `Receiving · visible as ${local.name}`
-    : 'Receiving off';
+  const [open, setOpen] = useState(false);
+  const { receiving } = snapshot;
+  const label =
+    receiving.mode === 'everyone'
+      ? receiving.autoOffAt !== null
+        ? `Everyone · until ${formatClock(receiving.autoOffAt)}`
+        : 'Receiving from everyone'
+      : receiving.mode === 'mine'
+      ? 'My devices · always ready'
+      : 'Receiving off';
   return (
-    <Pressable
-      onPress={() => toggle(!receiving.enabled)}
-      accessibilityRole="switch"
-      accessibilityLabel="Receiving"
-      accessibilityState={{ checked: receiving.enabled }}
-      accessibilityHint={
-        receiving.enabled
-          ? `Visible to nearby devices as ${local.name}. Double tap to turn off.`
-          : 'Lets nearby devices send to this phone. Turns off by itself after 10 minutes.'
-      }
-      style={styles.pill}
-    >
-      <Frost radius={999} />
-      <Text variant="subhead" style={styles.pillText} numberOfLines={1}>
-        {label}
+    <>
+      <Pressable
+        onPress={() => setOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`Receiving: ${label}`}
+        accessibilityHint="Choose who can send to this phone"
+        style={styles.pill}
+      >
+        <Frost radius={999} />
+        <Text variant="subhead" style={styles.pillText} numberOfLines={1}>
+          {label}
+        </Text>
+        <MiniSwitch on={receiving.enabled} />
+      </Pressable>
+      {open ? (
+        <ReceiveModeSheet snapshot={snapshot} onClose={() => setOpen(false)} />
+      ) : null}
+    </>
+  );
+}
+
+/** True for a moment after a new device appears, so Drip can wave hello. */
+function useWave(newestDeviceAt: number): boolean {
+  const [waving, setWaving] = useState(false);
+  useEffect(() => {
+    if (!newestDeviceAt || Date.now() - newestDeviceAt > 3000) return;
+    setWaving(true);
+    const timer = setTimeout(() => setWaving(false), 1400);
+    return () => clearTimeout(timer);
+  }, [newestDeviceAt]);
+  return waving;
+}
+
+/** A link or text waiting to be sent (share sheet or clipboard). */
+export function TextTray({
+  text,
+  onClear,
+}: {
+  text: SharedText;
+  onClear?: () => void;
+}) {
+  const t = useTheme();
+  return (
+    <View style={styles.tray}>
+      <Frost radius={22} />
+      <View style={styles.trayHead}>
+        <Icon
+          name={text.kind === 'link' ? 'link' : 'clipboard'}
+          size={18}
+          color={t.link}
+        />
+        <Text variant="headline" style={styles.flex} numberOfLines={1}>
+          {text.kind === 'link' ? 'Link' : 'Text'}
+        </Text>
+        {onClear ? (
+          <Button
+            title="Clear"
+            kind="plain"
+            compact
+            onPress={onClear}
+            accessibilityLabel={`Clear ${text.kind}`}
+          />
+        ) : null}
+      </View>
+      <Text
+        variant="callout"
+        tone="secondary"
+        numberOfLines={text.kind === 'link' ? 2 : 4}
+      >
+        {text.preview}
       </Text>
-      <MiniSwitch on={receiving.enabled} />
-    </Pressable>
+      <Text variant="footnote" tone="tertiary">
+        {text.kind === 'link'
+          ? 'Opens on a Mac; a phone shows it to open.'
+          : 'Lands on the other device’s clipboard. Not saved as a file.'}
+      </Text>
+    </View>
+  );
+}
+
+/** Pick several devices, then send to all of them at once. */
+function MultiSendSheet({
+  devices,
+  onSend,
+  onClose,
+}: {
+  devices: NearbyDevice[];
+  onSend: (devices: NearbyDevice[]) => void;
+  onClose: () => void;
+}) {
+  const t = useTheme();
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setPicked(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const chosen = devices.filter(d => picked.has(d.deviceId));
+  return (
+    <Sheet
+      visible
+      onRequestClose={onClose}
+      accessibilityLabel="Send to several devices"
+    >
+      <Text variant="title" accessibilityRole="header">
+        Send to several
+      </Text>
+      <Text variant="callout" tone="secondary">
+        Each device gets its own copy, verified separately.
+      </Text>
+      <View style={styles.multiList}>
+        {devices.map(d => {
+          const on = picked.has(d.deviceId);
+          return (
+            <Pressable
+              key={d.deviceId}
+              onPress={() => toggle(d.deviceId)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: on }}
+              accessibilityLabel={d.name}
+              style={[
+                styles.multiRow,
+                { backgroundColor: on ? 'rgba(20,154,91,0.10)' : t.inset },
+              ]}
+            >
+              <Icon
+                name={d.platform === 'macos' ? 'laptop' : 'phone'}
+                size={22}
+                color={t.textPrimary}
+              />
+              <Text variant="headline" style={styles.flex} numberOfLines={1}>
+                {d.name}
+              </Text>
+              <View
+                style={[
+                  styles.check,
+                  on
+                    ? { backgroundColor: green, borderColor: green }
+                    : { borderColor: t.textTertiary },
+                ]}
+              >
+                {on ? <Icon name="check" size={16} color="#FFFFFF" /> : null}
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Button
+        title={
+          chosen.length > 1
+            ? `Send to ${chosen.length} devices`
+            : chosen.length === 1
+            ? `Send to ${chosen[0].name}`
+            : 'Choose devices'
+        }
+        icon="send"
+        large
+        disabled={chosen.length === 0}
+        onPress={() => onSend(chosen)}
+      />
+    </Sheet>
   );
 }
 
@@ -184,6 +339,8 @@ interface NearbyViewProps {
   /** Title when devices are around (e.g. "Ready to send" or "Send 3 files"). */
   readyTitle: string;
   onSelect: (device: NearbyDevice) => void;
+  /** Send to several devices at once (offered when two or more are around). */
+  onSelectMany?: (devices: NearbyDevice[]) => void;
   busy: boolean;
   actionHint: (device: NearbyDevice) => string;
   /** The main action when devices are around (Choose files) or files are waiting (tray). */
@@ -198,6 +355,7 @@ export function NearbyView({
   header,
   readyTitle,
   onSelect,
+  onSelectMany,
   busy,
   actionHint,
   footer,
@@ -206,6 +364,8 @@ export function NearbyView({
   const insets = useSafeAreaInsets();
   const toggleReceiving = useReceivingToggle(snapshot);
   const [showAll, setShowAll] = useState(false);
+  const [showMulti, setShowMulti] = useState(false);
+  const waving = useWave(snapshot.newestDeviceAt);
   const mode = nearbyMode(snapshot);
   const count = snapshot.nearby.length;
 
@@ -257,10 +417,24 @@ export function NearbyView({
       subtitle = `${count} ${
         count === 1 ? 'device' : 'devices'
       } nearby. Tap one to send.`;
+      if (onSelectMany && count > 1) {
+        action = (
+          <View style={styles.footerGroup}>
+            {footer}
+            <Button
+              title="Send to several"
+              icon="layers"
+              kind="plain"
+              compact
+              onPress={() => setShowMulti(true)}
+            />
+          </View>
+        );
+      }
       stage = (
         <DripStage
           pose="nearby"
-          motion="bob"
+          motion={waving ? 'wave' : 'bob'}
           rings="halo"
           devices={snapshot.nearby}
           busy={busy}
@@ -273,7 +447,7 @@ export function NearbyView({
     case 'napping':
       title = 'Drip is napping';
       subtitle =
-        'Receiving is off, so nearby Macs can’t see this phone. Macs you can send to still show up here.';
+        'Receiving is off, so nearby Macs can’t see this phone. Macs that are receiving still show up here.';
       stage = <DripStage pose="sleepy" motion="breathe" />;
       action = (
         <View style={styles.footerGroup}>
@@ -342,6 +516,16 @@ export function NearbyView({
         {stage}
         <View style={styles.footer}>{action}</View>
       </ScrollView>
+      {showMulti && onSelectMany ? (
+        <MultiSendSheet
+          devices={snapshot.nearby}
+          onClose={() => setShowMulti(false)}
+          onSend={devices => {
+            setShowMulti(false);
+            onSelectMany(devices);
+          }}
+        />
+      ) : null}
       {showAll ? (
         <Sheet
           visible
@@ -377,6 +561,26 @@ export function NearbyScreen() {
   const { send, busy } = useSendFiles();
 
   const choose = async () => addToSelection(await pickFilesSafely());
+  const chooseFolder = async () => {
+    try {
+      const files = await CrossDrop.pickFolder();
+      if (files.length > 0) addToSelection(files);
+    } catch (e) {
+      Alert.alert(
+        'Couldn’t open folders',
+        e instanceof Error ? e.message : 'Try again.',
+      );
+    }
+  };
+  const pasteClipboard = async () => {
+    // The share screen takes over once the clipboard text is offered.
+    if (!(await CrossDrop.takeClipboard().catch(() => false))) {
+      Alert.alert(
+        'Nothing to send',
+        'Copy a link or some text first, then tap Clipboard again.',
+      );
+    }
+  };
 
   const onSelect = async (device: NearbyDevice) => {
     let files = selection;
@@ -385,6 +589,19 @@ export function NearbyScreen() {
       if (files.length === 0) return;
     }
     if (await send(device, files)) clearSelection();
+  };
+
+  const onSelectMany = async (devices: NearbyDevice[]) => {
+    let files = selection;
+    if (files.length === 0) {
+      files = await pickFilesSafely();
+      if (files.length === 0) return;
+    }
+    let sent = 0;
+    for (const device of devices) {
+      if (await send(device, files)) sent += 1;
+    }
+    if (sent > 0) clearSelection();
   };
 
   const header = (
@@ -411,6 +628,24 @@ export function NearbyScreen() {
     selection.length === 0 ? (
       <View style={styles.footerGroup}>
         <Button title="Choose files" icon="plus" large onPress={choose} />
+        <View style={styles.extraRow}>
+          <Button
+            title="Folder"
+            icon="folder"
+            kind="secondary"
+            compact
+            onPress={chooseFolder}
+            accessibilityLabel="Choose a folder to send"
+          />
+          <Button
+            title="Clipboard"
+            icon="clipboard"
+            kind="secondary"
+            compact
+            onPress={pasteClipboard}
+            accessibilityLabel="Send what's on the clipboard"
+          />
+        </View>
         <Text variant="footnote" tone="secondary" center>
           or share from any app
         </Text>
@@ -440,6 +675,7 @@ export function NearbyScreen() {
           : 'Ready to send'
       }
       onSelect={onSelect}
+      onSelectMany={onSelectMany}
       busy={busy}
       actionHint={device =>
         selection.length > 0
@@ -496,6 +732,24 @@ const styles = StyleSheet.create({
   titles: { gap: spacing.xs, paddingHorizontal: spacing.xxs },
   footer: { gap: spacing.sm },
   footerGroup: { gap: 10 },
+  extraRow: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm },
+  multiList: { gap: spacing.xs, marginVertical: spacing.sm },
+  multiRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: 18,
+    paddingHorizontal: spacing.md,
+    minHeight: 56,
+  },
+  check: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   tips: {
     borderRadius: 22,
     overflow: 'hidden',

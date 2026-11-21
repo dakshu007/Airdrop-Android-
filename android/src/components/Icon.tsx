@@ -38,7 +38,14 @@ export type IconName =
   | 'swap'
   | 'sound'
   | 'vibrate'
-  | 'cloudOff';
+  | 'cloudOff'
+  | 'arrowUpRight'
+  | 'link'
+  | 'clipboard'
+  | 'qr'
+  | 'search'
+  | 'layers'
+  | 'heart';
 
 interface IconProps {
   name: IconName;
@@ -310,6 +317,55 @@ export function Icon({ name, size = 24, color, strokeWidth = 1.8 }: IconProps) {
       break;
     case 'arrowUp':
       body = <Path d="M12 19V5M6 11l6-6 6 6" {...s} />;
+      break;
+    case 'arrowUpRight':
+      body = <Path d="M7 17L17 7M9 7h8v8" {...s} />;
+      break;
+    case 'link':
+      body = (
+        <Path
+          d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"
+          {...s}
+        />
+      );
+      break;
+    case 'clipboard':
+      body = (
+        <>
+          <Rect x={5} y={4.5} width={14} height={16} rx={2.5} {...s} />
+          <Rect x={9} y={3} width={6} height={3.5} rx={1.2} {...s} />
+          <Path d="M9 11.5h6M9 15h4" {...s} />
+        </>
+      );
+      break;
+    case 'qr':
+      body = (
+        <>
+          <Rect x={4} y={4} width={6} height={6} rx={1.2} {...s} />
+          <Rect x={14} y={4} width={6} height={6} rx={1.2} {...s} />
+          <Rect x={4} y={14} width={6} height={6} rx={1.2} {...s} />
+          <Path d="M14 14h2.5v2.5M20 14v.01M14 20h.01M17 17.5V20h3v-3" {...s} />
+        </>
+      );
+      break;
+    case 'search':
+      body = (
+        <>
+          <Circle cx={11} cy={11} r={6} {...s} />
+          <Path d="M15.5 15.5L20 20" {...s} />
+        </>
+      );
+      break;
+    case 'layers':
+      body = <Path d="M12 4l8 4-8 4-8-4 8-4zM4 12l8 4 8-4M4 16l8 4 8-4" {...s} />;
+      break;
+    case 'heart':
+      body = (
+        <Path
+          d="M12 19.5s-7-4.3-7-9.5a4 4 0 017-2.6A4 4 0 0119 10c0 5.2-7 9.5-7 9.5z"
+          {...s}
+        />
+      );
       break;
     case 'arrowDown':
       body = <Path d="M12 5v14M6 13l6 6 6-6" {...s} />;

@@ -78,6 +78,8 @@ function transfer(overrides: Partial<Transfer> = {}): Transfer {
     error: null,
     rejectReason: null,
     canRetry: false,
+    kind: 'files',
+    text: null,
     ...overrides,
   };
 }
@@ -88,7 +90,14 @@ afterEach(() => {
 
 test('welcomes a first-time user and remembers it', async () => {
   const renderer = await render(
-    emptySnapshot({ prefs: { sound: true, haptics: true, welcomed: false } }),
+    emptySnapshot({
+      prefs: {
+        sound: true,
+        haptics: true,
+        welcomed: false,
+        screenshotOffer: false,
+      },
+    }),
   );
   expect(allText(renderer)).toContain(
     'Your phone and your Mac, one tap apart.',
@@ -103,7 +112,14 @@ test('welcomes a first-time user and remembers it', async () => {
 test('looks for devices while receiving is on, and stops when it leaves', async () => {
   const renderer = await render(
     emptySnapshot({
-      receiving: { enabled: true, port: 4100, error: null, autoOffAt: null },
+      receiving: {
+        enabled: true,
+        mode: 'everyone',
+        base: 'off',
+        port: 4100,
+        error: null,
+        autoOffAt: null,
+      },
     }),
   );
   const text = allText(renderer);
@@ -146,6 +162,7 @@ test('shows a nearby Mac as a chip with its trust state', async () => {
           name: 'Studio Mac',
           platform: 'macos',
           trusted: true,
+          remembered: false,
         },
       ],
     }),
@@ -185,7 +202,7 @@ test('shows the pairing code as tiles and answers the prompt', async () => {
   await ReactTestRenderer.act(async () =>
     pressable(renderer, 'Codes match').props.onPress(),
   );
-  expect(native.respondToPairing).toHaveBeenCalledWith('s1', true);
+  expect(native.respondToPairing).toHaveBeenCalledWith('s1', true, false);
   expect(native.feedback).toHaveBeenCalledWith('confirm');
   expect(allText(renderer)).toContain('Waiting for Studio Mac to confirm…');
   await ReactTestRenderer.act(async () => renderer.unmount());
@@ -206,6 +223,7 @@ test('shows an incoming offer with total size and accepts it', async () => {
           ],
           totalBytes: 2_000_000,
           expiresAt: Date.now() + 60000,
+          kind: 'files',
         },
       ],
     }),
@@ -279,4 +297,157 @@ test('shows a recoverable error when the engine does not respond', async () => {
   });
   expect(allText(renderer!)).toContain('CrossDrop couldn’t start');
   await ReactTestRenderer.act(async () => renderer!.unmount());
+});
+
+/** The share sheet flow sits on top of the Nearby tab, which renders the same chips. */
+function topPressable(
+  renderer: ReactTestRenderer.ReactTestRenderer,
+  label: string,
+) {
+  const all = renderer.root.findAll(
+    node =>
+      node.props.accessibilityLabel === label &&
+      typeof node.props.onPress === 'function',
+  );
+  return all[all.length - 1];
+}
+
+const MAC = {
+  deviceId: 'abc',
+  name: 'Studio Mac',
+  platform: 'macos' as const,
+  trusted: true,
+  remembered: false,
+};
+
+test('"This is my device" goes along with the pairing answer', async () => {
+  const renderer = await render(
+    emptySnapshot({
+      pairing: [
+        {
+          sessionId: 's2',
+          peerId: 'abc',
+          peerName: 'Studio Mac',
+          peerPlatform: 'macos',
+          code: '123456',
+          role: 'receiver',
+          waitingForPeer: false,
+          expiresAt: Date.now() + 120000,
+        },
+      ],
+    }),
+  );
+  const toggle = renderer.root.find(
+    node =>
+      node.props.accessibilityLabel === 'This is my device' &&
+      node.props.accessibilityRole === 'switch',
+  );
+  await ReactTestRenderer.act(async () => toggle.props.onPress());
+  await ReactTestRenderer.act(async () =>
+    pressable(renderer, 'Codes match').props.onPress(),
+  );
+  expect(native.respondToPairing).toHaveBeenCalledWith('s2', true, true);
+  await ReactTestRenderer.act(async () => renderer.unmount());
+});
+
+test('chooses who can send from the receiving pill', async () => {
+  const renderer = await render(
+    emptySnapshot({ notificationPermission: 'granted' }),
+  );
+  await ReactTestRenderer.act(async () =>
+    pressable(renderer, 'Receiving: Receiving off').props.onPress(),
+  );
+  expect(allText(renderer)).toContain('Who can send to you');
+  await ReactTestRenderer.act(async () =>
+    pressable(renderer, 'My devices').props.onPress(),
+  );
+  expect(native.setReceiveMode).toHaveBeenCalledWith('mine');
+  await ReactTestRenderer.act(async () => renderer.unmount());
+});
+
+test('a shared link is sent as a link, not a file', async () => {
+  const renderer = await render(
+    emptySnapshot({
+      nearby: [MAC],
+      sharedText: {
+        kind: 'link',
+        preview: 'https://example.com/recipe',
+        length: 26,
+      },
+    }),
+  );
+  const text = allText(renderer);
+  expect(text).toContain('Send this link');
+  expect(text).toContain('https://example.com/recipe');
+  await ReactTestRenderer.act(async () =>
+    topPressable(renderer, 'Studio Mac, Mac, paired').props.onPress(),
+  );
+  expect(native.sendSharedText).toHaveBeenCalledWith('abc');
+  expect(native.clearSharedFiles).toHaveBeenCalled();
+  await ReactTestRenderer.act(async () => renderer.unmount());
+});
+
+test('a received link waits for the user to open or copy it', async () => {
+  const renderer = await render(
+    emptySnapshot({
+      transfers: [
+        transfer({ id: 'L1', direction: 'incoming', status: 'connecting' }),
+      ],
+    }),
+  );
+  const done = emptySnapshot({
+    transfers: [
+      transfer({
+        id: 'L1',
+        direction: 'incoming',
+        status: 'completed',
+        kind: 'link',
+        text: 'https://example.com/a',
+        files: [{ name: 'Link', size: 21, mime: null, bytes: 21, uri: null }],
+      }),
+    ],
+  });
+  const { DeviceEventEmitter } = require('react-native');
+  await ReactTestRenderer.act(async () => {
+    DeviceEventEmitter.emit('CrossDropState', { json: JSON.stringify(done) });
+  });
+  expect(allText(renderer)).toContain('Link from Studio Mac');
+  await ReactTestRenderer.act(async () =>
+    pressable(renderer, 'Open link').props.onPress(),
+  );
+  expect(native.openLink).toHaveBeenCalledWith('https://example.com/a');
+  await ReactTestRenderer.act(async () =>
+    pressable(renderer, 'Copy').props.onPress(),
+  );
+  expect(native.copyText).toHaveBeenCalledWith('https://example.com/a');
+  await ReactTestRenderer.act(async () => renderer.unmount());
+});
+
+test('sends to several devices at once', async () => {
+  const renderer = await render(
+    emptySnapshot({
+      nearby: [MAC, { ...MAC, deviceId: 'def', name: 'Office Mac' }],
+      shared: [{ uri: 'content://x/1', name: 'a.txt', size: 3, mime: null }],
+    }),
+  );
+  await ReactTestRenderer.act(async () =>
+    topPressable(renderer, 'Send to several').props.onPress(),
+  );
+  for (const name of ['Studio Mac', 'Office Mac']) {
+    const boxes = renderer.root.findAll(
+      node =>
+        node.props.accessibilityRole === 'checkbox' &&
+        node.props.accessibilityLabel === name &&
+        typeof node.props.onPress === 'function',
+    );
+    const box = boxes[boxes.length - 1];
+    await ReactTestRenderer.act(async () => box.props.onPress());
+  }
+  await ReactTestRenderer.act(async () =>
+    pressable(renderer, 'Send to 2 devices').props.onPress(),
+  );
+  expect(native.sendFiles).toHaveBeenCalledTimes(2);
+  expect(native.sendFiles).toHaveBeenCalledWith('abc', expect.any(String));
+  expect(native.sendFiles).toHaveBeenCalledWith('def', expect.any(String));
+  await ReactTestRenderer.act(async () => renderer.unmount());
 });

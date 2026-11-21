@@ -1,5 +1,5 @@
-import React from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import React, { useState } from 'react';
+import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
 import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
@@ -99,6 +99,87 @@ function TrustedDeviceCard({
   );
 }
 
+const PAIR_ERRORS: Record<string, string> = {
+  bad_code: 'That isn’t a CrossDrop pairing code.',
+  auth_failed:
+    'The device that answered isn’t the one in the code. Nothing was paired.',
+  unreachable:
+    'Couldn’t reach the Mac. Check that both are on the same Wi‑Fi and the code is still on screen.',
+  not_receiving: 'The code has expired. Show a new one on the Mac.',
+  pairing_rejected: 'The code was already used or expired. Show a new one.',
+};
+
+/** Pair by scanning the QR code a Mac shows: no numbers to compare. */
+function QrPairCard() {
+  const t = useTheme();
+  const [mine, setMine] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const scan = async () => {
+    const code = await CrossDrop.scanPairingCode().catch(() => '');
+    if (!code) return;
+    setBusy(true);
+    try {
+      const name = await CrossDrop.pairWithCode(code, mine);
+      CrossDrop.feedback('done');
+      Alert.alert(
+        `Paired with ${name}`,
+        mine
+          ? 'Files from it now arrive without asking.'
+          : 'You can now send files to each other.',
+      );
+    } catch (e) {
+      CrossDrop.feedback('error');
+      const code =
+        e && typeof e === 'object' && 'code' in e ? String(e.code) : '';
+      Alert.alert(
+        'Couldn’t pair',
+        PAIR_ERRORS[code] ?? 'Something went wrong. Try again.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <GlassCard tint={t.accentSoft}>
+      <View style={styles.header}>
+        <IconBubble name="qr" size={48} />
+        <View style={styles.flex}>
+          <Text variant="headline">Pair with a QR code</Text>
+          <Text variant="footnote" tone="secondary">
+            On your Mac, choose Pair a phone in the CrossDrop menu, then scan.
+            Works even where devices can’t find each other.
+          </Text>
+        </View>
+      </View>
+      <View style={styles.switchRow}>
+        <View style={styles.flex}>
+          <Text variant="callout">This is my device</Text>
+          <Text variant="footnote" tone="secondary">
+            Files from it arrive without asking.
+          </Text>
+        </View>
+        <Toggle
+          value={mine}
+          onValueChange={setMine}
+          accessibilityLabel="This is my device"
+        />
+      </View>
+      <View style={styles.actions}>
+        {busy ? (
+          <View style={styles.busy} accessibilityLiveRegion="polite">
+            <ActivityIndicator color={t.link} />
+            <Text variant="callout" tone="secondary">
+              Pairing…
+            </Text>
+          </View>
+        ) : (
+          <Button title="Scan pairing code" icon="qr" onPress={scan} />
+        )}
+      </View>
+    </GlassCard>
+  );
+}
+
 export function DevicesScreen() {
   const snapshot = useSnapshot();
   const t = useTheme();
@@ -127,6 +208,8 @@ export function DevicesScreen() {
           </Text>
         </View>
       </GlassCard>
+
+      <QrPairCard />
 
       <SectionHeader title="Paired" />
       {snapshot.trusted.length === 0 ? (
@@ -167,4 +250,10 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   actions: { flexDirection: 'row', marginTop: spacing.md },
+  busy: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: 48,
+  },
 });

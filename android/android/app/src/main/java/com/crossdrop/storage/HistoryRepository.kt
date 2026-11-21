@@ -15,6 +15,12 @@ data class HistoryEntry(
     val totalBytes: Long,
     val finishedAt: Long,
     val errorCode: String?,
+    /** Paired device id, for "Send again". Absent in entries from older versions. */
+    val peerId: String? = null,
+    /** "files", "link" or "text". */
+    val kind: String = "files",
+    /** The link itself for link entries (never the content of a text). */
+    val link: String? = null,
 )
 
 data class HistoryFile(val name: String, val size: Long, val uri: String?)
@@ -40,6 +46,9 @@ class HistoryRepository(context: Context) {
     }
 
     @Synchronized
+    fun get(id: String): HistoryEntry? = entries.firstOrNull { it.id == id }
+
+    @Synchronized
     fun clear() {
         entries.clear()
         persist()
@@ -57,6 +66,9 @@ class HistoryRepository(context: Context) {
                 "totalBytes" to e.totalBytes,
                 "finishedAt" to e.finishedAt,
                 "errorCode" to e.errorCode,
+                "peerId" to e.peerId,
+                "kind" to e.kind,
+                "link" to e.link,
             )
         })
         val tmp = File(file.parentFile, "history.json.tmp")
@@ -82,6 +94,9 @@ class HistoryRepository(context: Context) {
                     totalBytes = m["totalBytes"] as Long,
                     finishedAt = m["finishedAt"] as Long,
                     errorCode = m["errorCode"] as String?,
+                    peerId = m["peerId"] as String?,
+                    kind = m["kind"] as String? ?: "files",
+                    link = m["link"] as String?,
                 ),
             )
         }

@@ -190,7 +190,13 @@ export function DeviceChip({
         accessibilityRole="button"
         accessibilityLabel={`${device.name}, ${platformLabel(
           device.platform,
-        )}, ${device.trusted ? 'paired' : 'new device'}`}
+        )}, ${
+          device.remembered
+            ? 'paired, not seen nearby'
+            : device.trusted
+            ? 'paired'
+            : 'new device'
+        }`}
         accessibilityHint={actionHint}
         accessibilityState={{ disabled: !!disabled }}
         android_ripple={{ color: 'rgba(20,154,91,0.12)', foreground: true }}
@@ -206,11 +212,15 @@ export function DeviceChip({
             {device.name}
           </Text>
           <View style={styles.deviceMeta}>
-            {device.trusted ? (
+            {device.trusted && !device.remembered ? (
               <View style={[styles.dot, styles.smallDot]} />
             ) : null}
             <Text variant="footnote" tone="secondary" numberOfLines={1}>
-              {device.trusted ? 'Paired' : 'New · confirm a code'}
+              {device.remembered
+                ? 'Paired · not seen'
+                : device.trusted
+                ? 'Paired'
+                : 'New · confirm a code'}
             </Text>
           </View>
         </View>

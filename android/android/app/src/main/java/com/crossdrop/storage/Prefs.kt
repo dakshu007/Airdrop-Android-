@@ -27,6 +27,24 @@ class Prefs(private val context: Context) {
         get() = sp.getBoolean("welcomed", false)
         set(value) = sp.edit().putBoolean("welcomed", value).apply()
 
+    /**
+     * Receiving when the "everyone" window is closed: "off", or "mine" ("My devices
+     * only": always reachable by paired devices, invisible to everyone else).
+     */
+    var receiveBase: String
+        get() = sp.getString("receiveBase", "off").takeIf { it == "mine" } ?: "off"
+        set(value) = sp.edit().putString("receiveBase", if (value == "mine") "mine" else "off").apply()
+
+    /** Offer to send each new screenshot to the last device used (needs photo access). */
+    var screenshotOffer: Boolean
+        get() = sp.getBoolean("screenshotOffer", false)
+        set(value) = sp.edit().putBoolean("screenshotOffer", value).apply()
+
+    /** The device files were last sent to, for one-tap clipboard and screenshot sends. */
+    var lastDeviceId: String?
+        get() = sp.getString("lastDeviceId", null)
+        set(value) = sp.edit().putString("lastDeviceId", value).apply()
+
     var notificationPermissionAsked: Boolean
         get() = sp.getBoolean("notificationAsked", false)
         set(value) = sp.edit().putBoolean("notificationAsked", value).apply()

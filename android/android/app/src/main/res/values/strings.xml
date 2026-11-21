@@ -4,4 +4,6 @@
     <string name="tile_label">CrossDrop</string>
     <string name="tile_subtitle_on">Receiving</string>
     <string name="tile_subtitle_off">Off</string>
+    <string name="tile_clipboard_label">Send clipboard</string>
+    <string name="shortcut_scan">Pair with a Mac</string>
 </resources>

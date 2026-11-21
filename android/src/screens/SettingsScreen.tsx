@@ -11,7 +11,7 @@ import { Toggle } from '../components/Toggle';
 import * as CrossDrop from '../native/crossdrop';
 import type { NotificationPermission } from '../native/types';
 import { useSnapshot } from '../state/CrossDropProvider';
-import { useReceivingToggle } from '../state/useReceiving';
+import { useReceiveMode } from '../state/useReceiving';
 import { useTheme } from '../theme/ThemeProvider';
 import { minTouch, radii, spacing, typography } from '../theme/tokens';
 
@@ -66,7 +66,7 @@ const NOTIFICATION_TEXT: Record<NotificationPermission, string> = {
 export function SettingsScreen() {
   const snapshot = useSnapshot();
   const t = useTheme();
-  const toggleReceiving = useReceivingToggle(snapshot);
+  const setMode = useReceiveMode(snapshot);
   const [name, setName] = useState(snapshot.local.name);
   const [focused, setFocused] = useState(false);
 
@@ -129,15 +129,29 @@ export function SettingsScreen() {
       <SectionHeader title="Receiving" />
       <GlassCard padding={spacing.sm}>
         <Row
-          icon="download"
-          title="Receiving"
-          detail="Turns off after 10 minutes to save battery"
+          icon="heart"
+          title="Always ready for my devices"
+          detail="Devices you paired can send any time, even when CrossDrop is closed. Invisible to everyone else. Keeps a quiet notification while on."
           trailing={
             <Toggle
-              value={snapshot.receiving.enabled}
-              onValueChange={toggleReceiving}
-              accessibilityLabel="Receiving"
-              accessibilityHint="Lets nearby devices send to this phone"
+              value={snapshot.receiving.base === 'mine'}
+              onValueChange={v => setMode(v ? 'mine' : 'off')}
+              accessibilityLabel="Always ready for my devices"
+            />
+          }
+        />
+        <Divider />
+        <Row
+          icon="radar"
+          title="Everyone nearby"
+          detail="Anyone nearby can ask to send for the next 10 minutes. New devices confirm a code first."
+          trailing={
+            <Toggle
+              value={snapshot.receiving.mode === 'everyone'}
+              onValueChange={v =>
+                setMode(v ? 'everyone' : snapshot.receiving.base)
+              }
+              accessibilityLabel="Receive from everyone nearby"
             />
           }
         />
@@ -189,8 +203,27 @@ export function SettingsScreen() {
         <Divider />
         <Row
           icon="tile"
-          title="Quick Settings tile"
-          detail="Switch Receiving from Quick Settings. Add the tile from the Quick Settings edit panel — Android asks you to add it yourself."
+          title="Quick Settings tiles"
+          detail="“CrossDrop” switches Receiving; “Send clipboard” sends what you copied in two taps. Add them from the Quick Settings edit panel — Android asks you to add tiles yourself."
+        />
+        <Divider />
+        <Row
+          icon="image"
+          title="Offer to send screenshots"
+          detail={
+            snapshot.prefs.screenshotOffer && !snapshot.screenshotPermission
+              ? 'Needs photo access. Allow it in app settings.'
+              : 'After a screenshot, a notification offers to send it to the device you used last. Works while CrossDrop is receiving.'
+          }
+          trailing={
+            <Toggle
+              value={snapshot.prefs.screenshotOffer}
+              onValueChange={v =>
+                CrossDrop.setScreenshotOffer(v).catch(() => false)
+              }
+              accessibilityLabel="Offer to send screenshots"
+            />
+          }
         />
       </GlassCard>
 

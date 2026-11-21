@@ -14,7 +14,7 @@ import com.crossdrop.core.deviceIdFor
  * keys and display metadata, so they are not secret, but they decide who may
  * connect without pairing, and are only ever written after both users confirmed.
  */
-class TrustRepository(context: Context) : TrustStore {
+class TrustRepository(private val context: Context) : TrustStore {
     private val sp = context.getSharedPreferences("crossdrop_trust", Context.MODE_PRIVATE)
     private val peers = LinkedHashMap<String, TrustedPeer>()
     var onChange: (() -> Unit)? = null
@@ -32,13 +32,40 @@ class TrustRepository(context: Context) : TrustStore {
     @Synchronized
     fun all(): List<TrustedPeer> = peers.values.sortedByDescending { it.lastUsedAt ?: it.pairedAt }
 
-    override fun trust(peer: PeerInfo) {
+    override fun trust(peer: PeerInfo) = trust(peer, false)
+
+    /** [autoAccept] is the "This is my device" choice made while pairing. */
+    override fun trust(peer: PeerInfo, autoAccept: Boolean) {
         synchronized(this) {
-            val existing = peers[peer.deviceId]
+            val existing = peers[peer.deviceId]?.takeIf { it.identityKey.contentEquals(peer.identityKey) }
             val now = System.currentTimeMillis()
-            save(TrustedPeer(peer.deviceId, peer.identityKey, peer.name, peer.platform, now, existing?.lastUsedAt, existing?.autoAccept ?: false))
+            save(TrustedPeer(peer.deviceId, peer.identityKey, peer.name, peer.platform, now, existing?.lastUsedAt, autoAccept || (existing?.autoAccept ?: false)))
+            if (existing == null) addresses.remove(peer.deviceId)
         }
         onChange?.invoke()
+    }
+
+    // ---- last address that worked, per paired device (§9.5) ----
+    // Lets a paired device be reached on networks that block discovery. The handshake
+    // still proves who answers, so a stale address can only fail to connect.
+
+    private val addressPrefs = context.getSharedPreferences("crossdrop_addresses", Context.MODE_PRIVATE)
+    private val addresses = HashMap<String, Pair<String, Int>>().apply {
+        for ((key, value) in addressPrefs.all) {
+            val raw = value as? String ?: continue
+            val port = raw.substringAfterLast(':').toIntOrNull() ?: continue
+            put(key, raw.substringBeforeLast(':') to port)
+        }
+    }
+
+    @Synchronized
+    fun lastAddress(deviceId: String): Pair<String, Int>? = if (peers.containsKey(deviceId)) addresses[deviceId] else null
+
+    @Synchronized
+    fun rememberAddress(deviceId: String, host: String, port: Int) {
+        if (!peers.containsKey(deviceId) || addresses[deviceId] == (host to port)) return
+        addresses[deviceId] = host to port
+        addressPrefs.edit().putString(deviceId, "$host:$port").apply()
     }
 
     override fun touch(deviceId: String, name: String) {
@@ -52,7 +79,9 @@ class TrustRepository(context: Context) : TrustStore {
     fun forget(deviceId: String) {
         synchronized(this) {
             peers.remove(deviceId)
+            addresses.remove(deviceId)
             sp.edit().remove(deviceId).apply()
+            addressPrefs.edit().remove(deviceId).apply()
         }
         onChange?.invoke()
     }

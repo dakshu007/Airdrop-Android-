@@ -1,5 +1,5 @@
-import React from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { GlassCard } from '../components/GlassCard';
@@ -23,6 +23,29 @@ const STATUS_TEXT: Record<HistoryEntry['status'], string> = {
   cancelled: 'Cancelled',
   rejected: 'Not accepted',
 };
+
+function historyTitle(entry: HistoryEntry): string {
+  if (entry.kind === 'link') return entry.link ?? 'Link';
+  if (entry.kind === 'text') return 'Text';
+  return filesTitle(entry.files);
+}
+
+async function sendAgain(entry: HistoryEntry) {
+  try {
+    await CrossDrop.resendHistory(entry.id);
+  } catch (e) {
+    const code =
+      e && typeof e === 'object' && 'code' in e ? String(e.code) : '';
+    Alert.alert(
+      'Couldn’t send again',
+      code === 'file_unreadable'
+        ? 'Those files can no longer be read. Choose them again from Nearby.'
+        : code === 'unreachable'
+        ? `${entry.peerName} isn’t nearby right now.`
+        : 'Something went wrong. Try again.',
+    );
+  }
+}
 
 function HistoryRow({ entry, now }: { entry: HistoryEntry; now: number }) {
   const t = useTheme();
@@ -56,21 +79,34 @@ function HistoryRow({ entry, now }: { entry: HistoryEntry; now: number }) {
       </View>
       <View style={styles.flex}>
         <Text variant="callout" numberOfLines={1}>
-          {filesTitle(entry.files)}
+          {historyTitle(entry)}
         </Text>
         <Text variant="footnote" tone="secondary" numberOfLines={2}>
           {statusText} · {meta}
         </Text>
       </View>
-      <Icon
-        name={outgoing ? 'arrowUp' : 'arrowDown'}
-        size={18}
-        color={t.textTertiary}
-      />
+      {entry.canSendAgain ? (
+        <Button
+          title="Again"
+          icon="refresh"
+          kind="plain"
+          compact
+          onPress={() => sendAgain(entry)}
+          accessibilityLabel={`Send ${historyTitle(entry)} to ${
+            entry.peerName
+          } again`}
+        />
+      ) : (
+        <Icon
+          name={outgoing ? 'arrowUp' : 'arrowDown'}
+          size={18}
+          color={t.textTertiary}
+        />
+      )}
     </View>
   );
 
-  const label = `${filesTitle(entry.files)}. ${statusText}. ${meta}`;
+  const label = `${historyTitle(entry)}. ${statusText}. ${meta}`;
   if (!openable) {
     return (
       <View accessible accessibilityLabel={label}>
@@ -121,6 +157,18 @@ export function ActivityScreen() {
     );
 
   const nothing = transfers.length === 0 && snapshot.history.length === 0;
+  const [query, setQuery] = useState('');
+  const t = useTheme();
+  const history = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return snapshot.history;
+    return snapshot.history.filter(
+      h =>
+        h.peerName.toLowerCase().includes(q) ||
+        (h.link ?? '').toLowerCase().includes(q) ||
+        h.files.some(f => f.name.toLowerCase().includes(q)),
+    );
+  }, [snapshot.history, query]);
 
   return (
     <Screen
@@ -165,10 +213,46 @@ export function ActivityScreen() {
               />
             }
           />
+          {snapshot.history.length > 4 ? (
+            <View style={[styles.search, { backgroundColor: t.glassFill }]}>
+              <Icon name="search" size={18} color={t.textTertiary} />
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Search files, links or devices"
+                placeholderTextColor={t.textTertiary}
+                style={[styles.searchInput, { color: t.textPrimary }]}
+                accessibilityLabel="Search history"
+                returnKeyType="search"
+                autoCorrect={false}
+              />
+              {query ? (
+                <Pressable
+                  onPress={() => setQuery('')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                  hitSlop={12}
+                >
+                  <Icon name="x" size={18} color={t.textTertiary} />
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
           <GlassCard padding={spacing.xs}>
-            {snapshot.history.map(entry => (
-              <HistoryRow key={entry.id} entry={entry} now={now} />
-            ))}
+            {history.length === 0 ? (
+              <Text
+                variant="callout"
+                tone="secondary"
+                center
+                style={styles.noMatch}
+              >
+                Nothing matches “{query.trim()}”
+              </Text>
+            ) : (
+              history.map(entry => (
+                <HistoryRow key={entry.id} entry={entry} now={now} />
+              ))
+            )}
           </GlassCard>
         </>
       ) : null}
@@ -186,6 +270,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xs,
     paddingVertical: spacing.xs,
   },
+  search: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    borderRadius: 16,
+    paddingHorizontal: spacing.md,
+    minHeight: minTouch,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.9)',
+  },
+  searchInput: {
+    flex: 1,
+    fontFamily: 'Poppins-Regular',
+    fontSize: 15,
+    paddingVertical: 10,
+  },
+  noMatch: { paddingVertical: spacing.lg },
   statusDot: {
     width: 34,
     height: 34,

@@ -4,6 +4,7 @@ import type {
   FeedbackKind,
   NotificationPermission,
   PreferenceKey,
+  ReceiveMode,
   SharedFile,
   Snapshot,
 } from './types';
@@ -51,8 +52,34 @@ export const startDiscovery = () => NativeCrossDrop.startDiscovery();
 export const stopDiscovery = () => NativeCrossDrop.stopDiscovery();
 export const setReceiving = (enabled: boolean) =>
   NativeCrossDrop.setReceiving(enabled);
-export const respondToPairing = (sessionId: string, accept: boolean) =>
-  NativeCrossDrop.respondToPairing(sessionId, accept);
+export const respondToPairing = (
+  sessionId: string,
+  accept: boolean,
+  mine = false,
+) => NativeCrossDrop.respondToPairing(sessionId, accept, mine);
+export const setReceiveMode = (mode: ReceiveMode) =>
+  NativeCrossDrop.setReceiveMode(mode);
+
+export async function pickFolder(): Promise<SharedFile[]> {
+  const parsed = JSON.parse(await NativeCrossDrop.pickFolder());
+  return Array.isArray(parsed) ? (parsed as SharedFile[]) : [];
+}
+
+export const sendSharedText = (deviceId: string) =>
+  NativeCrossDrop.sendSharedText(deviceId);
+/** Reads the clipboard once (CrossDrop must be on screen). False when it holds nothing usable. */
+export const takeClipboard = () => NativeCrossDrop.takeClipboard();
+/** Resolves to the scanned code, or '' when cancelled. */
+export const scanPairingCode = () => NativeCrossDrop.scanPairingCode();
+/** Resolves to the paired device's name. */
+export const pairWithCode = (code: string, mine: boolean) =>
+  NativeCrossDrop.pairWithCode(code, mine);
+export const resendHistory = (historyId: string, deviceId?: string) =>
+  NativeCrossDrop.resendHistory(historyId, deviceId ?? '');
+export const openLink = (url: string) => NativeCrossDrop.openLink(url);
+export const copyText = (text: string) => NativeCrossDrop.copyText(text);
+export const setScreenshotOffer = (enabled: boolean) =>
+  NativeCrossDrop.setScreenshotOffer(enabled);
 export const respondToOffer = (transferId: string, accept: boolean) =>
   NativeCrossDrop.respondToOffer(transferId, accept);
 export const cancelTransfer = (transferId: string) =>

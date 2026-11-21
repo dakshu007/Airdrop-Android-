@@ -19,8 +19,14 @@ export interface LocalDevice {
   fingerprint: string;
 }
 
+/** 'mine': only paired devices, always on and invisible to others; 'everyone': anyone nearby, for 10 minutes. */
+export type ReceiveMode = 'off' | 'mine' | 'everyone';
+
 export interface ReceivingState {
   enabled: boolean;
+  mode: ReceiveMode;
+  /** What receiving returns to when the 'everyone' window closes. */
+  base: 'off' | 'mine';
   /** Set while the listener is up. */
   port: number | null;
   /** Error code when receiving could not start: 'no_network' | 'listen_failed' | 'nsd_failed'. */
@@ -45,7 +51,12 @@ export interface NearbyDevice {
   name: string;
   platform: Platform;
   trusted: boolean;
+  /** Paired but not found by discovery; CrossDrop will try the address that last worked. */
+  remembered: boolean;
 }
+
+/** 'files', or a link / text handed off without being saved as a file. */
+export type TransferKind = 'files' | 'link' | 'text';
 
 export interface TrustedDevice {
   deviceId: string;
@@ -104,6 +115,9 @@ export interface Transfer {
   /** Rejection reason when status is 'rejected'. */
   rejectReason: string | null;
   canRetry: boolean;
+  kind: TransferKind;
+  /** Received (or sent) link / text; this app session only. */
+  text: string | null;
 }
 
 export interface PairingPrompt {
@@ -128,6 +142,7 @@ export interface IncomingOffer {
   files: { name: string; size: number; mime: string | null }[];
   totalBytes: number;
   expiresAt: number;
+  kind: TransferKind;
 }
 
 export interface HistoryEntry {
@@ -140,6 +155,11 @@ export interface HistoryEntry {
   totalBytes: number;
   finishedAt: number;
   errorCode: string | null;
+  peerId: string | null;
+  kind: TransferKind;
+  /** The link, for link entries. Text content is never kept in history. */
+  link: string | null;
+  canSendAgain: boolean;
 }
 
 export interface SharedFile {
@@ -148,6 +168,16 @@ export interface SharedFile {
   /** null when the provider does not report a size. */
   size: number | null;
   mime: string | null;
+  /** Folder path inside a picked folder, e.g. "Trip/Day 1"; '' for a plain file. */
+  path?: string;
+}
+
+/** A link or short text from the share sheet or the clipboard, waiting to be sent. */
+export interface SharedText {
+  kind: 'link' | 'text';
+  /** First 500 characters. */
+  preview: string;
+  length: number;
 }
 
 export interface Preferences {
@@ -157,9 +187,11 @@ export interface Preferences {
   haptics: boolean;
   /** True once the welcome screen has been dismissed. */
   welcomed: boolean;
+  /** Offer to send each new screenshot to the last device used. */
+  screenshotOffer: boolean;
 }
 
-export type PreferenceKey = keyof Preferences;
+export type PreferenceKey = 'sound' | 'haptics' | 'welcomed';
 
 /** 'tick' when a code digit lands, 'confirm' for a confirmed code, 'done' and 'error' when a transfer ends. */
 export type FeedbackKind = 'tick' | 'confirm' | 'done' | 'error';
@@ -170,6 +202,8 @@ export interface Snapshot {
   discovery: DiscoveryState;
   network: NetworkState;
   nearby: NearbyDevice[];
+  /** When a device last appeared nearby (epoch ms; 0 = never). */
+  newestDeviceAt: number;
   trusted: TrustedDevice[];
   /** Active transfers plus ones finished during this app session (until dismissed). */
   transfers: Transfer[];
@@ -179,6 +213,11 @@ export interface Snapshot {
   history: HistoryEntry[];
   /** Files handed over by the Android share sheet and not yet sent or cleared. */
   shared: SharedFile[];
+  sharedText: SharedText | null;
+  /** The device files were last sent to. */
+  lastDeviceId: string | null;
+  /** Photo access for the screenshot suggestion. */
+  screenshotPermission: boolean;
   notificationPermission: NotificationPermission;
   /** Human-readable destination, e.g. "Download/CrossDrop". */
   destinationLabel: string;

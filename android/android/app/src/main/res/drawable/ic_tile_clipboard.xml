@@ -1,0 +1,7 @@
+<!-- Quick Settings glyph for "Send clipboard": a clipboard with an up arrow. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M9,2h6a1,1 0,0 1,1 1v1h2a2,2 0,0 1,2 2v14a2,2 0,0 1,-2 2H6a2,2 0,0 1,-2 -2V6a2,2 0,0 1,2 -2h2V3a1,1 0,0 1,1 -1zM10,4v1h4V4zM12,8.5l-4,4 1.4,1.4 1.6,-1.6V18h2v-5.7l1.6,1.6 1.4,-1.4z" />
+</vector>

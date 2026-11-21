@@ -17,6 +17,8 @@ data class DiscoveredDevice(
     val host: String,
     val port: Int,
     val serviceName: String,
+    /** Advertised as "My devices only" (§9.5); only worth showing when already paired. */
+    val private: Boolean = false,
 )
 
 /**
@@ -126,6 +128,6 @@ class NsdDiscovery(
         val address = info.host ?: return null
         // Prefer IPv4 when available: link-local IPv6 needs a scope id that is easy to lose.
         val host = if (address is Inet4Address) address.hostAddress else address.hostAddress?.substringBefore('%')
-        return DiscoveredDevice(id, info.serviceName, platform, host ?: return null, info.port, info.serviceName)
+        return DiscoveredDevice(id, info.serviceName, platform, host ?: return null, info.port, info.serviceName, attr("m") == "1")
     }
 }

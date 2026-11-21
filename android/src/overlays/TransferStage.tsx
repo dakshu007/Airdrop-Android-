@@ -131,7 +131,82 @@ export function TransferStage({
   let mood: Mood = 'active';
   let body: React.ReactNode;
 
-  if (transfer.status === 'completed') {
+  if (transfer.status === 'completed' && transfer.kind !== 'files') {
+    mood = 'done';
+    const link = transfer.kind === 'link';
+    const text = transfer.text;
+    const webLink = link && !!text && /^https?:\/\/\S+$/i.test(text.trim());
+    const sentDetail =
+      transfer.peerPlatform === 'macos'
+        ? link
+          ? `It opened on ${peer}.`
+          : `It’s on ${peer}’s clipboard.`
+        : `${peer} can open it from the notification.`;
+    body = (
+      <>
+        <View style={styles.head}>
+          <StatusPill label="Verified" />
+          <Text
+            variant="display"
+            center
+            accessibilityRole="header"
+            accessibilityLiveRegion="polite"
+          >
+            {outgoing
+              ? link
+                ? 'Link sent'
+                : 'Text sent'
+              : link
+              ? `Link from ${peer}`
+              : `Text from ${peer}`}
+          </Text>
+          <Text variant="body" tone="secondary" center>
+            {outgoing
+              ? sentDetail
+              : 'Nothing was opened or saved. Choose what to do with it.'}
+          </Text>
+        </View>
+        <View style={styles.center}>
+          <Drip pose="done" size={art * 0.8} motion="pop" />
+        </View>
+        {text ? (
+          <View style={styles.summary}>
+            <Frost radius={20} />
+            <Text
+              variant={link ? 'subhead' : 'body'}
+              numberOfLines={link ? 3 : 8}
+              selectable
+              accessibilityLabel={link ? `Link ${text}` : `Text ${text}`}
+            >
+              {text}
+            </Text>
+          </View>
+        ) : null}
+        <View style={styles.actions}>
+          {!outgoing && webLink ? (
+            <Button
+              title="Open link"
+              icon="arrowUpRight"
+              large
+              onPress={() => CrossDrop.openLink(text!.trim())}
+            />
+          ) : null}
+          {!outgoing && text ? (
+            <Button
+              title="Copy"
+              kind={webLink ? 'secondary' : 'primary'}
+              large={!webLink}
+              onPress={() => CrossDrop.copyText(text)}
+            />
+          ) : null}
+          {outgoing ? (
+            <Button title="Send more" icon="plus" large onPress={onSendMore} />
+          ) : null}
+          <Button title="Done" kind="plain" onPress={onClose} />
+        </View>
+      </>
+    );
+  } else if (transfer.status === 'completed') {
     mood = 'done';
     const uris = transfer.files.map(f => f.uri).filter((u): u is string => !!u);
     body = (

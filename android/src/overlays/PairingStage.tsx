@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import { Button } from '../components/Button';
 import { RoundButton, StatusPill } from '../components/Chips';
@@ -7,6 +7,7 @@ import { Drip } from '../components/Drip';
 import { Frost } from '../components/Frost';
 import { Stage, useArtSize } from '../components/Stage';
 import { Text } from '../components/Text';
+import { Toggle } from '../components/Toggle';
 import { countdownCoarse, spokenPairingCode } from '../format';
 import * as CrossDrop from '../native/crossdrop';
 import type { PairingPrompt } from '../native/types';
@@ -17,13 +18,15 @@ interface Props {
   prompt: PairingPrompt;
   now: number;
   responded: boolean;
-  onRespond: (accept: boolean) => void;
+  onRespond: (accept: boolean, mine: boolean) => void;
 }
 
 /** First contact with a device: both screens show the same six digits. */
 export function PairingStage({ prompt, now, responded, onRespond }: Props) {
   const t = useTheme();
   const art = useArtSize(0.24, 210, 130);
+  // "This is my device": its files then arrive without asking (AirDrop-style for your own devices).
+  const [mine, setMine] = useState(false);
   const waiting = prompt.waitingForPeer || responded;
   const intro =
     prompt.role === 'receiver'
@@ -32,13 +35,14 @@ export function PairingStage({ prompt, now, responded, onRespond }: Props) {
 
   const confirm = () => {
     CrossDrop.feedback('confirm');
-    onRespond(true);
+    onRespond(true, mine);
   };
+  const decline = () => onRespond(false, false);
 
   return (
     <Stage
       mood="idle"
-      onRequestClose={() => onRespond(false)}
+      onRequestClose={decline}
       accessibilityLabel={`Pair with ${prompt.peerName}`}
     >
       <ScrollView
@@ -47,11 +51,7 @@ export function PairingStage({ prompt, now, responded, onRespond }: Props) {
         bounces={false}
       >
         <View style={styles.top}>
-          <RoundButton
-            icon="x"
-            label="Cancel pairing"
-            onPress={() => onRespond(false)}
-          />
+          <RoundButton icon="x" label="Cancel pairing" onPress={decline} />
           <StatusPill label="New device" dot="#E0A100" />
           <View style={styles.spacer44} />
         </View>
@@ -89,6 +89,25 @@ export function PairingStage({ prompt, now, responded, onRespond }: Props) {
 
         <View style={styles.grow} />
 
+        {waiting ? null : (
+          <View style={styles.mineRow}>
+            <Frost radius={22} />
+            <View style={styles.mineText}>
+              <Text variant="headline">This is my device</Text>
+              <Text variant="footnote" tone="secondary">
+                Files from it arrive without asking. You can change this in
+                Devices.
+              </Text>
+            </View>
+            <Toggle
+              value={mine}
+              onValueChange={setMine}
+              accessibilityLabel="This is my device"
+              accessibilityHint="Files from it will arrive without asking"
+            />
+          </View>
+        )}
+
         <View style={styles.actions}>
           {waiting ? (
             <View style={styles.waiting} accessibilityLiveRegion="polite">
@@ -103,7 +122,7 @@ export function PairingStage({ prompt, now, responded, onRespond }: Props) {
           <Button
             title={waiting ? 'Cancel pairing' : 'They don’t match'}
             kind="secondary"
-            onPress={() => onRespond(false)}
+            onPress={decline}
           />
           <Text variant="footnote" tone="secondary" center>
             You only do this once per device.
@@ -138,6 +157,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   grow: { flexGrow: 1, minHeight: spacing.xl },
+  mineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: 22,
+    overflow: 'hidden',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  mineText: { flex: 1, gap: 2 },
   actions: { gap: spacing.sm },
   waiting: {
     flexDirection: 'row',

@@ -45,7 +45,8 @@ const BLINKS: Partial<Record<Pose, ImageSourcePropType>> = {
  * How Drip moves: 'bob' floats gently, 'float' rides higher and sways (the
  * paper plane), 'breathe' is slow and small (napping), 'scan' sweeps side to
  * side (binoculars), 'wobble' shakes once (something went wrong), 'pop'
- * springs in once (done). All motion stops with Reduce motion.
+ * springs in once (done), 'wave' hops and sways once to greet a device that
+ * just appeared. All motion stops with Reduce motion.
  */
 export type Motion =
   | 'bob'
@@ -54,6 +55,7 @@ export type Motion =
   | 'scan'
   | 'wobble'
   | 'pop'
+  | 'wave'
   | 'none';
 
 interface DripProps {
@@ -95,7 +97,9 @@ export function Drip({
   const reduced = useStill();
   const cycle = useRef(new Animated.Value(0)).current;
   const once = useRef(
-    new Animated.Value(motion === 'pop' || motion === 'wobble' ? 0 : 1),
+    new Animated.Value(
+      motion === 'pop' || motion === 'wobble' || motion === 'wave' ? 0 : 1,
+    ),
   ).current;
   const blink = useRef(new Animated.Value(0)).current;
   const leanV = useRef(new Animated.Value(lean)).current;
@@ -107,7 +111,7 @@ export function Drip({
       once.setValue(1);
       return;
     }
-    if (motion === 'pop' || motion === 'wobble') {
+    if (motion === 'pop' || motion === 'wobble' || motion === 'wave') {
       once.setValue(0);
       const anim =
         motion === 'pop'
@@ -119,8 +123,11 @@ export function Drip({
             })
           : Animated.timing(once, {
               toValue: 1,
-              duration: 1100,
-              easing: Easing.out(Easing.quad),
+              duration: motion === 'wave' ? 1300 : 1100,
+              easing:
+                motion === 'wave'
+                  ? Easing.inOut(Easing.sin)
+                  : Easing.out(Easing.quad),
               useNativeDriver: true,
             });
       anim.start();
@@ -228,6 +235,21 @@ export function Drip({
     transforms.push({
       scale: once.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }),
     });
+  } else if (motion === 'wave') {
+    transforms.push(
+      {
+        translateY: once.interpolate({
+          inputRange: [0, 0.18, 0.36, 0.5, 0.64, 1],
+          outputRange: [0, -16, 0, -7, 0, 0],
+        }),
+      },
+      {
+        rotate: once.interpolate({
+          inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1],
+          outputRange: ['0deg', '-7deg', '7deg', '-5deg', '3deg', '0deg'],
+        }),
+      },
+    );
   } else if (motion === 'wobble') {
     transforms.push({
       rotate: once.interpolate({

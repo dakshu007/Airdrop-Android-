@@ -18,17 +18,30 @@ object Snapshots {
                 "port" to s.receivingPort,
                 "error" to s.receivingError,
                 "autoOffAt" to if (activeIncoming) null else s.autoOffAt,
+                "mode" to s.mode,
+                "base" to engine.prefs.receiveBase,
             ),
             "discovery" to linkedMapOf("active" to s.discoveryActive, "error" to s.discoveryError),
             "network" to linkedMapOf("localNetwork" to s.localNetwork),
             "nearby" to s.nearby.map {
                 linkedMapOf(
                     "deviceId" to it.deviceId,
-                    "name" to it.name,
+                    "name" to (engine.trust.get(it.deviceId)?.name ?: it.name),
                     "platform" to it.platform.wire,
                     "trusted" to (engine.trust.get(it.deviceId) != null),
+                    "remembered" to false,
+                )
+            } + engine.trust.all().filter { p -> s.nearby.none { it.deviceId == p.deviceId } && engine.trust.lastAddress(p.deviceId) != null }.map {
+                // Paired but not seen by discovery: reachable at its last address, maybe.
+                linkedMapOf(
+                    "deviceId" to it.deviceId,
+                    "name" to it.name,
+                    "platform" to it.platform.wire,
+                    "trusted" to true,
+                    "remembered" to true,
                 )
             },
+            "newestDeviceAt" to s.newestDeviceAt,
             "trusted" to engine.trust.all().map {
                 linkedMapOf(
                     "deviceId" to it.deviceId,
@@ -59,6 +72,8 @@ object Snapshots {
                     "error" to t.error?.let { linkedMapOf("code" to it, "message" to null) },
                     "rejectReason" to t.rejectReason,
                     "canRetry" to t.canRetry,
+                    "kind" to t.kind,
+                    "text" to t.text?.take(4096),
                 )
             },
             "pairing" to s.pairing.map {
@@ -82,6 +97,7 @@ object Snapshots {
                     "files" to o.files.map { linkedMapOf("name" to it.name, "size" to it.size, "mime" to it.mime) },
                     "totalBytes" to o.totalBytes,
                     "expiresAt" to o.expiresAt,
+                    "kind" to o.kind.wire,
                 )
             },
             "history" to engine.history.all().map { h ->
@@ -95,9 +111,16 @@ object Snapshots {
                     "totalBytes" to h.totalBytes,
                     "finishedAt" to h.finishedAt,
                     "errorCode" to h.errorCode,
+                    "peerId" to h.peerId,
+                    "kind" to h.kind,
+                    "link" to h.link,
+                    "canSendAgain" to (h.direction == "outgoing" && h.peerId != null &&
+                        (h.kind == "link" || (h.kind == "files" && h.files.isNotEmpty() && h.files.all { it.uri?.startsWith("content://") == true }))),
                 )
             },
             "shared" to s.shared.map { it.toJson() },
+            "sharedText" to s.sharedText?.toJson(),
+            "lastDeviceId" to engine.prefs.lastDeviceId,
             "notificationPermission" to NotificationPermissions.status(engine.appContext, engine.prefs),
             "destinationLabel" to MediaStoreStorage.LABEL,
             "appVersion" to Engine.APP_VERSION,
@@ -105,7 +128,9 @@ object Snapshots {
                 "sound" to engine.prefs.sound,
                 "haptics" to engine.prefs.haptics,
                 "welcomed" to engine.prefs.welcomed,
+                "screenshotOffer" to engine.prefs.screenshotOffer,
             ),
+            "screenshotPermission" to s.screenshotPermission,
         )
         return Json.write(map)
     }

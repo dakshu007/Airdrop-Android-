@@ -11,16 +11,21 @@ class NsdAdvertiser(context: Context, private val onError: (String?) -> Unit) {
     private val nsd = context.getSystemService(Context.NSD_SERVICE) as NsdManager
     private var listener: NsdManager.RegistrationListener? = null
 
+    /** Random name for "My devices only" (§9.5), stable while the process lives. */
+    private val privateName = "CrossDrop-" + java.util.UUID.randomUUID().toString().take(8)
+
+    /** [private]: "My devices only" — random name and `m=1`, so strangers don't see the device's name. */
     @Synchronized
-    fun register(name: String, port: Int, deviceId: String) {
+    fun register(name: String, port: Int, deviceId: String, private: Boolean = false) {
         unregister()
         val info = NsdServiceInfo().apply {
-            serviceName = truncateUtf8(name, 63)
+            serviceName = if (private) privateName else truncateUtf8(name, 63)
             serviceType = Protocol.SERVICE_TYPE
             setPort(port)
             setAttribute("v", Protocol.VERSION.toString())
             setAttribute("id", deviceId)
             setAttribute("p", Platform.ANDROID.wire)
+            if (private) setAttribute("m", "1")
         }
         val l = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) = onError(null)

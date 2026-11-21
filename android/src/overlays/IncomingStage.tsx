@@ -72,12 +72,25 @@ export function IncomingStage({
               {offer.peerName}
             </Text>
             <Text variant="callout" tone="secondary" center>
-              wants to send {pluralFiles(offer.files.length)} ·{' '}
-              {formatBytes(offer.totalBytes)}
+              {offer.kind === 'link'
+                ? 'wants to send you a link'
+                : offer.kind === 'text'
+                ? 'wants to send you some text'
+                : `wants to send ${pluralFiles(
+                    offer.files.length,
+                  )} · ${formatBytes(offer.totalBytes)}`}
             </Text>
           </View>
 
-          <View style={styles.files}>
+          {offer.kind !== 'files' ? (
+            <Text variant="footnote" tone="secondary" center>
+              {offer.kind === 'link'
+                ? 'You’ll see it before anything opens.'
+                : 'You can copy it once it arrives. It isn’t saved as a file.'}
+            </Text>
+          ) : null}
+
+          <View style={[styles.files, offer.kind !== 'files' && styles.hidden]}>
             {offer.files.slice(0, PREVIEW).map((f, i) => (
               <View
                 key={`${i}-${f.name}`}
@@ -149,6 +162,7 @@ const styles = StyleSheet.create({
   who: { gap: 2 },
   peer: { fontSize: 17 },
   files: { gap: spacing.xs },
+  hidden: { display: 'none' },
   fileRow: { borderRadius: 18, paddingHorizontal: spacing.sm },
   note: {
     flexDirection: 'row',

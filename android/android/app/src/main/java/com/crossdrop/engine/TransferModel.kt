@@ -19,6 +19,10 @@ class TransferModel(
     var rejectReason: String? = null
     var canRetry: Boolean = false
     val rate = RateMeter()
+    /** "files", or "link" / "text" for a handoff that is not saved as a file (§9.2). */
+    var kind: String = "files"
+    /** The received (or sent) link / text, kept in memory only for this app session. */
+    var text: String? = null
 
     val totalBytes: Long get() = files.sumOf { it.size }
     val isFinished: Boolean get() = status in FINISHED

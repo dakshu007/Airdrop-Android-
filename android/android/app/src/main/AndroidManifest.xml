@@ -9,6 +9,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- "My devices only" can come back after a restart, only if the user turned it on. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Asked only when the user scans a pairing QR code; frames never leave the phone. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <!-- Asked only if the user turns on "Offer to send screenshots". -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <application
       android:name=".MainApplication"
@@ -41,7 +49,36 @@
             <category android:name="android.intent.category.DEFAULT" />
             <data android:mimeType="*/*" />
         </intent-filter>
+        <!-- Direct Share targets (recent paired devices in the share sheet). -->
+        <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
       </activity>
+
+      <!-- Reads a pairing QR code with the camera (ZXing, on device). -->
+      <activity
+        android:name=".pairing.ScanActivity"
+        android:exported="false"
+        android:theme="@style/Theme.AppCompat.NoActionBar" />
+
+      <receiver android:name=".notifications.NotificationActionReceiver" android:exported="false" />
+
+      <receiver android:name=".service.BootReceiver" android:exported="false">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED" />
+            <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        </intent-filter>
+      </receiver>
+
+      <!-- Optional "Send clipboard" tile; opens CrossDrop, which reads the clipboard once. -->
+      <service
+        android:name=".tiles.ClipboardTileService"
+        android:exported="true"
+        android:icon="@drawable/ic_tile_clipboard"
+        android:label="@string/tile_clipboard_label"
+        android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+        <intent-filter>
+            <action android:name="android.service.quicksettings.action.QS_TILE" />
+        </intent-filter>
+      </service>
 
       <!-- Runs only while receiving is switched on or a transfer is in progress. -->
       <service

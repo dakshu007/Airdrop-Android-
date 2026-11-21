@@ -15,11 +15,31 @@ export interface Spec extends TurboModule {
   startDiscovery(): void;
   stopDiscovery(): void;
   setReceiving(enabled: boolean): void;
+  /** 'off' | 'mine' (paired devices only, always on) | 'everyone' (for 10 minutes). */
+  setReceiveMode(mode: string): void;
   /** Opens the system document picker. Resolves to a JSON SharedFile[] (empty when cancelled). */
   pickFiles(): Promise<string>;
+  /** Opens the system folder picker. Resolves to a JSON SharedFile[] with folder paths (empty when cancelled). */
+  pickFolder(): Promise<string>;
   /** filesJson is a JSON SharedFile[]. Resolves to the new transfer id. */
   sendFiles(deviceId: string, filesJson: string): Promise<string>;
-  respondToPairing(sessionId: string, accept: boolean): void;
+  /** Sends the shared link / text (from the share sheet or clipboard). Resolves to the new transfer id. */
+  sendSharedText(deviceId: string): Promise<string>;
+  /** Reads the clipboard once and offers it for sending. Resolves false when it holds nothing usable. */
+  takeClipboard(): Promise<boolean>;
+  /** Opens the camera to read a pairing QR code. Resolves to the code text, or '' when cancelled. */
+  scanPairingCode(): Promise<string>;
+  /** Pairs with the device in a scanned code. Resolves to its name. */
+  pairWithCode(code: string, mine: boolean): Promise<string>;
+  /** "Send again" from history; deviceId '' means the same device as before. Resolves to the new transfer id. */
+  resendHistory(historyId: string, deviceId: string): Promise<string>;
+  /** Opens a received http(s) link in the browser. */
+  openLink(url: string): void;
+  copyText(text: string): void;
+  /** Turns the screenshot suggestion on or off, asking for photo access when needed. Resolves to the new state. */
+  setScreenshotOffer(enabled: boolean): Promise<boolean>;
+  /** mine: "This is my device" — its transfers are accepted without asking from now on. */
+  respondToPairing(sessionId: string, accept: boolean, mine: boolean): void;
   respondToOffer(transferId: string, accept: boolean): void;
   cancelTransfer(transferId: string): void;
   dismissTransfer(transferId: string): void;

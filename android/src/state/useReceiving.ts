@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import * as CrossDrop from '../native/crossdrop';
-import type { Snapshot } from '../native/types';
+import type { ReceiveMode, Snapshot } from '../native/types';
 
 type Listener = (next: () => void) => void;
 let listener: Listener | null = null;
@@ -31,6 +31,21 @@ export function useReceivingToggle(snapshot: Snapshot) {
         return;
       }
       CrossDrop.setReceiving(value);
+    },
+    [permission],
+  );
+}
+
+/** Sets the receive mode, explaining notifications the first time receiving is switched on. */
+export function useReceiveMode(snapshot: Snapshot) {
+  const permission = snapshot.notificationPermission;
+  return useCallback(
+    (mode: ReceiveMode) => {
+      if (mode !== 'off' && permission === 'undetermined') {
+        askForNotificationsThen(() => CrossDrop.setReceiveMode(mode));
+        return;
+      }
+      CrossDrop.setReceiveMode(mode);
     },
     [permission],
   );

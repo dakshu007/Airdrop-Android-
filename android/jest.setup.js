@@ -51,6 +51,16 @@ jest.mock('./specs/NativeCrossDrop', () => ({
     openWifiSettings: jest.fn(),
     setPreference: jest.fn(),
     feedback: jest.fn(),
+    setReceiveMode: jest.fn(),
+    pickFolder: jest.fn(() => Promise.resolve('[]')),
+    sendSharedText: jest.fn(() => Promise.resolve('t-3')),
+    takeClipboard: jest.fn(() => Promise.resolve(true)),
+    scanPairingCode: jest.fn(() => Promise.resolve('')),
+    pairWithCode: jest.fn(() => Promise.resolve('Studio Mac')),
+    resendHistory: jest.fn(() => Promise.resolve('t-4')),
+    openLink: jest.fn(),
+    copyText: jest.fn(),
+    setScreenshotOffer: jest.fn(() => Promise.resolve(true)),
   },
 }));
 

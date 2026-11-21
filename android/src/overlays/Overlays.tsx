@@ -74,9 +74,9 @@ export function Overlays() {
     setAnswers(prev => new Map(prev).set(id, accept));
 
   if (pairing) {
-    const respond = (accept: boolean) => {
+    const respond = (accept: boolean, mine: boolean) => {
       record(pairing.sessionId, accept);
-      CrossDrop.respondToPairing(pairing.sessionId, accept);
+      CrossDrop.respondToPairing(pairing.sessionId, accept, mine);
     };
     return (
       <PairingStage

@@ -139,7 +139,7 @@ export function Navigator() {
   const [built, setBuilt] = useState<Set<TabKey>>(() => new Set(['nearby']));
   const shareProgress = useRef(new Animated.Value(0)).current;
 
-  const sharing = snapshot.shared.length > 0;
+  const sharing = snapshot.shared.length > 0 || snapshot.sharedText !== null;
   useDiscovery(appActive && (tab === 'nearby' || sharing));
 
   const navigate = useCallback((next: TabKey) => {

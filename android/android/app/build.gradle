@@ -121,6 +121,13 @@ dependencies {
     implementation("com.facebook.react:react-android")
     implementation("com.crossdrop:core")
     implementation("androidx.core:core-ktx:1.13.1")
+    // Pairing QR scanner: CameraX for the preview, ZXing core (Apache-2.0) to decode on
+    // device. Chosen over ML Kit, which depends on Google Play services.
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("androidx.activity:activity-ktx:1.9.3")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

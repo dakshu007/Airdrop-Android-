@@ -70,21 +70,64 @@ class Notifier(private val context: Context) {
             .apply { if (progress != null) setProgress(100, progress.coerceIn(0, 100), false) }
             .build()
 
-    fun request(id: String, title: String, text: String) = post(
+    fun request(id: String, title: String, text: String, actions: List<NotificationCompat.Action> = emptyList()) = post(
         id.hashCode(),
         base(CHANNEL_REQUESTS, title, text, "CrossDrop request")
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setTimeoutAfter(120_000)
+            .apply { actions.forEach(::addAction) }
             .build(),
     )
 
-    fun result(id: String, title: String, text: String) = post(
+    fun result(
+        id: String,
+        title: String,
+        text: String,
+        actions: List<NotificationCompat.Action> = emptyList(),
+        tap: PendingIntent? = null,
+    ) = post(
         id.hashCode(),
         base(CHANNEL_RESULTS, title, text, "CrossDrop transfer finished")
             .setAutoCancel(true)
+            .apply {
+                actions.forEach(::addAction)
+                if (tap != null) setContentIntent(tap)
+            }
             .build(),
+    )
+
+    /** A suggestion, e.g. "Send this screenshot to …"; quiet and short-lived. */
+    fun suggestion(id: String, title: String, text: String, actions: List<NotificationCompat.Action>) = post(
+        id.hashCode(),
+        base(CHANNEL_RESULTS, title, text, "CrossDrop suggestion")
+            .setAutoCancel(true)
+            .setTimeoutAfter(60_000)
+            .apply { actions.forEach(::addAction) }
+            .build(),
+    )
+
+    /** An action button handled by [NotificationActionReceiver]. */
+    fun action(label: String, action: String, id: String, extra: String? = null): NotificationCompat.Action {
+        val intent = Intent(context, NotificationActionReceiver::class.java)
+            .setAction(action)
+            .putExtra(NotificationActionReceiver.EXTRA_ID, id)
+            .apply { if (extra != null) putExtra(NotificationActionReceiver.EXTRA_VALUE, extra) }
+        val pi = PendingIntent.getBroadcast(
+            context, (action + id).hashCode(), intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return NotificationCompat.Action.Builder(0, label, pi).build()
+    }
+
+    /** An action button that opens an activity (a file or a link). */
+    fun activityAction(label: String, id: String, intent: Intent): NotificationCompat.Action =
+        NotificationCompat.Action.Builder(0, label, activityIntent(id, intent)).build()
+
+    fun activityIntent(id: String, intent: Intent): PendingIntent = PendingIntent.getActivity(
+        context, ("open" + id).hashCode(), intent,
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
     fun cancel(id: String) = nm.cancel(id.hashCode())

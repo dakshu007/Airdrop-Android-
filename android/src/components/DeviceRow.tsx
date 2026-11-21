@@ -29,7 +29,9 @@ export function DeviceRow({
       duration: v ? 90 : 220,
       useNativeDriver: true,
     }).start();
-  const status = device.trusted
+  const status = device.remembered
+    ? 'Not seen nearby · tries its last address'
+    : device.trusted
     ? 'Paired · tap to send'
     : 'New · you’ll confirm a code';
   return (

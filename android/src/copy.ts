@@ -93,7 +93,7 @@ export const ERROR_COPY: Record<string, FriendlyError> = {
   connection_lost: {
     title: 'Connection lost',
     detail:
-      'The connection dropped during the transfer. Files that finished were kept; send the rest again.',
+      'The connection dropped. Send it again and it picks up where it stopped.',
   },
   file_unreadable: {
     title: 'Could not read a file',
