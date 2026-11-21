@@ -34,6 +34,8 @@ class LoopbackTest {
     @Volatile var acceptOffer = true
     @Volatile var receiving = true
     @Volatile var onStarted: ((IncomingTransfer) -> Unit)? = null
+    @Volatile var privateMode = false
+    @Volatile var receivedText: Pair<OfferKind, String>? = null
 
     private val events = object : ReceiverEvents {
         override fun isReceiving() = receiving
@@ -46,6 +48,7 @@ class LoopbackTest {
         override fun onTransferStarted(transfer: IncomingTransfer) { onStarted?.invoke(transfer) }
         override fun onFileSaved(transfer: IncomingTransfer, fileIndex: Int, saved: SavedFile) { this@LoopbackTest.saved.add(saved) }
         override fun onCompleted(transfer: IncomingTransfer) = completed.countDown()
+        override fun onTextReceived(transfer: IncomingTransfer, kind: OfferKind, text: String) { receivedText = kind to text }
         override fun onFailed(transfer: IncomingTransfer?, peer: PeerInfo?, error: ProtocolException) {
             failures.add(error.code)
             failed.countDown()
@@ -53,7 +56,7 @@ class LoopbackTest {
     }
 
     private val server = CrossDropServer(
-        serverIdentity, { LocalInfo("Test Mac", Platform.MACOS, "test") }, serverTrust, DirectoryStorage(dir), events,
+        serverIdentity, { LocalInfo("Test Mac", Platform.MACOS, "test") }, serverTrust, DirectoryStorage(dir), events, { privateMode },
     )
     private val port = server.start(0, InetAddress.getLoopbackAddress())
 
@@ -76,8 +79,53 @@ class LoopbackTest {
 
     private fun bytesFile(name: String, data: ByteArray) = OutgoingFile(name, data.size.toLong(), "application/octet-stream") { ByteArrayInputStream(data) }
 
-    private fun transfer(files: List<OutgoingFile>, ev: SenderEvents = ClientEvents()) =
-        OutgoingTransfer(clientIdentity, LocalInfo("Test Phone", Platform.ANDROID, "test"), clientTrust, "127.0.0.1", port, serverIdentity.deviceId, files, ev)
+    private fun transfer(
+        files: List<OutgoingFile>,
+        ev: SenderEvents = ClientEvents(),
+        toPort: Int = port,
+        kind: OfferKind = OfferKind.FILES,
+        qr: QrPairing? = null,
+    ) = OutgoingTransfer(
+        clientIdentity, LocalInfo("Test Phone", Platform.ANDROID, "test"), clientTrust, "127.0.0.1", toPort,
+        serverIdentity.deviceId, files, ev, kind = kind, qr = qr,
+    )
+
+    private val serverFingerprint get() = Hashing.sha256(serverIdentity.publicKey).toHex()
+
+    /**
+     * Forwards one connection to the server and counts client-to-server bytes; with
+     * [cutAfter] it drops the connection abruptly once that many bytes went through.
+     */
+    private inner class Proxy(private val cutAfter: Long = Long.MAX_VALUE) {
+        private val listener = java.net.ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        val port: Int = listener.localPort
+        @Volatile var forwarded = 0L
+
+        init {
+            Thread {
+                val client = listener.accept()
+                val upstream = Socket(InetAddress.getLoopbackAddress(), this@LoopbackTest.port)
+                Thread {
+                    runCatching { upstream.getInputStream().copyTo(client.getOutputStream()) }
+                    runCatching { client.close() }
+                }.apply { isDaemon = true }.start()
+                val buf = ByteArray(16 * 1024)
+                runCatching {
+                    val input = client.getInputStream()
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        upstream.getOutputStream().write(buf, 0, n)
+                        forwarded += n
+                        if (forwarded >= cutAfter) break
+                    }
+                }
+                runCatching { upstream.close() }
+                runCatching { client.close() }
+                runCatching { listener.close() }
+            }.apply { isDaemon = true }.start()
+        }
+    }
 
     @Test
     fun pairsAndTransfersFilesThenReusesTrust() {
@@ -191,5 +239,106 @@ class LoopbackTest {
             val bytes = s.getInputStream().readBytes()
             assertTrue(String(bytes.copyOfRange(4, bytes.size)).contains("unsupported_version"))
         }
+    }
+
+    @Test
+    fun foldersKeepTheirStructureButNeverEscape() {
+        val files = listOf(
+            OutgoingFile("a.txt", 1, null, listOf("Trip", "Day 1")) { ByteArrayInputStream(byteArrayOf(1)) },
+            OutgoingFile("b.txt", 1, null, listOf("..", "Trip", ".", "/etc")) { ByteArrayInputStream(byteArrayOf(2)) },
+        )
+        transfer(files).run()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+        assertEquals(listOf("Trip/Day 1/a.txt", "Trip/etc/b.txt"), saved.map { it.displayName })
+        assertTrue(File(saved[0].location).canonicalPath.startsWith(dir.toFile().canonicalPath))
+        assertTrue(File(saved[1].location).canonicalPath.startsWith(dir.toFile().canonicalPath))
+    }
+
+    @Test
+    fun linkArrivesAsTextAndIsNotSaved() {
+        transfer(listOf(OutgoingFile.text("Link", "https://example.com/a?b=c")), kind = OfferKind.LINK).run()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+        assertEquals(OfferKind.LINK to "https://example.com/a?b=c", receivedText)
+        assertTrue(saved.isEmpty())
+        assertTrue(dir.toFile().listFiles()!!.isEmpty())
+    }
+
+    @Test
+    fun tooLargeTextOfferIsRefused() {
+        val big = OutgoingFile("Text", 70_000, null) { ByteArrayInputStream(ByteArray(70_000)) }
+        val e = assertFailsWith<ProtocolException> { transfer(listOf(big), kind = OfferKind.TEXT).run() }
+        assertEquals(ErrorCode.BAD_MESSAGE, e.code)
+    }
+
+    @Test
+    fun qrTokenPairsWithoutPromptsAndRemembersMine() {
+        val token = server.pairingTokens.issue(mine = true)
+        val noPrompt = object : SenderEvents {
+            override fun onStage(stage: SendStage) {}
+            override fun onPairingPrompt(prompt: PairingPrompt) = error("QR pairing must not prompt")
+            override fun onPairingClosed(prompt: PairingPrompt, paired: Boolean) {}
+        }
+        acceptPairing = false // the server must not ask its user either
+        val peer = QrPairingClient.pairOnly(
+            clientIdentity, LocalInfo("Test Phone", Platform.ANDROID, "test"), clientTrust,
+            listOf("127.0.0.1"), port, QrPairing(token, serverFingerprint, mine = true), noPrompt,
+        )
+        assertEquals(serverIdentity.deviceId, peer.deviceId)
+        assertEquals(null, serverSas)
+        assertEquals(true, clientTrust.get(serverIdentity.deviceId)?.autoAccept)
+        assertEquals(true, serverTrust.get(clientIdentity.deviceId)?.autoAccept)
+        Thread.sleep(300)
+        assertTrue(failures.isEmpty(), "a pairing-only session ends quietly: $failures")
+        // The token is single-use.
+        assertEquals(null, server.pairingTokens.redeem(token))
+    }
+
+    @Test
+    fun qrCodeForAnotherDeviceIsRefused() {
+        val token = server.pairingTokens.issue(mine = false)
+        val e = assertFailsWith<ProtocolException> {
+            QrPairingClient.pairOnly(
+                clientIdentity, LocalInfo("Test Phone", Platform.ANDROID, "test"), clientTrust,
+                listOf("127.0.0.1"), port, QrPairing(token, "0".repeat(64), mine = false), ClientEvents(),
+            )
+        }
+        assertEquals(ErrorCode.AUTH_FAILED, e.code)
+        assertEquals(null, clientTrust.get(serverIdentity.deviceId))
+    }
+
+    @Test
+    fun privateModeOnlyAcceptsPairedDevicesOrQrTokens() {
+        privateMode = true
+        val e = assertFailsWith<ProtocolException> { transfer(listOf(bytesFile("a.txt", byteArrayOf(1)))).run() }
+        assertEquals(ErrorCode.NOT_RECEIVING, e.code)
+        assertEquals(null, serverSas, "strangers never see a pairing prompt")
+
+        // A QR token gets through, and afterwards the paired device sends normally.
+        val token = server.pairingTokens.issue(mine = false)
+        transfer(listOf(bytesFile("a.txt", byteArrayOf(1))), qr = QrPairing(token, serverFingerprint, mine = false)).run()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+        assertEquals(listOf("a.txt"), saved.map { it.displayName })
+    }
+
+    @Test
+    fun droppedTransferResumesWhereItStopped() {
+        val big = ByteArray(3_000_000).also { Random(7).nextBytes(it) }
+        // Pair first so both later connections go straight to the offer.
+        transfer(listOf(bytesFile("warmup.txt", byteArrayOf(0)))).run()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+
+        val cut = Proxy(cutAfter = 1_500_000)
+        val e = assertFailsWith<ProtocolException> { transfer(listOf(bytesFile("video.bin", big)), toPort = cut.port).run() }
+        assertTrue(e.code == ErrorCode.CONNECTION_LOST || e.code == ErrorCode.UNREACHABLE, "got ${e.code}")
+        assertTrue(failed.await(5, TimeUnit.SECONDS))
+        assertEquals(ErrorCode.CONNECTION_LOST, failures.last())
+        assertTrue(dir.toFile().listFiles()!!.any { it.name.startsWith(".crossdrop-resume-") }, "the part so far is kept")
+
+        val count = Proxy()
+        transfer(listOf(bytesFile("video.bin", big)), toPort = count.port).run()
+        assertContentEquals(big, File(saved.last().location).readBytes())
+        assertEquals("video.bin", saved.last().displayName)
+        assertTrue(count.forwarded < 2_500_000, "only the rest is sent again (sent ${count.forwarded})")
+        assertTrue(dir.toFile().listFiles()!!.none { it.name.startsWith(".crossdrop-") })
     }
 }

@@ -50,14 +50,18 @@ data class TrustedPeer(
 interface TrustStore {
     fun get(deviceId: String): TrustedPeer?
     fun trust(peer: PeerInfo)
+
+    /** Stores trust; [autoAccept] is true when the user said "this is my device" while pairing (§9.4). */
+    fun trust(peer: PeerInfo, autoAccept: Boolean) = trust(peer)
     fun touch(deviceId: String, name: String)
 }
 
 class InMemoryTrustStore : TrustStore {
     private val peers = java.util.concurrent.ConcurrentHashMap<String, TrustedPeer>()
     override fun get(deviceId: String) = peers[deviceId]
-    override fun trust(peer: PeerInfo) {
-        peers[peer.deviceId] = TrustedPeer(peer.deviceId, peer.identityKey, peer.name, peer.platform, System.currentTimeMillis(), null, false)
+    override fun trust(peer: PeerInfo) = trust(peer, false)
+    override fun trust(peer: PeerInfo, autoAccept: Boolean) {
+        peers[peer.deviceId] = TrustedPeer(peer.deviceId, peer.identityKey, peer.name, peer.platform, System.currentTimeMillis(), null, autoAccept)
     }
     override fun touch(deviceId: String, name: String) {
         peers.computeIfPresent(deviceId) { _, p -> p.copy(name = name, lastUsedAt = System.currentTimeMillis()) }

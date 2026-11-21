@@ -24,16 +24,36 @@ interface ReceiveStorage {
 
     /** Opens a temporary, not-yet-visible file for [name] (already sanitised). */
     fun begin(name: String, mime: String?, size: Long): PartialFile
+
+    /**
+     * Opens a temporary file inside the folders [path] (already sanitised, §9.1).
+     * [resumeKey] names this file for resuming (§9.3); when [resumeFrom] > 0 the bytes
+     * kept under that key are reopened and new bytes are appended after them.
+     */
+    fun begin(name: String, mime: String?, size: Long, path: List<String>, resumeKey: String?, resumeFrom: Long): PartialFile =
+        if (resumeFrom > 0) throw IOException("resume not supported") else begin(name, mime, size)
+
+    /** Bytes kept from an earlier interrupted transfer under [resumeKey] (§9.3), or 0. */
+    fun resumableBytes(resumeKey: String): Long = 0
 }
 
 interface PartialFile {
     val output: OutputStream
+
+    /** Bytes already in the file when it was reopened to resume. */
+    val existingBytes: Long get() = 0
+
+    /** Reads the bytes already present, so they can be hashed again. */
+    fun openExisting(): java.io.InputStream? = null
 
     /** Makes the verified file visible under a non-colliding name. */
     fun commit(): SavedFile
 
     /** Deletes the temporary file. Must not throw. */
     fun abort()
+
+    /** Keeps the bytes received so far for a later resume (§9.3). Must not throw. */
+    fun keepForResume() = abort()
 }
 
 /** [location] is a content URI on Android, an absolute path on the JVM. */
@@ -59,6 +79,9 @@ interface ReceiverEvents : PairingEvents {
     fun onFailed(transfer: IncomingTransfer?, peer: PeerInfo?, error: ProtocolException) {}
 
     fun onRejected(offer: IncomingOffer, reason: String) {}
+
+    /** A link or text offer arrived and was verified (§9.2). Nothing is saved to storage. */
+    fun onTextReceived(transfer: IncomingTransfer, kind: OfferKind, text: String) {}
 }
 
 /** An accepted incoming transfer; [cancel] may be called from any thread. */
@@ -67,6 +90,7 @@ class IncomingTransfer internal constructor(
     val peer: PeerInfo,
     val files: List<OfferFile>,
     private val conn: Connection,
+    val kind: OfferKind = OfferKind.FILES,
 ) {
     val totalBytes: Long = files.sumOf { it.size }
     internal val cancelled = AtomicBoolean(false)
@@ -88,7 +112,11 @@ class CrossDropServer(
     private val trust: TrustStore,
     private val storage: ReceiveStorage,
     private val events: ReceiverEvents,
+    /** "My devices only" (§9.5): only paired devices, or a valid QR token, get past the handshake. */
+    private val privateMode: () -> Boolean = { false },
 ) {
+    /** Tokens for pairing QR codes shown by this device (§9.4). */
+    val pairingTokens = PairingTokens()
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
     private val active = AtomicInteger(0)
@@ -148,9 +176,10 @@ class CrossDropServer(
             try {
                 runInner()
             } catch (e: ProtocolException) {
-                partial?.abort()
                 val t = transfer
                 val error = if (t != null && t.cancelled.get()) ProtocolException(ErrorCode.CANCELLED, "cancelled") else e
+                // A dropped connection keeps the file so far for a resume (§9.3); anything else discards it.
+                if (error.code == ErrorCode.CONNECTION_LOST || error.code == ErrorCode.TIMEOUT) partial?.keepForResume() else partial?.abort()
                 if (!error.remote && error.code != ErrorCode.CANCELLED && error.code != ErrorCode.CONNECTION_LOST && !conn.isClosed) {
                     conn.sendErrorAndClose(error.code, encrypted)
                 }
@@ -175,12 +204,26 @@ class CrossDropServer(
             encrypted = true
             peer = hs.peer
 
+            var paired = false
             while (true) {
-                val msg = nextControl(Protocol.STREAM_IDLE_TIMEOUT_MS)
+                val msg = try {
+                    nextControl(Protocol.STREAM_IDLE_TIMEOUT_MS)
+                } catch (e: ProtocolException) {
+                    // A pairing-only session (QR code, §9.4) simply closes after pairing.
+                    if (paired && e.code == ErrorCode.CONNECTION_LOST) return
+                    throw e
+                }
+                val untrusted = trust.get(hs.peer.deviceId) == null
                 when (msg.type) {
-                    "pair.request" -> Pairing.run(conn, hs, Role.RECEIVER, events, trust)
+                    "pair.request" -> {
+                        val mine = msg.optString("token", 64)?.let { pairingTokens.redeem(it) }
+                        if (untrusted && mine == null && privateMode()) throw ProtocolException(ErrorCode.NOT_RECEIVING, "paired devices only")
+                        Pairing.run(conn, hs, Role.RECEIVER, events, trust, mine?.let { AutoPair(it) })
+                        paired = true
+                    }
                     "transfer.offer" -> {
-                        if (trust.get(hs.peer.deviceId) == null) {
+                        if (untrusted) {
+                            if (privateMode()) throw ProtocolException(ErrorCode.NOT_RECEIVING, "paired devices only")
                             mapIo { conn.sendControl(Message.build("error", "code" to ErrorCode.PAIRING_REQUIRED.wire)) }
                             continue
                         }
@@ -205,7 +248,8 @@ class CrossDropServer(
         private fun handleOffer(peer: PeerInfo, msg: Message) {
             val transferId = msg.transferId()
             val files = OfferFile.parseOffer(msg)
-            val offer = IncomingOffer(transferId, peer, files, System.currentTimeMillis() + Protocol.HUMAN_DECISION_TIMEOUT_MS)
+            val kind = OfferFile.parseKind(msg, files)
+            val offer = IncomingOffer(transferId, peer, files, System.currentTimeMillis() + Protocol.HUMAN_DECISION_TIMEOUT_MS, kind)
 
             if (!events.isReceiving()) {
                 reject(transferId, "not_receiving")
@@ -236,11 +280,23 @@ class CrossDropServer(
                 return
             }
 
-            mapIo { conn.sendControl(Message.build("transfer.accept", "transferId" to transferId)) }
-            val t = IncomingTransfer(transferId, peer, files, conn)
+            // Offer to continue files a dropped connection left half-received (§9.3).
+            val resumeAt = HashMap<Int, Long>()
+            if (kind == OfferKind.FILES) {
+                for (file in files) {
+                    val have = storage.resumableBytes(resumeKey(peer, file))
+                    if (have in 1 until file.size) resumeAt[file.fileId] = have
+                }
+            }
+            val accept = Message.build("transfer.accept", "transferId" to transferId)
+            if (resumeAt.isNotEmpty()) {
+                (accept as MutableMap<String, Any?>)["resume"] = resumeAt.map { (id, offset) -> linkedMapOf("fileId" to id, "offset" to offset) }
+            }
+            mapIo { conn.sendControl(accept) }
+            val t = IncomingTransfer(transferId, peer, files, conn, kind)
             transfer = t
             events.onTransferStarted(t)
-            receiveFiles(t)
+            if (kind == OfferKind.FILES) receiveFiles(t, resumeAt) else receiveText(t)
             mapIo { conn.sendControl(Message.build("transfer.complete", "transferId" to transferId)) }
             trust.touch(peer.deviceId, peer.name)
             events.onCompleted(t)
@@ -248,24 +304,79 @@ class CrossDropServer(
             runCatching { conn.next(2_000) }
         }
 
-        private fun receiveFiles(t: IncomingTransfer) {
+        private fun nextStart(t: IncomingTransfer, file: OfferFile): Message {
+            val start = nextControl(Protocol.STREAM_IDLE_TIMEOUT_MS)
+            if (start.type != "transfer.start") Sessions.handleUnexpected(start)
+            if (start.transferId() != t.transferId || start.long("fileId", 0, Protocol.MAX_FILES.toLong()).toInt() != file.fileId) {
+                throw ProtocolException(ErrorCode.BAD_MESSAGE, "files out of order")
+            }
+            return start
+        }
+
+        /** A link or text payload (§9.2): small, held in memory, verified, never written to storage. */
+        private fun receiveText(t: IncomingTransfer) {
+            val file = t.files[0]
+            nextStart(t, file)
+            val buf = java.io.ByteArrayOutputStream(file.size.toInt())
+            while (buf.size() < file.size) {
+                when (val item = conn.next(Protocol.STREAM_IDLE_TIMEOUT_MS)) {
+                    is Connection.Incoming.Data -> {
+                        if (buf.size() + item.length > file.size) throw ProtocolException(ErrorCode.BAD_MESSAGE, "more data than announced")
+                        buf.write(item.buffer, item.offset, item.length)
+                    }
+                    is Connection.Incoming.Control -> Sessions.handleUnexpected(item.message)
+                    else -> throw ProtocolException(ErrorCode.UNEXPECTED_MESSAGE)
+                }
+            }
+            val bytes = buf.toByteArray()
+            if (Hashing.sha256(bytes).toHex() != file.sha256) throw ProtocolException(ErrorCode.INTEGRITY_FAILED, "sha256 mismatch")
+            val text = try {
+                Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+            } catch (e: java.nio.charset.CharacterCodingException) {
+                throw ProtocolException(ErrorCode.BAD_MESSAGE, "text is not UTF-8")
+            }
+            sendProgress(t, file, file.size)
+            events.onProgress(t, 0, file.size, file.size)
+            events.onTextReceived(t, t.kind, text)
+        }
+
+        private fun receiveFiles(t: IncomingTransfer, resumeAt: Map<Int, Long>) {
             var totalReceived = 0L
             for ((index, file) in t.files.withIndex()) {
-                val start = nextControl(Protocol.STREAM_IDLE_TIMEOUT_MS)
-                if (start.type != "transfer.start") Sessions.handleUnexpected(start)
-                if (start.transferId() != t.transferId || start.long("fileId", 0, Protocol.MAX_FILES.toLong()).toInt() != file.fileId) {
-                    throw ProtocolException(ErrorCode.BAD_MESSAGE, "files out of order")
-                }
+                val start = nextStart(t, file)
+                // The sender either continues where we offered (§9.3) or starts from 0.
+                val offset = (start.fields["offset"] as? Long) ?: 0L
+                if (offset != 0L && offset != resumeAt[file.fileId]) throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad offset")
 
                 val name = Sanitizer.fileName(file.name)
+                val key = resumeKey(t.peer, file)
                 val p = try {
-                    storage.begin(name, file.mime, file.size)
+                    storage.begin(name, file.mime, file.size, file.path, key, offset)
                 } catch (e: IOException) {
                     throw ProtocolException(ErrorCode.STORAGE_ERROR, "cannot create file")
                 }
                 partial = p
                 val md = MessageDigest.getInstance("SHA-256")
                 var received = 0L
+                if (offset > 0) {
+                    // Hash the bytes kept from last time, so the check still covers the whole file.
+                    try {
+                        val existing = p.openExisting() ?: throw IOException("nothing to resume")
+                        existing.use { input ->
+                            val buf = ByteArray(Protocol.MAX_DATA_BODY)
+                            while (received < offset) {
+                                val n = input.read(buf, 0, minOf(buf.size.toLong(), offset - received).toInt())
+                                if (n < 0) break
+                                md.update(buf, 0, n)
+                                received += n
+                            }
+                        }
+                    } catch (e: IOException) {
+                        throw ProtocolException(ErrorCode.STORAGE_ERROR, "cannot read kept part")
+                    }
+                    if (received != offset) throw ProtocolException(ErrorCode.STORAGE_ERROR, "kept part is shorter")
+                    totalReceived += offset
+                }
                 var lastProgressAt = 0L
                 while (received < file.size) {
                     when (val item = conn.next(Protocol.STREAM_IDLE_TIMEOUT_MS)) {
@@ -308,6 +419,10 @@ class CrossDropServer(
             }
         }
 
+        /** Names a half-received file by sender and content, so any later offer of the same file can resume it (§9.3). */
+        private fun resumeKey(peer: PeerInfo, file: OfferFile): String =
+            Hashing.sha256("CrossDrop/1 resume|${peer.deviceId}|${file.sha256}|${file.size}".toByteArray(Charsets.UTF_8)).toHex()
+
         private fun sendProgress(t: IncomingTransfer, file: OfferFile, bytes: Long) {
             mapIo {
                 conn.sendControl(Message.build("transfer.progress", "transferId" to t.transferId, "fileId" to file.fileId, "bytes" to bytes))
@@ -316,10 +431,22 @@ class CrossDropServer(
     }
 }
 
-/** Saves into a directory: temp file in the same directory, verified, then moved without overwriting. */
+/**
+ * Saves into a directory: temp file in the same directory, verified, then moved
+ * without overwriting. Folder paths (§9.1) become subfolders that never leave the
+ * directory or follow symlinks; interrupted files are kept for a day to resume (§9.3).
+ */
 class DirectoryStorage(private val dir: Path) : ReceiveStorage {
     init {
         Files.createDirectories(dir)
+        // Drop kept parts older than the resume window.
+        runCatching {
+            Files.list(dir).use { stream ->
+                stream.filter { it.fileName.toString().startsWith(RESUME_PREFIX) }
+                    .filter { System.currentTimeMillis() - Files.getLastModifiedTime(it).toMillis() > Protocol.RESUME_KEEP_MS }
+                    .forEach { runCatching { Files.deleteIfExists(it) } }
+            }
+        }
     }
 
     override fun availableBytes(): Long = try {
@@ -328,23 +455,55 @@ class DirectoryStorage(private val dir: Path) : ReceiveStorage {
         Long.MAX_VALUE
     }
 
-    override fun begin(name: String, mime: String?, size: Long): PartialFile {
-        val temp = dir.resolve(".crossdrop-${UUID.randomUUID()}.partial")
-        val out = Files.newOutputStream(temp, java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE)
+    private fun resumePath(key: String): Path {
+        require(Protocol.isValidSha256Hex(key))
+        return dir.resolve("$RESUME_PREFIX$key.partial")
+    }
+
+    override fun resumableBytes(resumeKey: String): Long {
+        val p = resumePath(resumeKey)
+        if (!Files.isRegularFile(p, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return 0
+        val age = System.currentTimeMillis() - Files.getLastModifiedTime(p).toMillis()
+        return if (age > Protocol.RESUME_KEEP_MS) 0 else Files.size(p)
+    }
+
+    override fun begin(name: String, mime: String?, size: Long): PartialFile = begin(name, mime, size, emptyList(), null, 0)
+
+    override fun begin(name: String, mime: String?, size: Long, path: List<String>, resumeKey: String?, resumeFrom: Long): PartialFile {
+        val kept = resumeKey?.let { resumePath(it) }
+        val temp: Path
+        val out: OutputStream
+        if (resumeFrom > 0) {
+            if (kept == null || !Files.isRegularFile(kept, java.nio.file.LinkOption.NOFOLLOW_LINKS) || Files.size(kept) != resumeFrom) {
+                throw IOException("kept part changed")
+            }
+            temp = kept
+            out = Files.newOutputStream(temp, java.nio.file.StandardOpenOption.APPEND, java.nio.file.StandardOpenOption.WRITE)
+        } else {
+            // A fresh start replaces anything kept for this file.
+            kept?.let { runCatching { Files.deleteIfExists(it) } }
+            temp = dir.resolve(".crossdrop-${UUID.randomUUID()}.partial")
+            out = Files.newOutputStream(temp, java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE)
+        }
         return object : PartialFile {
             override val output: OutputStream = out.buffered(256 * 1024)
+            override val existingBytes: Long = resumeFrom
+
+            override fun openExisting() = if (resumeFrom > 0) Files.newInputStream(temp) else null
 
             override fun commit(): SavedFile {
+                val target = folder(path)
                 var n = 0
                 while (true) {
                     val candidate = if (n == 0) name else Sanitizer.numbered(name, n)
-                    val target = dir.resolve(candidate)
-                    if (target.parent != dir) throw IOException("escapes destination")
+                    val file = target.resolve(candidate)
+                    if (file.parent != target) throw IOException("escapes destination")
                     try {
-                        if (Files.exists(target, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw FileAlreadyExistsException(candidate)
-                        Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE)
+                        if (Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw FileAlreadyExistsException(candidate)
+                        Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE)
                         // ATOMIC_MOVE may replace on some platforms; the existence check above guards the common case.
-                        return SavedFile(candidate, target.toAbsolutePath().toString())
+                        val shown = (path + candidate).joinToString("/")
+                        return SavedFile(shown, file.toAbsolutePath().toString())
                     } catch (e: FileAlreadyExistsException) {
                         n++
                         if (n > 9999) throw IOException("no free name")
@@ -356,6 +515,33 @@ class DirectoryStorage(private val dir: Path) : ReceiveStorage {
                 runCatching { output.close() }
                 runCatching { Files.deleteIfExists(temp) }
             }
+
+            override fun keepForResume() {
+                runCatching { output.close() }
+                if (kept == null) {
+                    runCatching { Files.deleteIfExists(temp) }
+                } else if (temp != kept) {
+                    runCatching { Files.move(temp, kept, StandardCopyOption.REPLACE_EXISTING) }
+                }
+            }
         }
+    }
+
+    /** Creates the folders for [path] under the destination, refusing symlinks and anything outside it. */
+    private fun folder(path: List<String>): Path {
+        var current = dir
+        for (part in path) {
+            val next = current.resolve(part).normalize()
+            if (next.parent != current || !next.startsWith(dir)) throw IOException("escapes destination")
+            if (Files.isSymbolicLink(next)) throw IOException("symlink in path")
+            if (!Files.exists(next, java.nio.file.LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(next)
+            if (!Files.isDirectory(next, java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw IOException("not a folder")
+            current = next
+        }
+        return current
+    }
+
+    private companion object {
+        const val RESUME_PREFIX = ".crossdrop-resume-"
     }
 }

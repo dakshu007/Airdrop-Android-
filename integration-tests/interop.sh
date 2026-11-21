@@ -63,8 +63,71 @@ run_case() {
   echo "ok: SAS $sas_send matched, 6 files verified ($((end - start))s)"
 }
 
+start_receiver() { # name receiver port extra-args...
+  local name="$1" receiver="$2" port="$3"; shift 3
+  mkdir -p "$WORK/out-$name"
+  "$receiver" receive --port "$port" --dir "$WORK/out-$name" --identity "$WORK/$name-recv.key" --name "Receiver" "$@" > "$WORK/$name-recv.log" 2>&1 &
+  RPID=$!
+  for _ in $(seq 1 100); do grep -q LISTENING "$WORK/$name-recv.log" 2>/dev/null && break; sleep 0.2; done
+  grep -q LISTENING "$WORK/$name-recv.log" || { cat "$WORK/$name-recv.log"; echo "receiver did not start"; exit 1; }
+}
+
+fail_with_logs() { echo "$1"; for f in "$WORK"/*.log; do echo "--- $f"; cat "$f"; done; exit 1; }
+
+# v1 extensions (docs/protocol-v1.md §9): links, folders, QR pairing with
+# "my devices only", and resuming a dropped transfer.
+run_extras() {
+  local name="$1" receiver="$2" sender="$3" port="$4"
+  echo "=== extras $name: $(basename "$sender") -> $(basename "$receiver") ==="
+
+  # Link: arrives as text, nothing saved.
+  start_receiver "$name-link" "$receiver" "$port" --once
+  "$sender" send --host 127.0.0.1 --port "$port" --identity "$WORK/$name-send.key" --kind link --text "https://example.com/a?b=c" \
+    > "$WORK/$name-link-send.log" 2>&1 || fail_with_logs "link send failed"
+  wait "$RPID" || fail_with_logs "link receiver failed"
+  grep -q "^TEXT link $(printf 'https://example.com/a?b=c' | base64)" "$WORK/$name-link-recv.log" || fail_with_logs "link not received"
+  [[ -z "$(ls -A "$WORK/out-$name-link")" ]] || fail_with_logs "a link must not create files"
+
+  # Folder: structure kept under the destination.
+  start_receiver "$name-folder" "$receiver" $((port + 1)) --once
+  "$sender" send --host 127.0.0.1 --port $((port + 1)) --identity "$WORK/$name-send.key" --path "Trip/Day 1" "$WORK/in/one-byte.bin" \
+    > "$WORK/$name-folder-send.log" 2>&1 || fail_with_logs "folder send failed"
+  wait "$RPID" || fail_with_logs "folder receiver failed"
+  [[ -f "$WORK/out-$name-folder/Trip/Day 1/one-byte.bin" ]] || { ls -laR "$WORK/out-$name-folder"; fail_with_logs "folder structure lost"; }
+
+  # My devices only: a stranger is refused, a QR token gets in.
+  start_receiver "$name-qr" "$receiver" $((port + 2)) --private --token-out "$WORK/$name-token"
+  if "$sender" send --host 127.0.0.1 --port $((port + 2)) --identity "$WORK/$name-stranger.key" "$WORK/in/one-byte.bin" > "$WORK/$name-stranger.log" 2>&1; then
+    fail_with_logs "private receiver accepted a stranger"
+  fi
+  grep -q "not_receiving" "$WORK/$name-stranger.log" || fail_with_logs "stranger should see not_receiving"
+  read -r token fpr < "$WORK/$name-token"
+  "$sender" send --host 127.0.0.1 --port $((port + 2)) --identity "$WORK/$name-send.key" --qr "$token:$fpr" "$WORK/in/big.bin" \
+    > "$WORK/$name-qr-send.log" 2>&1 || fail_with_logs "QR pairing send failed"
+  if grep -q '^SAS' "$WORK/$name-qr-send.log" "$WORK/$name-qr-recv.log"; then fail_with_logs "QR pairing must not show codes"; fi
+  kill "$RPID" 2>/dev/null || true; wait "$RPID" 2>/dev/null || true
+
+  # Resume: the sender dies halfway; the next attempt sends only the rest.
+  start_receiver "$name-resume" "$receiver" $((port + 3))
+  "$sender" send --host 127.0.0.1 --port $((port + 3)) --identity "$WORK/$name-send.key" --die-after 2500000 "$WORK/in/random 5MB.bin" \
+    > "$WORK/$name-resume-1.log" 2>&1 && fail_with_logs "the dying sender should not succeed"
+  sleep 1
+  "$sender" send --host 127.0.0.1 --port $((port + 3)) --identity "$WORK/$name-send.key" "$WORK/in/random 5MB.bin" \
+    > "$WORK/$name-resume-2.log" 2>&1 || fail_with_logs "resumed send failed"
+  grep -q '^RESUMED ' "$WORK/$name-resume-2.log" || fail_with_logs "second attempt did not resume"
+  kill "$RPID" 2>/dev/null || true; wait "$RPID" 2>/dev/null || true
+  [[ "$(shasum -a 256 "$WORK/out-$name-resume/random 5MB.bin" | awk '{print $1}')" == "$(shasum -a 256 "$WORK/in/random 5MB.bin" | awk '{print $1}')" ]] \
+    || fail_with_logs "resumed file differs"
+  echo "ok: link, folder, QR + my-devices-only, resume ($(grep '^RESUMED' "$WORK/$name-resume-2.log"))"
+}
+
+if [[ "${INTEROP_EXTRAS_ONLY:-}" != "1" ]]; then
 run_case kotlin-to-swift "$SWIFT_CLI" "$KOTLIN_CLI" 47801
 run_case swift-to-kotlin "$KOTLIN_CLI" "$SWIFT_CLI" 47802
 run_case swift-to-swift "$SWIFT_CLI" "$SWIFT_CLI" 47803
 run_case kotlin-to-kotlin "$KOTLIN_CLI" "$KOTLIN_CLI" 47804
+fi
+run_extras kotlin-to-swift "$SWIFT_CLI" "$KOTLIN_CLI" 47810
+run_extras swift-to-kotlin "$KOTLIN_CLI" "$SWIFT_CLI" 47820
+run_extras kotlin-to-kotlin "$KOTLIN_CLI" "$KOTLIN_CLI" 47830
 echo "All interop cases passed."

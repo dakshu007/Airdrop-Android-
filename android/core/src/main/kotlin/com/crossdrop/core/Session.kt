@@ -15,12 +15,58 @@ class PairingPrompt internal constructor(
     val expiresAt: Long,
 ) {
     internal val decision = CompletableFuture<Boolean>()
+    @Volatile internal var mine = false
 
-    /** Called by the UI with the user's answer. Later calls are ignored. */
-    fun respond(accept: Boolean) {
+    /**
+     * Called by the UI with the user's answer. [mine] means "this is my device":
+     * once paired, its files arrive without asking (§9.4). Later calls are ignored.
+     */
+    fun respond(accept: Boolean, mine: Boolean = false) {
+        if (!decision.isDone) this.mine = mine
         decision.complete(accept)
     }
 }
+
+/**
+ * One-time tokens a receiver shows inside a pairing QR code (§9.4). Scanning the
+ * code proves the scanner is physically in front of this screen, so a pairing that
+ * presents a valid token skips the code comparison on this side.
+ */
+class PairingTokens {
+    private class Entry(val expiresAt: Long, val mine: Boolean)
+    private val tokens = java.util.concurrent.ConcurrentHashMap<String, Entry>()
+    private val random = java.security.SecureRandom()
+
+    /** A fresh token, valid for [Protocol.PAIRING_TOKEN_TTL_MS]; [mine] is the local "this is my device" choice. */
+    fun issue(mine: Boolean): String {
+        val bytes = ByteArray(16).also(random::nextBytes)
+        val token = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+        val now = System.currentTimeMillis()
+        tokens.entries.removeIf { it.value.expiresAt < now }
+        tokens[token] = Entry(now + Protocol.PAIRING_TOKEN_TTL_MS, mine)
+        return token
+    }
+
+    /** Uses up [token]. Returns the "mine" choice it was issued with, or null if it isn't valid. */
+    fun redeem(token: String): Boolean? {
+        val entry = tokens.remove(token) ?: return null
+        return if (entry.expiresAt >= System.currentTimeMillis()) entry.mine else null
+    }
+
+    fun revokeAll() = tokens.clear()
+}
+
+/** What a client learned from a pairing QR code (§9.4). */
+data class QrPairing(
+    val token: String,
+    /** SHA-256 of the receiver's identity key, lowercase hex: the code is only good for that device. */
+    val fingerprint: String,
+    /** The scanning user's "this is my device" choice. */
+    val mine: Boolean,
+)
+
+/** Pairing that needs no prompt on this side: a QR token was presented or verified. */
+internal class AutoPair(val mine: Boolean)
 
 /** An incoming offer awaiting the local user's decision (§6.2). */
 class IncomingOffer internal constructor(
@@ -28,6 +74,8 @@ class IncomingOffer internal constructor(
     val peer: PeerInfo,
     val files: List<OfferFile>,
     val expiresAt: Long,
+    /** Files, or a link / text that the receiver handles without saving a file (§9.2). */
+    val kind: OfferKind = OfferKind.FILES,
 ) {
     val totalBytes: Long = files.sumOf { it.size }
     internal val decision = CompletableFuture<Boolean>()
@@ -53,15 +101,21 @@ private class OfferDecision(val offer: IncomingOffer, val accept: Boolean)
 
 internal object Pairing {
     /** Runs the §5 exchange once `pair.request` has been sent or received. */
-    fun run(conn: Connection, hs: HandshakeResult, role: Role, events: PairingEvents, trust: TrustStore) {
+    fun run(conn: Connection, hs: HandshakeResult, role: Role, events: PairingEvents, trust: TrustStore, auto: AutoPair? = null) {
         val deadline = System.currentTimeMillis() + Protocol.HUMAN_DECISION_TIMEOUT_MS
         val prompt = PairingPrompt(UUID.randomUUID().toString(), hs.peer, hs.sas, role, deadline)
-        prompt.decision.thenAccept { conn.inject(PairingDecision(prompt, it)) }
+        // Only a prompt the user answers feeds a decision into the connection.
+        if (auto == null) prompt.decision.thenAccept { conn.inject(PairingDecision(prompt, it)) }
         var paired = false
-        events.onPairingPrompt(prompt)
+        if (auto == null) events.onPairingPrompt(prompt)
         try {
             var localAccepted = false
             var remoteAccepted = false
+            if (auto != null) {
+                // The QR code already proved who is on each side: answer for the user.
+                mapIo { conn.sendControl(Message.build("pair.confirm", "accepted" to true)) }
+                localAccepted = true
+            }
             while (!(localAccepted && remoteAccepted)) {
                 val remaining = deadline - System.currentTimeMillis()
                 if (remaining <= 0) {
@@ -100,11 +154,11 @@ internal object Pairing {
                     else -> throw ProtocolException(ErrorCode.UNEXPECTED_MESSAGE, "data during pairing")
                 }
             }
-            trust.trust(hs.peer)
+            trust.trust(hs.peer, auto?.mine ?: prompt.mine)
             paired = true
         } finally {
             prompt.decision.complete(false)
-            events.onPairingClosed(prompt, paired)
+            if (auto == null) events.onPairingClosed(prompt, paired)
         }
     }
 

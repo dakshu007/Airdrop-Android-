@@ -25,6 +25,15 @@ object Protocol {
     const val PROGRESS_INTERVAL_MS = 500L
     /** Free space required on top of the offer total (§6.5). */
     const val STORAGE_MARGIN_BYTES = 64L * 1024 * 1024
+    /** Largest link or text payload (§9.2): it is kept in memory, not saved as a file. */
+    const val MAX_TEXT_PAYLOAD = 65536L
+    /** Folder depth and length limits for `path` (§9.1). */
+    const val MAX_PATH_COMPONENTS = 16
+    const val MAX_PATH_BYTES = 1024
+    /** How long a QR pairing token stays valid (§9.4). */
+    const val PAIRING_TOKEN_TTL_MS = 5 * 60_000L
+    /** How long an interrupted file is kept for resuming (§9.3). */
+    const val RESUME_KEEP_MS = 24 * 60 * 60_000L
 
     val LABEL_TRANSCRIPT = "CrossDrop/1 transcript".toByteArray(Charsets.US_ASCII)
     val LABEL_CLIENT_PROOF = "CrossDrop/1 client-proof".toByteArray(Charsets.US_ASCII)
@@ -174,21 +183,39 @@ class Message(val fields: Map<String, Any?>) {
     }
 }
 
-/** One file entry of a `transfer.offer`. */
+/** What an offer carries (§9.2): files to save, or a link / text that isn't saved as a file. */
+enum class OfferKind(val wire: String) {
+    FILES("files"), LINK("link"), TEXT("text");
+
+    companion object {
+        fun fromWire(s: String?): OfferKind = when (s) {
+            null, "files" -> FILES
+            "link" -> LINK
+            "text" -> TEXT
+            else -> throw ProtocolException(ErrorCode.BAD_MESSAGE, "unknown kind")
+        }
+    }
+}
+
+/** One file entry of a `transfer.offer`. [path] holds sanitised folder names (§9.1), outermost first. */
 data class OfferFile(
     val fileId: Int,
     val name: String,
     val size: Long,
     val mime: String?,
     val sha256: String,
+    val path: List<String> = emptyList(),
 ) {
-    fun toJson(): Map<String, Any?> = linkedMapOf(
+    fun toJson(): Map<String, Any?> = linkedMapOf<String, Any?>(
         "fileId" to fileId,
         "name" to name,
         "size" to size,
         "mime" to mime,
         "sha256" to sha256,
-    ).also { if (mime == null) it.remove("mime") }
+    ).also {
+        if (mime == null) it.remove("mime")
+        if (path.isNotEmpty()) it["path"] = path.joinToString("/")
+    }
 
     companion object {
         fun parseOffer(msg: Message): List<OfferFile> {
@@ -204,8 +231,31 @@ data class OfferFile(
                 if (name.isEmpty()) throw ProtocolException(ErrorCode.BAD_MESSAGE, "empty name")
                 val sha = m.string("sha256", 64)
                 if (!Protocol.isValidSha256Hex(sha)) throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad sha256")
-                OfferFile(fileId, name, m.long("size", 0, Protocol.MAX_SAFE_SIZE), m.optString("mime", 255), sha)
+                OfferFile(fileId, name, m.long("size", 0, Protocol.MAX_SAFE_SIZE), m.optString("mime", 255), sha, parsePath(m.optString("path", Protocol.MAX_PATH_BYTES)))
             }
+        }
+
+        /**
+         * Splits a sender's relative folder path into safe folder names: each part is
+         * sanitised like a file name, and empty, "." and ".." parts are dropped, so the
+         * result can never point outside the destination (§9.1).
+         */
+        fun parsePath(raw: String?): List<String> {
+            if (raw.isNullOrEmpty()) return emptyList()
+            val parts = raw.split('/', '\\')
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && it != "." && it != ".." }
+                .map { Sanitizer.fileName(it) }
+            if (parts.size > Protocol.MAX_PATH_COMPONENTS) throw ProtocolException(ErrorCode.BAD_MESSAGE, "path too deep")
+            return parts
+        }
+
+        fun parseKind(msg: Message, files: List<OfferFile>): OfferKind {
+            val kind = OfferKind.fromWire(msg.optString("kind", 16))
+            if (kind != OfferKind.FILES && (files.size != 1 || files[0].size > Protocol.MAX_TEXT_PAYLOAD)) {
+                throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad ${kind.wire} payload")
+            }
+            return kind
         }
     }
 }

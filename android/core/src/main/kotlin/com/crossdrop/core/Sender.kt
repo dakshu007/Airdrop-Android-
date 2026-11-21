@@ -15,8 +15,19 @@ class OutgoingFile(
     val name: String,
     val size: Long?,
     val mime: String?,
+    /** Folders above the file inside a sent folder, outermost first (§9.1). */
+    val path: List<String> = emptyList(),
     val open: () -> InputStream,
-)
+) {
+    companion object {
+        /** A link or text payload (§9.2) as the single "file" of an offer. */
+        fun text(name: String, text: String): OutgoingFile {
+            val bytes = text.toByteArray(Charsets.UTF_8)
+            require(bytes.size <= Protocol.MAX_TEXT_PAYLOAD) { "text too long" }
+            return OutgoingFile(name, bytes.size.toLong(), "text/plain; charset=utf-8") { bytes.inputStream() }
+        }
+    }
+}
 
 enum class SendStage { PREPARING, CONNECTING, PAIRING, WAITING_FOR_ACCEPTANCE, TRANSFERRING }
 
@@ -51,6 +62,10 @@ class OutgoingTransfer(
     private val files: List<OutgoingFile>,
     private val events: SenderEvents,
     val transferId: String = Sessions.newTransferId(),
+    /** Files, or a link / text the receiver handles without saving (§9.2). */
+    private val kind: OfferKind = OfferKind.FILES,
+    /** Set when pairing from a scanned QR code (§9.4). */
+    private val qr: QrPairing? = null,
 ) {
     private val cancelled = AtomicBoolean(false)
     @Volatile private var conn: Connection? = null
@@ -117,12 +132,12 @@ class OutgoingTransfer(
         var pairedThisSession = false
         if (trust.get(hs.peer.deviceId) == null) {
             events.onStage(SendStage.PAIRING)
-            mapIo { c.sendControl(Message.build("pair.request")) }
-            Pairing.run(c, hs, Role.SENDER, events, trust)
+            QrPairingClient.pair(c, hs, qr, events, trust)
             pairedThisSession = true
         }
 
         val offer = Message.build("transfer.offer", "transferId" to transferId, "files" to offerFiles.map { it.toJson() })
+        if (kind != OfferKind.FILES) (offer as MutableMap<String, Any?>)["kind"] = kind.wire
         events.onStage(SendStage.WAITING_FOR_ACCEPTANCE)
         mapIo { c.sendControl(offer) }
         while (true) {
@@ -132,6 +147,7 @@ class OutgoingTransfer(
             when (msg.type) {
                 "transfer.accept" -> {
                     if (msg.transferId() != transferId) throw ProtocolException(ErrorCode.BAD_MESSAGE, "wrong transferId")
+                    resumeAt = parseResume(msg, offerFiles)
                     break
                 }
                 "transfer.reject" -> throw TransferRejectedException(msg.optString("reason", 64) ?: "declined")
@@ -153,7 +169,7 @@ class OutgoingTransfer(
         }
 
         events.onStage(SendStage.TRANSFERRING)
-        stream(c, offerFiles)
+        stream(c, offerFiles, resumeAt)
 
         // Wait for the receiver to verify the last file.
         while (true) {
@@ -168,6 +184,24 @@ class OutgoingTransfer(
         }
         trust.touch(hs.peer.deviceId, hs.peer.name)
         return hs.peer
+    }
+
+    private var resumeAt: Map<Int, Long> = emptyMap()
+
+    /** Files the receiver already holds part of (§9.3): fileId -> bytes to skip. */
+    private fun parseResume(msg: Message, offerFiles: List<OfferFile>): Map<Int, Long> {
+        val raw = msg.fields["resume"] as? List<*> ?: return emptyMap()
+        val sizes = offerFiles.associate { it.fileId to it.size }
+        val out = HashMap<Int, Long>()
+        for (entry in raw) {
+            val m = entry as? Map<*, *> ?: throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad resume entry")
+            val id = (m["fileId"] as? Long)?.toInt() ?: throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad resume entry")
+            val offset = m["offset"] as? Long ?: throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad resume entry")
+            val size = sizes[id] ?: throw ProtocolException(ErrorCode.BAD_MESSAGE, "resume for unknown file")
+            if (offset <= 0 || offset >= size) throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad resume offset")
+            out[id] = offset
+        }
+        return out
     }
 
     private fun prepare(index: Int, file: OutgoingFile): OfferFile {
@@ -191,7 +225,7 @@ class OutgoingTransfer(
         }
         if (file.size != null && file.size != total) throw ProtocolException(ErrorCode.FILE_UNREADABLE, "size changed")
         val name = file.name.ifBlank { "file" }
-        return OfferFile(index, name, total, file.mime?.takeIf { it.toByteArray().size <= 255 }, md.digest().toHex())
+        return OfferFile(index, name, total, file.mime?.takeIf { it.toByteArray().size <= 255 }, md.digest().toHex(), file.path)
     }
 
     private fun handleProgress(msg: Message) {
@@ -199,7 +233,7 @@ class OutgoingTransfer(
         events.onReceiverProgress(msg.long("fileId", 0, Protocol.MAX_FILES.toLong()).toInt(), msg.long("bytes", 0, Protocol.MAX_SAFE_SIZE))
     }
 
-    private fun stream(c: Connection, offerFiles: List<OfferFile>) {
+    private fun stream(c: Connection, offerFiles: List<OfferFile>, resumeAt: Map<Int, Long>) {
         val watchdog: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
             Thread(r, "crossdrop-send-watchdog").apply { isDaemon = true }
         }
@@ -213,10 +247,20 @@ class OutgoingTransfer(
             var sentTotal = 0L
             for ((index, offerFile) in offerFiles.withIndex()) {
                 checkCancelled()
-                mapIo { c.sendControl(Message.build("transfer.start", "transferId" to transferId, "fileId" to offerFile.fileId)) }
+                val offset = resumeAt[offerFile.fileId] ?: 0L
+                val start = Message.build("transfer.start", "transferId" to transferId, "fileId" to offerFile.fileId)
+                if (offset > 0) (start as MutableMap<String, Any?>)["offset"] = offset
+                mapIo { c.sendControl(start) }
                 var sent = 0L
                 try {
                     files[index].open().use { input ->
+                        if (offset > 0) {
+                            // Continue where the receiver stopped (§9.3).
+                            skipFully(input, offset)
+                            sent = offset
+                            sentTotal += offset
+                            events.onBytesSent(sentTotal)
+                        }
                         while (sent < offerFile.size) {
                             checkCancelled()
                             drainIncoming(c)
@@ -242,6 +286,21 @@ class OutgoingTransfer(
             }
         } finally {
             watchdog.shutdownNow()
+        }
+    }
+
+    private fun skipFully(input: InputStream, count: Long) {
+        var left = count
+        val scratch = ByteArray(64 * 1024)
+        while (left > 0) {
+            val skipped = input.skip(left)
+            if (skipped > 0) {
+                left -= skipped
+                continue
+            }
+            val n = input.read(scratch, 0, minOf(scratch.size.toLong(), left).toInt())
+            if (n < 0) throw ProtocolException(ErrorCode.FILE_UNREADABLE, "source shrank")
+            left -= n
         }
     }
 
@@ -276,5 +335,55 @@ class OutgoingTransfer(
             val msg = (item as? Connection.Incoming.Control)?.message ?: continue
             if (msg.type != "transfer.progress") Sessions.handleUnexpected(msg)
         }
+    }
+}
+
+/**
+ * Pairing driven by a scanned QR code (§9.4): the receiver is only accepted if its
+ * identity key matches the code, and the code's one-time token lets the receiver
+ * skip its prompt. Without a code it is the usual compare-the-numbers pairing.
+ */
+object QrPairingClient {
+    internal fun pair(c: Connection, hs: HandshakeResult, qr: QrPairing?, events: PairingEvents, trust: TrustStore) {
+        if (qr == null) {
+            mapIo { c.sendControl(Message.build("pair.request")) }
+            Pairing.run(c, hs, Role.SENDER, events, trust)
+            return
+        }
+        if (hs.peer.fingerprint != qr.fingerprint) throw ProtocolException(ErrorCode.AUTH_FAILED, "not the device in the QR code")
+        mapIo { c.sendControl(Message.build("pair.request", "token" to qr.token)) }
+        Pairing.run(c, hs, Role.SENDER, events, trust, AutoPair(qr.mine))
+    }
+
+    /** Connects to the device in a QR code, pairs, and closes. Returns the paired peer. */
+    fun pairOnly(
+        identity: IdentityKey,
+        local: LocalInfo,
+        trust: TrustStore,
+        hosts: List<String>,
+        port: Int,
+        qr: QrPairing,
+        events: PairingEvents,
+    ): PeerInfo {
+        var lastError: ProtocolException = ProtocolException(ErrorCode.UNREACHABLE, "no address")
+        for (host in hosts) {
+            val socket = Socket()
+            try {
+                socket.connect(InetSocketAddress(host, port), Protocol.CONNECT_TIMEOUT_MS)
+            } catch (e: IOException) {
+                runCatching { socket.close() }
+                lastError = ProtocolException(ErrorCode.UNREACHABLE, "connect failed")
+                continue
+            }
+            val c = Connection(socket)
+            try {
+                val hs = Handshake.client(c, identity, local, trust)
+                pair(c, hs, qr, events, trust)
+                return hs.peer
+            } finally {
+                c.close()
+            }
+        }
+        throw lastError
     }
 }
