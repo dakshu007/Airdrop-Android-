@@ -65,6 +65,36 @@ public enum FileNaming {
         throw CrossDropError.violation(ErrorCode.storageError, "no free name")
     }
 
+    /// Creates (or reuses) the folders of a received file's `path` (§9.1) under
+    /// `directory`. Each part is already sanitised; an existing item that is a symlink
+    /// or not a folder is refused, so a received path can never lead outside.
+    public static func subfolder(_ path: [String], in directory: URL) throws -> URL {
+        let fm = FileManager.default
+        var current = directory
+        for part in path {
+            let sanitized = sanitize(part)
+            guard sanitized == part, part != ".", part != ".." else {
+                throw CrossDropError.violation(ErrorCode.storageError, "bad folder name")
+            }
+            current = current.appendingPathComponent(part, isDirectory: true)
+            if let attributes = try? fm.attributesOfItem(atPath: current.path) {
+                guard attributes[.type] as? FileAttributeType == .typeDirectory else {
+                    throw CrossDropError.violation(ErrorCode.storageError, "folder is not a plain folder")
+                }
+                continue
+            }
+            do {
+                try fm.createDirectory(at: current, withIntermediateDirectories: false)
+            } catch {
+                // Lost a race with another transfer creating the same folder: fine if it is a folder.
+                guard (try? fm.attributesOfItem(atPath: current.path))?[.type] as? FileAttributeType == .typeDirectory else {
+                    throw CrossDropError.violation(ErrorCode.storageError, "cannot create folder")
+                }
+            }
+        }
+        return current
+    }
+
     /// Bytes available for new files on the volume holding `url`.
     public static func availableCapacity(at url: URL) -> Int64? {
         if let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),

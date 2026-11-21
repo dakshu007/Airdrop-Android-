@@ -134,25 +134,47 @@ enum JSONValue {
 
 // MARK: - Transfer offer
 
+/// What an offer carries (§9.2): files to save, or a link / text that is not saved.
+public enum OfferKind: String, Equatable {
+    case files
+    case link
+    case text
+}
+
 public struct OfferedFile: Equatable {
     public let fileId: Int64
     public let name: String
     public let size: Int64
     public let mime: String?
     public let sha256: String
+    /// Sanitised folder names, outermost first (§9.1). Empty for a plain file.
+    public let path: [String]
 
-    public init(fileId: Int64, name: String, size: Int64, mime: String?, sha256: String) {
+    public init(fileId: Int64, name: String, size: Int64, mime: String?, sha256: String, path: [String] = []) {
         self.fileId = fileId
         self.name = name
         self.size = size
         self.mime = mime
         self.sha256 = sha256
+        self.path = path
+    }
+
+    /// "Trip/Day 1/photo.jpg" for display; just the name without a path.
+    public var displayPath: String {
+        (path + [FileNaming.sanitize(name)]).joined(separator: "/")
     }
 }
 
 public struct TransferOffer: Equatable {
     public let transferId: String
     public let files: [OfferedFile]
+    public let kind: OfferKind
+
+    public init(transferId: String, files: [OfferedFile], kind: OfferKind = .files) {
+        self.transferId = transferId
+        self.files = files
+        self.kind = kind
+    }
 
     public var totalBytes: Int64 { files.reduce(0) { $0 + $1.size } }
 
@@ -193,11 +215,40 @@ public struct TransferOffer: Equatable {
             guard let sha = entry["sha256"] as? String, Hex.isLowerHex(sha, length: 64) else {
                 throw bad("invalid sha256")
             }
+            var path: [String] = []
+            if let rawPath = entry["path"], !(rawPath is NSNull) {
+                guard let text = rawPath as? String, text.utf8.count <= ProtocolConstants.maxPathBytes else {
+                    throw bad("invalid path")
+                }
+                path = try parsePath(text)
+            }
             total += size
             guard total <= ProtocolConstants.maxSafeInteger else { throw bad("total too large") }
-            files.append(OfferedFile(fileId: fileId, name: name, size: size, mime: mime, sha256: sha))
+            files.append(OfferedFile(fileId: fileId, name: name, size: size, mime: mime, sha256: sha, path: path))
         }
-        return TransferOffer(transferId: transferId, files: files)
+        var kind = OfferKind.files
+        if let rawKind = message.fields["kind"], !(rawKind is NSNull) {
+            guard let text = rawKind as? String, let parsed = OfferKind(rawValue: text) else { throw bad("unknown kind") }
+            kind = parsed
+        }
+        if kind != .files && (files.count != 1 || files[0].size > ProtocolConstants.maxTextPayload) {
+            throw bad("bad \(kind.rawValue) payload")
+        }
+        return TransferOffer(transferId: transferId, files: files, kind: kind)
+    }
+
+    /// Splits a `path` field into folder names (§9.1). Each part is sanitised like a
+    /// file name and empty, "." and ".." parts are dropped, so the result can never
+    /// point outside the destination.
+    static func parsePath(_ raw: String) throws -> [String] {
+        let parts = raw.split(whereSeparator: { $0 == "/" || $0 == "\\" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0 != "." && $0 != ".." }
+            .map { FileNaming.sanitize($0) }
+        guard parts.count <= ProtocolConstants.maxPathComponents else {
+            throw CrossDropError.violation(ErrorCode.badMessage, "path too deep")
+        }
+        return parts
     }
 
     func toMessage() -> [String: Any] {
@@ -209,8 +260,11 @@ public struct TransferOffer: Equatable {
                 "sha256": file.sha256,
             ]
             if let mime = file.mime { entry["mime"] = mime }
+            if !file.path.isEmpty { entry["path"] = file.path.joined(separator: "/") }
             return entry
         }
-        return WireMessage.make("transfer.offer", ["transferId": transferId, "files": list])
+        var fields: [String: Any] = ["transferId": transferId, "files": list]
+        if kind != .files { fields["kind"] = kind.rawValue }
+        return WireMessage.make("transfer.offer", fields)
     }
 }

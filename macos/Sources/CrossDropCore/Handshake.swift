@@ -51,6 +51,14 @@ public protocol TrustProvider: AnyObject {
     func storeTrust(for peer: PeerInfo)
     /// Called after a successful transfer with an already-trusted peer.
     func touch(peer: PeerInfo)
+    /// Called after pairing; `autoAccept` is the "This is my device" choice (§9.4).
+    func storeTrust(for peer: PeerInfo, autoAccept: Bool)
+}
+
+public extension TrustProvider {
+    func storeTrust(for peer: PeerInfo, autoAccept: Bool) {
+        storeTrust(for: peer)
+    }
 }
 
 struct HandshakeResult {

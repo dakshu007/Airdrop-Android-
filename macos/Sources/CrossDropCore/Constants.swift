@@ -17,6 +17,17 @@ public enum ProtocolConstants {
     public static let progressInterval: TimeInterval = 0.5
     public static let freeSpaceMargin: Int64 = 64 * 1024 * 1024
 
+    // v1 extensions (docs/protocol-v1.md §9).
+    /// Largest link / text payload (§9.2).
+    public static let maxTextPayload: Int64 = 65_536
+    /// Folder depth and length limits for a file's `path` (§9.1).
+    public static let maxPathComponents = 16
+    public static let maxPathBytes = 1024
+    /// How long a QR pairing token stays valid (§9.4).
+    public static let pairingTokenTTL: TimeInterval = 5 * 60
+    /// How long an interrupted file is kept for resuming (§9.3).
+    public static let resumeKeep: TimeInterval = 24 * 60 * 60
+
     public static let recordKindControl: UInt8 = 0x01
     public static let recordKindData: UInt8 = 0x02
 }

@@ -64,6 +64,12 @@ public struct TransferSnapshot: Equatable {
     public var rejectReason: String?
     /// Outgoing only: bytes the receiver reported via transfer.progress.
     public var peerConfirmedBytes: Int64
+    /// Files, or a link / text that is not saved (§9.2).
+    public var kind: OfferKind
+    /// Incoming link / text, set when it has arrived and was verified.
+    public var text: String?
+    /// Bytes skipped because the receiver kept them from an interrupted attempt (§9.3).
+    public var resumedBytes: Int64
 
     public init(id: String, direction: TransferDirection, peerId: String?, peerName: String,
                 peerPlatform: String?, phase: TransferPhase, files: [TransferFileState]) {
@@ -79,6 +85,9 @@ public struct TransferSnapshot: Equatable {
         self.error = nil
         self.rejectReason = nil
         self.peerConfirmedBytes = 0
+        self.kind = .files
+        self.text = nil
+        self.resumedBytes = 0
     }
 
     public var totalBytes: Int64 { files.reduce(0) { $0 + $1.size } }
@@ -106,6 +115,7 @@ public struct OfferPrompt {
     public let files: [OfferedFile]
     public let totalBytes: Int64
     public let expiresAt: Date
+    public var kind: OfferKind = .files
 }
 
 /// Callbacks from the engine. Called on background threads.

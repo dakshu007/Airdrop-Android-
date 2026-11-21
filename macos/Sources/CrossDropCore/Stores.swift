@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 /// Loads or creates an identity stored as 64 hex chars in a file (CLI and tests only;
 /// the app keeps its key in the Keychain).
@@ -53,6 +54,13 @@ public final class InMemoryTrustStore: TrustProvider {
         lock.unlock()
     }
 
+    public func storeTrust(for peer: PeerInfo, autoAccept value: Bool) {
+        lock.lock()
+        keys[peer.deviceId] = peer.identityKey
+        if value { autoAccept.insert(peer.deviceId) }
+        lock.unlock()
+    }
+
     public func touch(peer: PeerInfo) {}
 
     public func forget(deviceId: String) {
@@ -60,5 +68,66 @@ public final class InMemoryTrustStore: TrustProvider {
         keys[deviceId] = nil
         autoAccept.remove(deviceId)
         lock.unlock()
+    }
+}
+
+/// One-time tokens a receiver shows inside a pairing QR code (§9.4). Scanning the
+/// code proves the scanner can see this screen, so a pairing request that presents
+/// a valid token skips the code comparison on this side.
+public final class PairingTokens {
+    private struct Entry {
+        let expires: Date
+        let mine: Bool
+    }
+
+    private let lock = NSLock()
+    private var tokens: [String: Entry] = [:]
+
+    public init() {}
+
+    /// A fresh token, valid for `ProtocolConstants.pairingTokenTTL`; `mine` is the
+    /// local "This is my device" choice.
+    public func issue(mine: Bool) -> String {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let token = Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let now = Date()
+        lock.lock()
+        tokens = tokens.filter { $0.value.expires > now }
+        tokens[token] = Entry(expires: now.addingTimeInterval(ProtocolConstants.pairingTokenTTL), mine: mine)
+        lock.unlock()
+        return token
+    }
+
+    /// Uses up `token`. Returns the "mine" choice it was issued with, or nil if it is not valid.
+    public func redeem(_ token: String) -> Bool? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = tokens.removeValue(forKey: token), entry.expires > Date() else { return nil }
+        return entry.mine
+    }
+
+    public func revokeAll() {
+        lock.lock()
+        tokens.removeAll()
+        lock.unlock()
+    }
+}
+
+/// What a scanned pairing QR code says about the receiver (§9.4).
+public struct QrPairing: Equatable {
+    public let token: String
+    /// SHA-256 of the receiver's identity key, lowercase hex.
+    public let fingerprint: String
+    /// This side's "This is my device" choice.
+    public let mine: Bool
+
+    public init(token: String, fingerprint: String, mine: Bool) {
+        self.token = token
+        self.fingerprint = fingerprint
+        self.mine = mine
     }
 }

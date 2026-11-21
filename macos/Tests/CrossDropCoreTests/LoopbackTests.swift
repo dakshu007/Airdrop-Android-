@@ -117,14 +117,15 @@ final class LoopbackTests: XCTestCase {
         let port: UInt16
     }
 
-    private func makeRig() async throws -> Rig {
+    private func makeRig(privateMode: Bool = false) async throws -> Rig {
         let serverIdentity = DeviceIdentity.generate()
         let serverTrust = InMemoryTrustStore()
         let serverDelegate = TestDelegate()
         let inbox = self.inbox
         let server = CrossDropServer(configuration: .init(identity: serverIdentity,
                                                           local: LocalInfo(name: "Test Mac", appVersion: "test"),
-                                                          trust: serverTrust, destination: { inbox }))
+                                                          trust: serverTrust, destination: { inbox },
+                                                          privateMode: { privateMode }))
         server.delegate = serverDelegate
         let port = try await startServer(server)
         return Rig(server: server, serverIdentity: serverIdentity, serverTrust: serverTrust,
@@ -132,12 +133,18 @@ final class LoopbackTests: XCTestCase {
                    clientDelegate: TestDelegate(), port: port)
     }
 
-    private func transfer(_ rig: Rig, files: [URL]) -> OutgoingTransfer {
+    private func transfer(_ rig: Rig, files: [URL], path: [String] = []) -> OutgoingTransfer {
+        transfer(rig, outgoing: files.map { OutgoingFile(url: $0, mime: "application/octet-stream", path: path) })
+    }
+
+    private func transfer(_ rig: Rig, outgoing: [OutgoingFile], kind: OfferKind = .files, qr: QrPairing? = nil,
+                          identity: DeviceIdentity? = nil) -> OutgoingTransfer {
         OutgoingTransfer(endpoint: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: rig.port)!),
                          peerName: "server", peerId: nil, peerPlatform: nil,
-                         files: files.map { OutgoingFile(url: $0, mime: "application/octet-stream") },
-                         identity: rig.clientIdentity, local: LocalInfo(name: "Test Client", appVersion: "test"),
-                         trust: rig.clientTrust, delegate: rig.clientDelegate)
+                         files: outgoing,
+                         identity: identity ?? rig.clientIdentity, local: LocalInfo(name: "Test Client", appVersion: "test"),
+                         trust: identity == nil ? rig.clientTrust : InMemoryTrustStore(), delegate: rig.clientDelegate,
+                         kind: kind, qr: qr)
     }
 
     func testPairAndTransferTwoFiles() async throws {
@@ -222,5 +229,113 @@ final class LoopbackTests: XCTestCase {
         let result = await transfer(rig, files: [file]).run()
         XCTAssertEqual(result.phase, .failed)
         XCTAssertEqual(result.error?.code, ErrorCode.peerChangedIdentity)
+    }
+
+    // MARK: v1 extensions (docs/protocol-v1.md §9)
+
+    func testFoldersKeepTheirStructureButNeverEscape() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        let file = try makeFile("a.txt", bytes: 10)
+        let result = await transfer(rig, files: [file], path: ["Trip", "Day 1"]).run()
+        XCTAssertEqual(result.phase, .completed, "error: \(String(describing: result.error))")
+        _ = try await rig.serverDelegate.waitForFinished()
+        XCTAssertEqual(try Data(contentsOf: inbox.appendingPathComponent("Trip/Day 1/a.txt")), try Data(contentsOf: file))
+
+        // A hostile path is flattened into harmless folder names inside the destination.
+        XCTAssertEqual(try TransferOffer.parsePath("../../etc/./x\\..\\y"), ["etc", "x", "y"])
+        XCTAssertEqual(try TransferOffer.parsePath("/.hidden/ok"), ["hidden", "ok"])
+        XCTAssertThrowsError(try TransferOffer.parsePath(Array(repeating: "a", count: 17).joined(separator: "/")))
+    }
+
+    func testLinkArrivesAsTextAndIsNotSaved() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        let link = "https://example.com/a?b=c"
+        let result = await transfer(rig, outgoing: [.text(link, name: "Link")], kind: .link).run()
+        XCTAssertEqual(result.phase, .completed, "error: \(String(describing: result.error))")
+        let incoming = try await rig.serverDelegate.waitForFinished()
+        XCTAssertEqual(incoming.kind, .link)
+        XCTAssertEqual(incoming.text, link)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: inbox.path), [])
+    }
+
+    func testTooLargeTextOfferIsRefused() throws {
+        let big = WireMessage(type: "transfer.offer", version: 1, fields: [
+            "transferId": "abcdefgh-1234",
+            "kind": "text",
+            "files": [["fileId": 0, "name": "t", "size": 65_537, "sha256": String(repeating: "a", count: 64)]],
+        ])
+        XCTAssertThrowsError(try TransferOffer.parse(big))
+        let unknown = WireMessage(type: "transfer.offer", version: 1, fields: [
+            "transferId": "abcdefgh-1234",
+            "kind": "hologram",
+            "files": [["fileId": 0, "name": "t", "size": 1, "sha256": String(repeating: "a", count: 64)]],
+        ])
+        XCTAssertThrowsError(try TransferOffer.parse(unknown))
+    }
+
+    func testQrTokenPairsWithoutPromptsAndRemembersMine() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        let token = rig.server.pairingTokens.issue(mine: true)
+        let qr = QrPairing(token: token, fingerprint: rig.serverIdentity.fingerprint, mine: true)
+        let file = try makeFile("a.txt", bytes: 10)
+        let outgoing = transfer(rig, outgoing: [OutgoingFile(url: file)], qr: qr)
+        let result = await outgoing.run()
+        XCTAssertEqual(result.phase, .completed, "error: \(String(describing: result.error))")
+        XCTAssertEqual(rig.serverDelegate.seenCodes, [])
+        XCTAssertEqual(rig.clientDelegate.seenCodes, [])
+        XCTAssertTrue(rig.serverTrust.isAutoAccept(deviceId: rig.clientIdentity.deviceId))
+        XCTAssertTrue(rig.clientTrust.isAutoAccept(deviceId: rig.serverIdentity.deviceId))
+        // The token is single-use.
+        XCTAssertNil(rig.server.pairingTokens.redeem(token))
+    }
+
+    func testQrCodeForAnotherDeviceIsRefused() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        let token = rig.server.pairingTokens.issue(mine: false)
+        let qr = QrPairing(token: token, fingerprint: DeviceIdentity.generate().fingerprint, mine: false)
+        let file = try makeFile("a.txt", bytes: 10)
+        let result = await transfer(rig, outgoing: [OutgoingFile(url: file)], qr: qr).run()
+        XCTAssertEqual(result.phase, .failed)
+        XCTAssertEqual(result.error?.code, ErrorCode.authFailed)
+        XCTAssertNil(rig.serverTrust.trustedIdentityKey(for: rig.clientIdentity.deviceId))
+    }
+
+    func testPrivateModeOnlyAcceptsPairedDevicesOrQrTokens() async throws {
+        let rig = try await makeRig(privateMode: true)
+        defer { rig.server.stop() }
+        let file = try makeFile("a.txt", bytes: 10)
+
+        let stranger = await transfer(rig, outgoing: [OutgoingFile(url: file)], identity: DeviceIdentity.generate()).run()
+        XCTAssertEqual(stranger.phase, .failed)
+        XCTAssertEqual(stranger.error?.code, ErrorCode.notReceiving)
+
+        let qr = QrPairing(token: rig.server.pairingTokens.issue(mine: false),
+                           fingerprint: rig.serverIdentity.fingerprint, mine: false)
+        let paired = await transfer(rig, outgoing: [OutgoingFile(url: file)], qr: qr).run()
+        XCTAssertEqual(paired.phase, .completed, "error: \(String(describing: paired.error))")
+
+        // Now paired: no token needed.
+        let again = await transfer(rig, outgoing: [OutgoingFile(url: file)]).run()
+        XCTAssertEqual(again.phase, .completed, "error: \(String(describing: again.error))")
+    }
+
+    func testPairOnlyClosesQuietly() async throws {
+        let rig = try await makeRig(privateMode: true)
+        defer { rig.server.stop() }
+        let qr = QrPairing(token: rig.server.pairingTokens.issue(mine: true),
+                           fingerprint: rig.serverIdentity.fingerprint, mine: true)
+        let peer = try await QrPairingClient.pairOnly(
+            endpoints: [.hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: rig.port)!)],
+            qr: qr, identity: rig.clientIdentity, local: LocalInfo(name: "Test Client", appVersion: "test"),
+            trust: rig.clientTrust, delegate: rig.clientDelegate)
+        XCTAssertEqual(peer.deviceId, rig.serverIdentity.deviceId)
+        XCTAssertNotNil(rig.clientTrust.trustedIdentityKey(for: rig.serverIdentity.deviceId))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertNotNil(rig.serverTrust.trustedIdentityKey(for: rig.clientIdentity.deviceId))
+        XCTAssertEqual(rig.serverDelegate.finished.count, 0)
     }
 }

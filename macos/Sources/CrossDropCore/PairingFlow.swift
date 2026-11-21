@@ -6,11 +6,13 @@ enum PairingFlow {
     /// and trust was stored; throws otherwise.
     ///
     /// - autoConfirm: this side already trusts the peer, so no local prompt is shown.
+    /// - autoMine: a QR code stood in for the prompt (§9.4); its "This is my device" choice.
     static func run(channel: SecureChannel,
                     peer: PeerInfo,
                     sas: String,
                     role: PairingPrompt.Role,
                     autoConfirm: Bool,
+                    autoMine: Bool? = nil,
                     trust: TrustProvider,
                     delegate: CrossDropDelegate?,
                     onDecision: ((Decision) -> Void)? = nil) async throws {
@@ -34,8 +36,8 @@ enum PairingFlow {
 
         let outcome: Decision.Outcome
         var prompted = false
-        if autoConfirm {
-            decision.resolve(true)
+        if autoConfirm || autoMine != nil {
+            decision.resolve(true, mine: autoMine ?? false)
             outcome = .accepted
         } else {
             let prompt = PairingPrompt(id: decision.id, peer: peer, code: sas, role: role,
@@ -57,9 +59,11 @@ enum PairingFlow {
             } catch {
                 // The peer may have declined and closed before our confirmation went out;
                 // report its answer rather than the broken connection.
-                if let answer = try? await peerAnswer.value,
-                   answer.type == "pair.confirm", answer.bool("accepted") == false {
-                    throw CrossDropError.peer(ErrorCode.pairingRejected)
+                if let answer = try? await peerAnswer.value {
+                    if answer.type == "pair.confirm", answer.bool("accepted") == false {
+                        throw CrossDropError.peer(ErrorCode.pairingRejected)
+                    }
+                    if answer.type == "error" { throw answer.peerError() }
                 }
                 throw error
             }
@@ -88,7 +92,11 @@ enum PairingFlow {
             // Cancelled locally without an answer from the user.
             throw CrossDropError.local(ErrorCode.cancelled)
         }
-        trust.storeTrust(for: peer)
+        if autoConfirm && autoMine == nil {
+            trust.storeTrust(for: peer)
+        } else {
+            trust.storeTrust(for: peer, autoAccept: decision.mine)
+        }
         success = true
     }
 

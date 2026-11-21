@@ -74,6 +74,10 @@ be reviewed by a cryptographer before a 1.0 release**. See
   | `id` | `deviceId` (32 hex chars) |
   | `p` | platform: `android` or `macos` |
 
+  Optional: `m=1` means the device is in "My devices only" mode (§9.5); its
+  instance name is then random and browsers should list it only when its `id`
+  belongs to a paired device.
+
 * No secrets, no account data and no file metadata are ever put in DNS-SD records.
 * Discovery is **not** authentication. A device that advertises a trusted
   `id` is only considered trusted after the handshake proves possession of the
@@ -398,3 +402,118 @@ Then:
 `v` is the protocol version, separate from the app version. Additive optional
 fields keep `v = 1`. Any change to framing, crypto, the handshake or required
 fields needs `v = 2` and a new section in a `protocol-v2.md`.
+
+---
+
+## 9. Optional extensions (still `v = 1`)
+
+Everything here is additive and optional (§8): an implementation that ignores
+these fields still interoperates, it just doesn't get the feature. Both
+reference cores (Kotlin and Swift) implement all of it, and
+`integration-tests/interop.sh` exercises each item across them.
+
+### 9.1 Folders
+
+A `transfer.offer` file entry may carry `path`: the folders to recreate on the
+receiver, outermost first, joined with `/` (for example `"Trip/Day 1"`).
+
+* The string is at most 1024 bytes of UTF-8. It is split on `/` **and** `\`;
+  each part is trimmed, `""`, `"."` and `".."` are dropped, and every remaining
+  part is sanitised exactly like a file name (§6.5). More than 16 parts is
+  `bad_message`.
+* The receiver creates the folders under its destination one at a time and
+  refuses (`storage_error`) any existing item on the way that is a symlink or
+  not a folder. The file itself then follows the normal §6.5 rules inside that
+  folder (temporary file, verify, never overwrite).
+* Because every part is sanitised and dot parts are dropped, a path can never
+  name anything outside the destination.
+
+### 9.2 Links and text
+
+`transfer.offer` may carry `kind`: `"files"` (default, same as absent),
+`"link"` or `"text"`. Any other value is `bad_message`.
+
+* `link` / `text` offers have exactly one file entry of at most 65536 bytes;
+  anything else is `bad_message`. The bytes are the UTF-8 text; the sender uses
+  `mime: "text/plain; charset=utf-8"`.
+* The receiver keeps the payload in memory, checks its SHA-256 as usual,
+  rejects invalid UTF-8 (`bad_message`) and **never writes it to storage**.
+* What happens next is up to the receiving app and must stay explicit: the Mac
+  app opens `http`/`https` links in the default browser and copies text to the
+  clipboard; nothing is executed or opened for any other scheme.
+* Approval rules are the same as for files: an unpaired device must pair, and a
+  paired device without auto-accept gets a prompt.
+
+### 9.3 Resuming an interrupted transfer
+
+When a connection drops (`connection_lost` or a stream `timeout`) in the middle
+of a file, the receiver may keep the bytes received so far for 24 hours. It
+does not keep them after a cancel, an integrity failure or any other error.
+
+* The kept part is indexed by
+  `resumeKey = hex(SHA-256("CrossDrop/1 resume|" + senderDeviceId + "|" + fileSha256 + "|" + fileSize))`,
+  so only the same file (same content and size) from the same sender can
+  continue it.
+* `transfer.accept` may carry `resume: [{"fileId": n, "offset": k}, …]`, one
+  entry per file the receiver holds `k` bytes of, with `0 < k < size`. The
+  sender rejects a malformed list with `bad_message`.
+* `transfer.start` may then carry `offset`. The sender either sends the offered
+  offset and skips that many bytes of the file, or omits it (or sends `0`) and
+  sends the whole file, in which case the receiver discards its kept part. Any
+  other value is `bad_message`.
+* The receiver re-hashes the kept bytes before appending, so the final SHA-256
+  check still covers the whole file.
+
+### 9.4 Pairing with a QR code
+
+The receiver can show a QR code instead of asking both people to compare
+numbers. The code holds a URI:
+
+```
+crossdrop://pair?v=1&id=<deviceId>&fp=<fingerprint>&t=<token>&n=<name>&p=<port>&h=<host1>,<host2>
+```
+
+* `fp` is the lowercase hex SHA-256 of the receiver's identity key; `t` is a
+  one-time token (16 random bytes, base64url without padding) that the receiver
+  issued and accepts once, within 5 minutes. `h` lists the receiver's current
+  addresses, so the scanner can connect even where DNS-SD is blocked.
+* The scanner runs the normal handshake (§4), then checks that the peer's
+  identity-key fingerprint equals `fp`; a mismatch ends the connection with
+  `auth_failed`. It then sends `pair.request` with `"token": t`.
+* A receiver that redeems a valid token skips its prompt; the scanner skips its
+  prompt too, because it has just verified the key it was shown. Both sides
+  still exchange `pair.confirm` (§5). An invalid or reused token falls back to
+  the normal numeric comparison.
+* Seeing the receiver's screen is the out-of-band check here: the QR code binds
+  the exact identity key, so a device in the middle cannot substitute its own.
+* Each side may record a local "This is my device" choice with the new trust
+  entry; apps use it to auto-accept that device's transfers. It never goes on
+  the wire.
+* A connection made only to pair simply closes after `pair.confirm`; the
+  receiver treats that close as normal, not as an error.
+
+### 9.5 "My devices only"
+
+A receiver in this mode accepts connections only from devices it has already
+paired with, or from a device presenting a valid QR token (§9.4).
+
+* After the handshake, `pair.request` without a valid token and
+  `transfer.offer` from an unpaired device are answered with `error`
+  `not_receiving` and the connection is closed.
+* It advertises with a random instance name and `m=1` (§2), so people nearby
+  don't see the device's name. The `id` key is still present so paired devices
+  can recognise it.
+* Paired devices may remember the address that last worked and try it directly
+  when discovery doesn't find the receiver (networks that block multicast).
+  The handshake still authenticates the device, so a stale address can at worst
+  fail to connect.
+
+### 9.6 Limits added by this section
+
+| item | limit |
+|---|---|
+| link / text payload | 64 KiB |
+| `path` length | 1024 bytes |
+| `path` depth | 16 folders |
+| QR pairing token lifetime | 5 minutes, single use |
+| kept partial file for resume | 24 hours |

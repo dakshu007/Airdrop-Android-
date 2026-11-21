@@ -68,6 +68,12 @@ final class TrustStore: TrustProvider {
         }
     }
 
+    /// After pairing; `autoAccept` is the "This is my device" choice.
+    func storeTrust(for peer: PeerInfo, autoAccept: Bool) {
+        storeTrust(for: peer)
+        if autoAccept { setAutoAccept(true, for: peer.deviceId) }
+    }
+
     func touch(peer: PeerInfo) {
         mutate { records in
             guard var record = records[peer.deviceId], record.identityKey == peer.identityKey else { return }

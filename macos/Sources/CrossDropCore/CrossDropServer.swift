@@ -18,17 +18,24 @@ public final class CrossDropServer {
         public var trust: TrustProvider
         /// Folder for received files; evaluated per offer.
         public var destination: () -> URL
+        /// "My devices only" (§9.5): unpaired devices are refused unless they show a QR
+        /// token. Read per connection; advertising follows it on the next `start`.
+        public var privateMode: () -> Bool
 
-        public init(identity: DeviceIdentity, local: LocalInfo, trust: TrustProvider, destination: @escaping () -> URL) {
+        public init(identity: DeviceIdentity, local: LocalInfo, trust: TrustProvider, destination: @escaping () -> URL,
+                    privateMode: @escaping () -> Bool = { false }) {
             self.identity = identity
             self.local = local
             self.trust = trust
             self.destination = destination
+            self.privateMode = privateMode
         }
     }
 
     public weak var delegate: CrossDropDelegate?
     public var onStateChange: ((State) -> Void)?
+    /// One-time tokens for pairing QR codes (§9.4).
+    public let pairingTokens = PairingTokens()
 
     private let configuration: Configuration
     private let queue = DispatchQueue(label: "app.crossdrop.listener")
@@ -61,11 +68,17 @@ public final class CrossDropServer {
             throw CrossDropError.local(ErrorCode.internalError, "listener: \(error)")
         }
         if advertise {
-            listener.service = NWListener.Service(name: Self.serviceName(configuration.local.wireName),
+            // In "my devices only" mode the name is random, so strangers nearby do not
+            // see this Mac's name; paired devices recognise it by `id` (§9.5).
+            let isPrivate = configuration.privateMode()
+            let name = isPrivate ? "CrossDrop-\(UUID().uuidString.prefix(8).lowercased())"
+                                 : Self.serviceName(configuration.local.wireName)
+            listener.service = NWListener.Service(name: name,
                                                   type: ProtocolConstants.serviceType,
                                                   domain: nil,
                                                   txtRecord: Self.txtRecord(deviceId: configuration.identity.deviceId,
-                                                                            platform: configuration.local.platform))
+                                                                            platform: configuration.local.platform,
+                                                                            privateMode: isPrivate))
         }
         listener.stateUpdateHandler = { [weak self, weak listener] state in
             guard let self = self else { return }
@@ -149,7 +162,8 @@ public final class CrossDropServer {
         let session = IncomingSession(transport: transport, identity: config.identity, local: config.local,
                                       trust: config.trust, delegate: delegate,
                                       destination: config.destination,
-                                      isReceiving: { [weak self] in self?.isRunning() ?? false })
+                                      isReceiving: { [weak self] in self?.isRunning() ?? false },
+                                      privateMode: config.privateMode, pairingTokens: pairingTokens)
         lock.lock()
         sessions[session.id] = session
         lock.unlock()
@@ -175,9 +189,11 @@ public final class CrossDropServer {
     }
 
     /// DNS-SD TXT wire format: each entry is a length byte followed by "key=value".
-    static func txtRecord(deviceId: String, platform: String) -> Data {
+    static func txtRecord(deviceId: String, platform: String, privateMode: Bool = false) -> Data {
         var data = Data()
-        for entry in ["v=\(ProtocolConstants.version)", "id=\(deviceId)", "p=\(platform)"] {
+        var entries = ["v=\(ProtocolConstants.version)", "id=\(deviceId)", "p=\(platform)"]
+        if privateMode { entries.append("m=1") }
+        for entry in entries {
             let bytes = Data(entry.utf8)
             data.append(UInt8(bytes.count))
             data.append(bytes)

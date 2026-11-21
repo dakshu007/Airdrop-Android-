@@ -27,7 +27,24 @@ public final class Decision {
         return outcome != nil
     }
 
+    /// Pairing only: the user said "This is my device", so its transfers are accepted
+    /// without asking from now on (§9.4).
+    public var mine: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isMine
+    }
+    private var isMine = false
+
     public func resolve(_ accepted: Bool) {
+        finish(accepted ? .accepted : .declined)
+    }
+
+    /// Pairing answer with the "This is my device" choice.
+    public func resolve(_ accepted: Bool, mine: Bool) {
+        lock.lock()
+        if outcome == nil { isMine = accepted && mine }
+        lock.unlock()
         finish(accepted ? .accepted : .declined)
     }
 
