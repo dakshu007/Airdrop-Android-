@@ -24,12 +24,8 @@ struct ReceiveView: View {
                 SectionHeader(title: "Incoming", detail: "This session")
                     .padding(.top, ui.s)
                 if ui.wide {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: ui(CDLayout.cardGap), alignment: .top),
-                                        GridItem(.flexible(), spacing: ui(CDLayout.cardGap), alignment: .top)],
-                              alignment: .leading, spacing: ui(CDLayout.cardGap)) {
-                        ForEach(incoming) { item in
-                            TransferCard(item: item)
-                        }
+                    PairedRows(incoming) { item in
+                        TransferCard(item: item)
                     }
                 } else {
                     ForEach(incoming) { item in

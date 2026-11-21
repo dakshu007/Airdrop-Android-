@@ -139,8 +139,8 @@ struct DropZone: View {
         .glassPanel(cornerRadius: radius)
         .overlay(
             RoundedRectangle(cornerRadius: ui(radius - dashInset), style: .continuous)
-                .strokeBorder(style: StrokeStyle(lineWidth: 2, lineCap: .round,
-                                                 dash: targeted ? [] : [7, 7]))
+                .strokeBorder(style: StrokeStyle(lineWidth: ui(2), lineCap: .round,
+                                                 dash: targeted ? [] : [ui(7), ui(7)]))
                 .foregroundColor(CDPalette.mint.opacity(targeted ? 0.8 : (lit ? 0.45 : 0.28)))
                 .padding(ui(dashInset))
                 .allowsHitTesting(false)
@@ -253,7 +253,9 @@ struct NearbyCard: View {
     @Environment(\.cdScale) private var ui
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: ui(240), maximum: ui(400)), spacing: ui.m, alignment: .top)]
+        // No maximum, so a lone column fills the card; two columns only once each tile
+        // has room for the name, its status and the Send pill.
+        [GridItem(.adaptive(minimum: ui(320)), spacing: ui.m, alignment: .top)]
     }
 
     var body: some View {
@@ -261,7 +263,9 @@ struct NearbyCard: View {
             HStack(spacing: ui.s) {
                 SectionHeader(title: "Nearby", detail: headerDetail)
                 if model.discoveryStatus == .browsing && !model.nearby.isEmpty {
-                    ProgressView().controlSize(.small).scaleEffect(0.8)
+                    // Native spinners don't follow the UI scale, so scale the drawing.
+                    ProgressView().controlSize(.small).scaleEffect(0.8 * ui.factor)
+                        .frame(width: ui(16), height: ui(16))
                         .accessibilityLabel("Still looking")
                 }
                 if model.nearby.count > 1 && model.hasSomethingToSend {

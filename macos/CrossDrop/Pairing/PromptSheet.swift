@@ -7,6 +7,7 @@ import CrossDropCore
 struct PromptCard: View {
     @EnvironmentObject private var model: AppModel
     let prompt: PromptItem
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
         Group {
@@ -20,9 +21,10 @@ struct PromptCard: View {
                              respond: { model.respond(to: prompt, accept: $0) })
             }
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 30)
-        .glassPanel(cornerRadius: CDRadius.panel)
+        .padding(.horizontal, ui(28))
+        .padding(.vertical, ui(28))
+        .frame(maxWidth: .infinity)
+        .glassPanel(cornerRadius: CDRadius.panel, style: .floating)
         .onAppear { model.presentedPromptId = prompt.id }
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
@@ -35,19 +37,20 @@ private struct PairingContent: View {
     let respond: (_ accept: Bool, _ mine: Bool) -> Void
     /// "This is my device": its files then arrive without asking.
     @State private var mine = false
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
-        VStack(spacing: CDSpacing.l) {
+        VStack(spacing: ui.l) {
             StatusPill(text: "New device · \(prompt.peer.name)", dot: Color(hex: 0xE0A100))
             DripView(pose: .pairing, size: 140, motion: .bob)
-                .padding(.vertical, -10)
-            VStack(spacing: 6) {
+                .padding(.vertical, -ui(10))
+            VStack(spacing: ui(6)) {
                 Text("Do these match?")
-                    .font(CDFont.poppins(26, .bold))
+                    .font(ui.font(26, .bold))
                     .foregroundColor(CDPalette.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("\(prompt.peer.name) is showing a code too. Pair only if both are the same.")
-                    .font(CDFont.body)
+                    .font(ui.body)
                     .foregroundColor(CDPalette.textSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -55,15 +58,16 @@ private struct PairingContent: View {
             .legibleText()
 
             CodeTiles(code: prompt.code)
-                .padding(.vertical, 18)
-                .padding(.horizontal, 22)
-                .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Color.white.opacity(0.55)))
-                .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(Color.white.opacity(0.95), lineWidth: 1))
+                .padding(.vertical, ui(18))
+                .padding(.horizontal, ui(22))
+                .background(RoundedRectangle(cornerRadius: ui(24), style: .continuous).fill(CDPalette.mintSoft.opacity(0.6)))
+                .overlay(RoundedRectangle(cornerRadius: ui(24), style: .continuous).strokeBorder(Color.white.opacity(0.95), lineWidth: 1))
 
             Group {
                 if waiting {
-                    HStack(spacing: CDSpacing.s) {
-                        ProgressView().controlSize(.small)
+                    HStack(spacing: ui.s) {
+                        ProgressView().controlSize(.small).scaleEffect(ui.factor)
+                            .frame(width: ui(16), height: ui(16))
                         Text("Waiting for \(prompt.peer.name) to confirm…")
                     }
                 } else {
@@ -72,25 +76,25 @@ private struct PairingContent: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .font(CDFont.caption)
+            .font(ui.caption)
             .foregroundColor(CDPalette.textSecondary)
 
             if !waiting {
                 Toggle(isOn: $mine) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: ui(2)) {
                         Text("This is my device")
-                            .font(CDFont.headline)
+                            .font(ui.headline)
                             .foregroundColor(CDPalette.textPrimary)
                         Text("Files from it arrive without asking.")
-                            .font(CDFont.caption)
+                            .font(ui.caption)
                             .foregroundColor(CDPalette.textSecondary)
                     }
                 }
                 .toggleStyle(GlassToggleStyle())
-                .frame(maxWidth: 340)
+                .frame(maxWidth: ui(340))
             }
 
-            HStack(spacing: CDSpacing.m) {
+            HStack(spacing: ui.m) {
                 Button(waiting ? "Cancel" : "They Don't Match") { respond(false, false) }
                     .buttonStyle(GlassButtonStyle())
                     .keyboardShortcut(.cancelAction)
@@ -99,7 +103,7 @@ private struct PairingContent: View {
                     .keyboardShortcut(.defaultAction)
                     .disabled(waiting)
             }
-            .padding(.top, 4)
+            .padding(.top, ui(4))
         }
     }
 }
@@ -109,6 +113,7 @@ private struct OfferContent: View {
     let trusted: Bool
     let destination: URL
     let respond: (Bool) -> Void
+    @Environment(\.cdScale) private var ui
 
     private var offerLine: String {
         switch offer.kind {
@@ -119,19 +124,21 @@ private struct OfferContent: View {
     }
 
     var body: some View {
-        VStack(spacing: CDSpacing.l) {
+        VStack(spacing: ui.l) {
             DripView(pose: .incoming, size: 150, motion: .pop)
-                .padding(.vertical, -12)
-            VStack(spacing: 8) {
+                .padding(.vertical, -ui(12))
+            VStack(spacing: ui(8)) {
                 Text(offer.kind == .files ? "Files are on their way" : (offer.kind == .link ? "A link is on its way" : "Some text is on its way"))
-                    .font(CDFont.poppins(24, .bold))
+                    .font(ui.font(24, .bold))
                     .foregroundColor(CDPalette.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(offerLine)
-                    .font(CDFont.body)
+                    .font(ui.body)
                     .foregroundColor(CDPalette.textSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 6) {
+                HStack(spacing: ui(6)) {
                     Chip(text: trusted ? "Paired" : "Not paired", symbol: trusted ? "checkmark.seal.fill" : "seal",
                          tint: trusted ? CDPalette.mint : CDPalette.amber)
                     Chip(text: Format.bytes(offer.totalBytes))
@@ -142,28 +149,31 @@ private struct OfferContent: View {
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(offer.files.enumerated()), id: \.offset) { index, file in
-                        HStack(spacing: CDSpacing.m) {
+                        HStack(spacing: ui.m) {
                             FileIcon(url: nil, name: file.name, size: 26)
                             Text(file.displayPath)
-                                .font(CDFont.callout)
+                                .font(ui.callout)
                                 .foregroundColor(CDPalette.textPrimary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
-                            Spacer(minLength: CDSpacing.s)
+                            Spacer(minLength: ui.s)
                             Text(Format.bytes(file.size))
-                                .font(CDFont.caption.monospacedDigit())
+                                .font(ui.caption.monospacedDigit())
                                 .foregroundColor(CDPalette.textSecondary)
                         }
-                        .padding(.vertical, 7)
-                        .padding(.horizontal, CDSpacing.m)
+                        .padding(.vertical, ui(7))
+                        .padding(.horizontal, ui.m)
                         if index < offer.files.count - 1 {
-                            GlassDivider().padding(.leading, 50)
+                            GlassDivider()
+                                .padding(.leading, ui.m + ui(26) + ui.m)
+                                .padding(.trailing, ui.m)
                         }
                     }
                 }
             }
-            .frame(height: min(190, CGFloat(offer.files.count) * 41))
-            .glassPanel(cornerRadius: 16, style: .inset)
+            .frame(height: ui(min(190, CGFloat(offer.files.count) * 41)))
+            .glassPanel(cornerRadius: CDRadius.tile, style: .inset)
+            .clipShape(RoundedRectangle(cornerRadius: ui(CDRadius.tile), style: .continuous))
             }
 
             Text(offer.kind == .link
@@ -171,12 +181,12 @@ private struct OfferContent: View {
                  : offer.kind == .text
                  ? "If you accept, it's copied to your clipboard. It isn't saved as a file."
                  : "Saved to \(destination.lastPathComponent) after each file's checksum is verified. Nothing is overwritten.")
-                .font(CDFont.caption)
+                .font(ui.caption)
                 .foregroundColor(CDPalette.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: CDSpacing.m) {
+            HStack(spacing: ui.m) {
                 Button("Decline") { respond(false) }
                     .buttonStyle(GlassButtonStyle(destructive: true))
                     .keyboardShortcut(.cancelAction)
@@ -184,7 +194,7 @@ private struct OfferContent: View {
                     .buttonStyle(PrimaryButtonStyle(large: true))
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(.top, 4)
+            .padding(.top, ui(4))
         }
     }
 }

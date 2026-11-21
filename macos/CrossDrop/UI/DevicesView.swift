@@ -31,12 +31,8 @@ struct DevicesView: View {
                              pose: .pairing)
                     .glassPanel(cornerRadius: CDRadius.card)
             } else if ui.wide {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: ui(CDLayout.cardGap), alignment: .top),
-                                    GridItem(.flexible(), spacing: ui(CDLayout.cardGap), alignment: .top)],
-                          alignment: .leading, spacing: ui(CDLayout.cardGap)) {
-                    ForEach(model.trustedDevices) { device in
-                        TrustedDeviceRow(device: device, onForget: { pendingForget = device })
-                    }
+                PairedRows(model.trustedDevices) { device in
+                    TrustedDeviceRow(device: device, onForget: { pendingForget = device })
                 }
             } else {
                 ForEach(model.trustedDevices) { device in
@@ -190,7 +186,8 @@ struct TrustedDeviceRow: View {
         .padding(.horizontal, ui(CDLayout.cardPadding))
         .padding(.top, ui(CDLayout.cardPadding))
         .padding(.bottom, ui(CDLayout.cardPadding - CDLayout.rowPadding))
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Fills the height offered, so two cards side by side end level.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .glassPanel(cornerRadius: CDRadius.card)
     }
 

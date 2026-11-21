@@ -75,7 +75,7 @@ enum CDLayout {
 // MARK: - Scale
 
 /// How large the main window's UI is drawn. 1.0 at the default 1040×700 window; it
-/// grows smoothly to 1.35 as the window gets large (maximised, full screen), times the
+/// grows in proportion to the window up to 1.35 (maximised, full screen), times the
 /// user's View › Zoom level. Fonts are re-laid out at the new size, so text stays crisp.
 struct CDScale: Equatable {
     var factor: CGFloat = 1
@@ -132,10 +132,12 @@ struct CDScale: Equatable {
     /// The scale for a window of `size` at the user's zoom level.
     static func forWindow(_ size: CGSize, zoom: CGFloat) -> CDScale {
         guard size.width > 1, size.height > 1 else { return CDScale() }
-        // 0 at the default window, 1 at about 1900×1150 and beyond.
-        let growWidth = min(max((size.width - CDLayout.defaultWindow.width) / 860, 0), 1)
-        let growHeight = min(max((size.height - CDLayout.defaultWindow.height) / 450, 0), 1)
-        let automatic = 1 + 0.35 * min(growWidth, growHeight)
+        // Grows with the window relative to the default size (the tighter of the two
+        // axes), from 1.0 at the default window up to 1.35, so a maximised laptop window
+        // fills with UI instead of leaving wide margins of mint.
+        let byWidth = size.width / CDLayout.defaultWindow.width
+        let byHeight = size.height / CDLayout.defaultWindow.height
+        let automatic = min(max(min(byWidth, byHeight), 1), 1.35)
         // Never so large that the window holds less than the smallest designed layout.
         let roomWidth = size.width / CDLayout.minLogical.width
         let roomHeight = size.height / CDLayout.minLogical.height
@@ -736,7 +738,7 @@ struct DripView: View {
             }
         }
         .frame(width: ui(size), height: ui(size))
-        .offset(y: motion == .bob ? (up ? -ui(6) : 0) : motion == .float ? (up ? -ui(10) : 0) : 0)
+        .offset(y: lift)
         .rotationEffect(.degrees(motion == .float ? (up ? 2 : -2) : 0))
         .scaleEffect(motion == .pop ? (shown ? 1 : 0.6) : 1)
         .opacity(motion == .pop ? (shown ? 1 : 0) : 1)
@@ -759,6 +761,16 @@ struct DripView: View {
         .accessibilityElement()
         .accessibilityLabel(label ?? "")
         .accessibilityHidden(label == nil)
+    }
+
+    /// How far Drip rises at the top of a bob or float.
+    private var lift: CGFloat {
+        guard up else { return 0 }
+        switch motion {
+        case .bob: return -ui(6)
+        case .float: return -ui(10)
+        case .pop, .still: return 0
+        }
     }
 
     private func image(_ name: String) -> some View {
@@ -1114,24 +1126,30 @@ struct SegmentedGlass: View {
     let choices: [SegmentChoice]
     @Binding var selection: Int
     var accessibilityName: String = ""
+    /// Stretch the segments to share the width offered (each keeps at least its
+    /// label's width), instead of hugging the labels.
+    var fillsWidth = false
+    /// Smaller type and padding, for tight spots such as the sidebar.
+    var compact = false
     @Namespace private var namespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.cdScale) private var ui
 
     var body: some View {
-        HStack(spacing: ui(2)) {
+        SegmentRow(spacing: ui(2)) {
             ForEach(choices) { choice in
                 let selected = selection == choice.id
                 Button {
                     withAnimation(CDMotion.layout(reduceMotion)) { selection = choice.id }
                 } label: {
                     Text(choice.label)
-                        .font(ui.font(11, selected ? .semibold : .medium))
+                        .font(ui.font(compact ? 10.5 : 11, selected ? .semibold : .medium))
                         .foregroundColor(selected ? .white : CDPalette.textPrimary)
                         .lineLimit(1)
                         .fixedSize()
-                        .padding(.horizontal, ui(10))
-                        .frame(height: ui(26))
+                        .padding(.horizontal, ui(compact ? 6 : 10))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: ui(compact ? 24 : 26))
                         .background {
                             if selected {
                                 Capsule().fill(CDPalette.ink)
@@ -1147,9 +1165,47 @@ struct SegmentedGlass: View {
         .padding(ui(3))
         .background(Capsule().fill(Color.white.opacity(0.85)))
         .overlay(Capsule().strokeBorder(CDPalette.controlBorder, lineWidth: 1))
-        .fixedSize()
+        .fixedSize(horizontal: !fillsWidth, vertical: true)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityName)
+    }
+}
+
+/// Segments in a row: each gets its label's width plus an equal share of any width
+/// left over, so a filling control stays balanced without truncating long labels.
+private struct SegmentRow: Layout {
+    var spacing: CGFloat
+
+    private func naturalWidths(_ subviews: Subviews) -> [CGFloat] {
+        subviews.map { $0.sizeThatFits(.unspecified).width }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let widths = naturalWidths(subviews)
+        let gaps = spacing * CGFloat(max(subviews.count - 1, 0))
+        let natural = widths.reduce(0, +) + gaps
+        let height = subviews.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+        var width = natural
+        if let offered = proposal.width, offered.isFinite {
+            width = max(offered, natural)
+        }
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard !subviews.isEmpty else { return }
+        let widths = naturalWidths(subviews)
+        let gaps = spacing * CGFloat(subviews.count - 1)
+        let natural = widths.reduce(0, +) + gaps
+        let extra = max(bounds.width - natural, 0) / CGFloat(subviews.count)
+        var x = bounds.minX
+        for index in subviews.indices {
+            let width = widths[index] + extra
+            subviews[index].place(at: CGPoint(x: x, y: bounds.midY),
+                                  anchor: .leading,
+                                  proposal: ProposedViewSize(width: width, height: bounds.height))
+            x += width + spacing
+        }
     }
 }
 

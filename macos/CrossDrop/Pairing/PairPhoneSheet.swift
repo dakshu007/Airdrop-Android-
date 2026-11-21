@@ -8,13 +8,14 @@ import CoreImage.CIFilterBuiltins
 /// exactly this Mac and nobody has to compare numbers (protocol §9.4).
 struct PairPhoneSheet: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.cdScale) private var ui
     @State private var mine = true
     @State private var uri: String?
     @State private var refresh = Date()
     private let timer = Timer.publish(every: 240, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(spacing: CDSpacing.l) {
+        VStack(spacing: ui.l) {
             HStack {
                 Spacer()
                 Button {
@@ -26,68 +27,71 @@ struct PairPhoneSheet: View {
                 .keyboardShortcut(.cancelAction)
                 .accessibilityLabel("Close")
             }
-            VStack(spacing: 6) {
+            VStack(spacing: ui(6)) {
                 Text("Pair a phone")
-                    .font(CDFont.poppins(26, .bold))
+                    .font(ui.font(26, .bold))
                     .foregroundColor(CDPalette.textPrimary)
                 Text("On your phone, open CrossDrop › Devices › Scan pairing code.")
-                    .font(CDFont.body)
+                    .font(ui.body)
                     .foregroundColor(CDPalette.textSecondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .legibleText()
 
             ZStack {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                RoundedRectangle(cornerRadius: ui(CDRadius.panel), style: .continuous)
                     .fill(Color.white)
-                    .shadow(color: Color(hex: 0x185434, opacity: 0.12), radius: 18, x: 0, y: 8)
+                    .shadow(color: CDPalette.shadow.opacity(0.10), radius: ui(14), x: 0, y: ui(6))
+                RoundedRectangle(cornerRadius: ui(CDRadius.panel), style: .continuous)
+                    .strokeBorder(CDPalette.controlBorder, lineWidth: 1)
                 if let uri = uri, let image = QRCode.image(for: uri) {
                     Image(nsImage: image)
                         .interpolation(.none)
                         .resizable()
-                        .padding(22)
+                        .padding(ui(22))
                         .accessibilityLabel("Pairing QR code. Scan it with CrossDrop on your phone.")
                 } else {
-                    VStack(spacing: 10) {
+                    VStack(spacing: ui(10)) {
                         Image(systemName: model.receivingEnabled ? "wifi.exclamationmark" : "moon.zzz")
-                            .font(.system(size: 30))
+                            .font(ui.system(30))
                             .foregroundColor(CDPalette.textTertiary)
                         Text(model.receivingEnabled ? "Waiting for the network…" : "Receiving is off")
-                            .font(CDFont.callout)
+                            .font(ui.callout)
                             .foregroundColor(CDPalette.textSecondary)
                         if !model.receivingEnabled {
                             Button("Turn On for My Devices") { model.setReceiveMode(.mine) }
                                 .buttonStyle(PrimaryButtonStyle())
                         }
                     }
-                    .padding()
+                    .padding(ui.l)
                 }
             }
-            .frame(width: 280, height: 280)
+            .frame(width: ui(280), height: ui(280))
 
             Toggle(isOn: $mine) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: ui(2)) {
                     Text("This is my phone")
-                        .font(CDFont.headline)
+                        .font(ui.headline)
                         .foregroundColor(CDPalette.textPrimary)
                     Text("Files from it arrive without asking.")
-                        .font(CDFont.caption)
+                        .font(ui.caption)
                         .foregroundColor(CDPalette.textSecondary)
                 }
             }
             .toggleStyle(GlassToggleStyle())
-            .frame(maxWidth: 320)
+            .frame(maxWidth: ui(320))
 
             Label("The code works once and expires in 5 minutes. It only lets a phone that can see this screen pair; it can't be used to read files.",
                   systemImage: "lock.shield")
-                .font(CDFont.caption)
+                .font(ui.caption)
                 .foregroundColor(CDPalette.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 360)
+                .frame(maxWidth: ui(360))
         }
-        .padding(28)
-        .frame(width: 440)
+        .padding(ui(28))
+        .frame(width: ui(440))
         .background(MintBackdrop(mood: .idle))
         .environment(\.colorScheme, .light)
         .onAppear(perform: regenerate)

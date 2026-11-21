@@ -9,53 +9,57 @@ struct TransferCard: View {
     @EnvironmentObject private var model: AppModel
     let item: TransferItem
     var compact = false
+    @Environment(\.cdScale) private var ui
 
     private var snapshot: TransferSnapshot { item.snapshot }
     private var outgoing: Bool { snapshot.direction == .outgoing }
 
     var body: some View {
-        HStack(alignment: .top, spacing: CDSpacing.m) {
+        HStack(alignment: .top, spacing: ui.m) {
             leadingIcon
 
-            VStack(alignment: .leading, spacing: compact ? 5 : 7) {
-                HStack(alignment: .firstTextBaseline, spacing: CDSpacing.s) {
+            VStack(alignment: .leading, spacing: ui(compact ? 5 : 7)) {
+                HStack(alignment: .firstTextBaseline, spacing: ui.s) {
                     Text(title)
-                        .font(CDFont.poppins(compact ? 12 : 13.5, .semibold))
+                        .font(ui.font(compact ? 12 : 13.5, .semibold))
                         .foregroundColor(CDPalette.textPrimary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Spacer(minLength: CDSpacing.s)
+                    Spacer(minLength: ui.s)
                     statusLabel
                 }
                 Text(subtitle)
-                    .font(compact ? CDFont.caption : CDFont.callout)
+                    .font(compact ? ui.caption : ui.callout)
                     .foregroundColor(CDPalette.textSecondary)
                     .lineLimit(1)
 
                 if showsProgress {
                     CapsuleProgress(value: item.fraction)
-                        .padding(.top, 2)
+                        .padding(.top, ui(2))
                     TimelineView(.periodic(from: Date(), by: 1)) { _ in
                         Text(progressText)
-                            .font(CDFont.caption.monospacedDigit())
+                            .font(ui.caption.monospacedDigit())
+                            .lineLimit(1)
                             .foregroundColor(CDPalette.textTertiary)
                     }
                 }
 
                 if hasProblem {
                     Text(TransferText.errorMessage(snapshot))
-                        .font(CDFont.caption)
+                        .font(ui.caption)
                         .foregroundColor(snapshot.phase == .failed ? CDPalette.coral : CDPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if !compact {
+                if !compact && hasActions {
                     actions
                 }
             }
         }
-        .padding(compact ? CDSpacing.m : CDSpacing.l)
-        .glassPanel(cornerRadius: compact ? 16 : CDRadius.card, style: compact ? .inset : .regular)
+        .padding(compact ? ui.m : ui(CDLayout.cardPadding))
+        // Full cards fill the height offered, so cards side by side end level.
+        .frame(maxWidth: .infinity, maxHeight: compact ? nil : CGFloat.infinity, alignment: .topLeading)
+        .glassPanel(cornerRadius: compact ? CDRadius.tile : CDRadius.card, style: compact ? .inset : .regular)
         .accessibilityElement(children: .contain)
     }
 
@@ -69,11 +73,11 @@ struct TransferCard: View {
                 DeviceAvatar(platform: snapshot.peerPlatform, size: size)
             }
             Image(systemName: outgoing ? "arrow.up" : "arrow.down")
-                .font(.system(size: compact ? 7 : 9, weight: .heavy))
+                .font(ui.system(compact ? 7 : 9, .heavy))
                 .foregroundColor(.white)
-                .frame(width: compact ? 13 : 17, height: compact ? 13 : 17)
+                .frame(width: ui(compact ? 13 : 17), height: ui(compact ? 13 : 17))
                 .background(Circle().fill(outgoing ? CDPalette.ink : CDPalette.mint))
-                .offset(x: 3, y: 3)
+                .offset(x: ui(3), y: ui(3))
                 .accessibilityHidden(true)
         }
     }
@@ -94,17 +98,17 @@ struct TransferCard: View {
     }
 
     private var statusLabel: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: ui(5)) {
             if snapshot.phase == .completed {
                 Image(systemName: "checkmark.circle.fill").foregroundColor(CDPalette.mint)
             } else if snapshot.phase == .failed {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundColor(CDPalette.coral)
             } else if !snapshot.phase.isFinished && snapshot.phase != .transferring {
-                ProgressView().controlSize(.small).scaleEffect(0.65).frame(width: 14, height: 14)
+                ProgressView().controlSize(.small).scaleEffect(0.65 * ui.factor).frame(width: ui(14), height: ui(14))
             }
             Text(TransferText.status(snapshot))
         }
-        .font(CDFont.poppins(11, .medium))
+        .font(ui.font(11, .medium))
         .foregroundColor(CDPalette.textSecondary)
         .lineLimit(1)
     }
@@ -127,9 +131,17 @@ struct TransferCard: View {
         return parts.joined(separator: " · ")
     }
 
+    /// Whether `actions` has any button to show (none while awaiting approval).
+    private var hasActions: Bool {
+        (!snapshot.phase.isFinished && snapshot.phase != .awaitingApproval)
+            || (!outgoing && snapshot.phase == .completed)
+            || model.canRetry(item)
+            || snapshot.phase.isFinished
+    }
+
     @ViewBuilder
     private var actions: some View {
-        HStack(spacing: CDSpacing.s) {
+        HStack(spacing: ui.s) {
             if !snapshot.phase.isFinished && snapshot.phase != .awaitingApproval {
                 Button("Cancel") { model.cancel(item) }
                     .buttonStyle(GlassButtonStyle(destructive: true))
@@ -156,6 +168,6 @@ struct TransferCard: View {
                     .buttonStyle(GlassButtonStyle())
             }
         }
-        .padding(.top, 4)
+        .padding(.top, ui(4))
     }
 }

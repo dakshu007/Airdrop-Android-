@@ -32,7 +32,6 @@ private struct WindowContent: View {
 
     var body: some View {
         let ui = scale
-        let prompting = !model.prompts.isEmpty
         MintCanvas(mood: model.activeTransfers.isEmpty ? .idle : .active) {
             ZStack {
                 HStack(alignment: .top, spacing: 0) {
@@ -44,15 +43,20 @@ private struct WindowContent: View {
                     page
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
-                // Soften the window behind a prompt (a real blur of the content, so no
-                // grey material tint).
-                .blur(radius: prompting ? ui(8) : 0)
-                .animation(CDMotion.layout(reduceMotion), value: prompting)
 
                 PromptLayer()
             }
-            .overlay(alignment: .bottom) { NoticeToast() }
-            .overlay(alignment: .bottomTrailing) { CelebrationCard() }
+            // Toasts and the celebration belong to the page, not the whole window, so
+            // they never cover the sidebar's receiving switch; stacked so they never
+            // overlap each other. Above the prompt layer, as before.
+            .overlay(alignment: .bottom) {
+                VStack(alignment: .trailing, spacing: 0) {
+                    NoticeToast()
+                        .frame(maxWidth: .infinity)
+                    CelebrationCard()
+                }
+                .padding(.leading, ui(CDLayout.windowInset + CDLayout.sidebarWidth))
+            }
         }
     }
 
@@ -110,6 +114,41 @@ struct PageScroll<Content: View>: View {
             }
         )
         .ignoresSafeArea()
+    }
+}
+
+/// Cards in rows of two for wide windows. Unlike a lazy grid, both cards in a row end
+/// level: each row takes the taller card's height and both cards fill it (the cards
+/// themselves fill the height they are offered).
+struct PairedRows<Item: Identifiable, Cell: View>: View {
+    let items: [Item]
+    let cell: (Item) -> Cell
+    @Environment(\.cdScale) private var ui
+
+    init(_ items: [Item], @ViewBuilder cell: @escaping (Item) -> Cell) {
+        self.items = items
+        self.cell = cell
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ui(CDLayout.cardGap)) {
+            ForEach(Array(stride(from: 0, to: items.count, by: 2)), id: \.self) { index in
+                HStack(alignment: .top, spacing: ui(CDLayout.cardGap)) {
+                    cell(items[index])
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    if index + 1 < items.count {
+                        cell(items[index + 1])
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    } else {
+                        Color.clear
+                            .frame(height: 0)
+                            .frame(maxWidth: .infinity)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
@@ -324,7 +363,7 @@ enum ReceiverText {
 
 // MARK: - Prompts
 
-/// Pairing and incoming-offer prompts: a glass card over the softly blurred window.
+/// Pairing and incoming-offer prompts: a glass card over the frosted, brightened window.
 /// Shrinks to fit short windows, and scrolls as a last resort.
 struct PromptLayer: View {
     @EnvironmentObject private var model: AppModel
@@ -337,8 +376,10 @@ struct PromptLayer: View {
         ZStack {
             if let prompt = model.prompts.first {
                 ZStack {
-                    Color.white.opacity(reduceTransparency ? 0.8 : 0.35)
-                    CDPalette.ink.opacity(0.08)
+                    Rectangle().fill(.ultraThinMaterial)
+                    // Keep the frost bright and minty rather than grey.
+                    Color.white.opacity(reduceTransparency ? 0.7 : 0.3)
+                    CDPalette.ink.opacity(0.06)
                 }
                 .contentShape(Rectangle())
                 .ignoresSafeArea()
@@ -453,12 +494,15 @@ struct NoticeToast: View {
                 .frame(maxWidth: ui(520))
                 .glassPanel(cornerRadius: 18, style: .floating)
                 .padding(.horizontal, ui(CDLayout.pageInset))
-                .padding(.bottom, ui(CDLayout.pageInset))
+                // Sits on top of the celebration card (which brings its own inset) while
+                // that is showing.
+                .padding(.bottom, model.celebration == nil ? ui(CDLayout.pageInset) : 0)
                 .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                 .id(notice.id)
             }
         }
         .animation(CDMotion.layout(reduceMotion), value: model.notice)
+        .animation(CDMotion.layout(reduceMotion), value: model.celebration == nil)
     }
 }
 

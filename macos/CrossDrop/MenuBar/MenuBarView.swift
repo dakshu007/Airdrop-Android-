@@ -5,17 +5,20 @@ import CrossDropCore
 #endif
 
 /// Compact panel shown from the menu bar icon, on the same mint backdrop as the main window.
+/// Always drawn at 100 % (the zoom applies to the main window only), using the same
+/// tokens and rhythm as the main window.
 struct MenuBarView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
         Group {
-            VStack(alignment: .leading, spacing: CDSpacing.m) {
+            VStack(alignment: .leading, spacing: ui.m) {
                 header
                 DropZone(compact: true)
                 devices
                 if !model.activeTransfers.isEmpty {
-                    VStack(spacing: CDSpacing.s) {
+                    VStack(spacing: ui.s) {
                         ForEach(model.activeTransfers.prefix(3)) { item in
                             TransferCard(item: item, compact: true)
                         }
@@ -23,8 +26,8 @@ struct MenuBarView: View {
                 }
                 footer
             }
-            .padding(CDSpacing.m)
-            .frame(width: 360)
+            .padding(ui.l)
+            .frame(width: ui(368))
         }
         .background(MintBackdrop(mood: model.activeTransfers.isEmpty ? .idle : .active))
         .environment(\.colorScheme, .light)
@@ -33,18 +36,19 @@ struct MenuBarView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: ui(10)) {
+            HStack(spacing: ui(10)) {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
-                    .frame(width: 26, height: 26)
+                    .interpolation(.high)
+                    .frame(width: ui(26), height: ui(26))
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: ui(1)) {
                     Text("CrossDrop")
-                        .font(CDFont.poppins(15, .bold))
+                        .font(ui.font(15, .bold))
                         .foregroundColor(CDPalette.textPrimary)
                     Text(ReceiverText.detail(model))
-                        .font(CDFont.poppins(10.5))
+                        .font(ui.font(10.5))
                         .foregroundColor(CDPalette.textSecondary)
                         .lineLimit(1)
                 }
@@ -52,19 +56,20 @@ struct MenuBarView: View {
             }
             ReceiveModePicker()
         }
-        .padding(.horizontal, CDSpacing.m)
-        .padding(.vertical, 10)
+        .padding(.horizontal, ui.m)
+        .padding(.vertical, ui.m)
         .glassPanel(cornerRadius: CDRadius.card)
     }
 
     @ViewBuilder
     private var devices: some View {
-        VStack(alignment: .leading, spacing: CDSpacing.s) {
-            HStack {
+        VStack(alignment: .leading, spacing: ui.s) {
+            HStack(spacing: ui.s) {
                 Text(sendTitle)
-                    .font(CDFont.poppins(12.5, .semibold))
+                    .font(ui.font(12.5, .semibold))
                     .foregroundColor(CDPalette.textPrimary)
-                Spacer()
+                    .lineLimit(1)
+                Spacer(minLength: 0)
                 if model.hasSomethingToSend {
                     Button("Clear") { model.clearSelection() }
                         .buttonStyle(GlassButtonStyle())
@@ -72,23 +77,23 @@ struct MenuBarView: View {
             }
             if let text = model.pendingText {
                 Label(text.text, systemImage: text.kind == .link ? "link" : "doc.plaintext")
-                    .font(CDFont.caption)
+                    .font(ui.caption)
                     .foregroundColor(CDPalette.textSecondary)
                     .lineLimit(2)
                     .truncationMode(.middle)
             }
             if !model.networkAvailable {
-                HStack(spacing: CDSpacing.m) {
+                HStack(spacing: ui.m) {
                     DripView(pose: .nowifi, size: 56, motion: .still)
                     hint("Not connected to Wi-Fi. Join the same network as your phone.", symbol: "wifi.slash")
                 }
             } else if model.discoveryStatus == .localNetworkDenied {
                 hint("Allow Local Network access in System Settings › Privacy & Security.", symbol: "lock.shield")
             } else if model.nearby.isEmpty {
-                HStack(spacing: CDSpacing.m) {
+                HStack(spacing: ui.m) {
                     DripView(pose: .searching, size: 56, motion: .bob)
                     Text("Looking for nearby devices. Turn on Receiving on your phone.")
-                        .font(CDFont.caption)
+                        .font(ui.caption)
                         .foregroundColor(CDPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -102,33 +107,33 @@ struct MenuBarView: View {
                             model.sendSelection(to: device)
                         }
                     } label: {
-                        HStack(spacing: CDSpacing.s) {
+                        HStack(spacing: ui.s) {
                             DeviceAvatar(platform: device.platform, size: 28)
                             Text(device.name)
-                                .font(CDFont.poppins(12.5, .medium))
+                                .font(ui.font(12.5, .medium))
                                 .foregroundColor(CDPalette.textPrimary)
                                 .lineLimit(1)
                             if model.isTrusted(device.deviceId) {
                                 Image(systemName: "checkmark.seal.fill")
-                                    .font(.system(size: 10))
+                                    .font(ui.system(10))
                                     .foregroundColor(CDPalette.mint)
                                     .accessibilityLabel("Paired")
                             }
                             if device.isRemembered {
                                 Text("not seen")
-                                    .font(CDFont.poppins(10))
+                                    .font(ui.font(10))
                                     .foregroundColor(CDPalette.textTertiary)
                                     .help("Not found nearby. CrossDrop will try the address that worked last time.")
                             }
-                            Spacer()
+                            Spacer(minLength: 0)
                             Image(systemName: model.hasSomethingToSend ? "paperplane.fill" : "plus")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(ui.system(11, .semibold))
                                 .foregroundColor(model.hasSomethingToSend ? .white : CDPalette.ink)
-                                .frame(width: 24, height: 24)
+                                .frame(width: ui(24), height: ui(24))
                                 .background(Circle().fill(model.hasSomethingToSend ? CDPalette.ink : Color(hex: 0xE9F4EC)))
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
+                        .padding(.horizontal, ui(10))
+                        .padding(.vertical, ui(7))
                     }
                     .buttonStyle(TileButtonStyle())
                     .accessibilityLabel(model.hasSomethingToSend ? "Send to \(device.name)" : "Choose files for \(device.name)")
@@ -138,7 +143,8 @@ struct MenuBarView: View {
                 }
             }
         }
-        .padding(CDSpacing.m)
+        .padding(ui.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .glassPanel(cornerRadius: CDRadius.card)
     }
 
@@ -148,7 +154,7 @@ struct MenuBarView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: CDSpacing.s) {
+        HStack(spacing: ui.s) {
             Button {
                 model.requestMainWindow()
             } label: {
@@ -173,19 +179,18 @@ struct MenuBarView: View {
             .buttonStyle(GlassButtonStyle())
             .help("Pair a phone with a QR code")
             .accessibilityLabel("Pair a phone")
-            Spacer()
+            Spacer(minLength: 0)
             Button("Quit") { NSApp.terminate(nil) }
                 .buttonStyle(GlassButtonStyle())
                 .keyboardShortcut("q", modifiers: .command)
         }
-        .padding(.horizontal, 4)
     }
 
     private func hint(_ text: String, symbol: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: ui(6)) {
             Image(systemName: symbol).foregroundColor(CDPalette.textSecondary)
             Text(text)
-                .font(CDFont.caption)
+                .font(ui.caption)
                 .foregroundColor(CDPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -193,19 +198,26 @@ struct MenuBarView: View {
     }
 }
 
-/// Off / My Devices / Everyone, as a compact glass segmented control.
+/// My Devices / Everyone / Off, as the glass segmented control drawn at the UI scale,
+/// filling the width it is given. `compact` is for tight spots such as the sidebar's
+/// receiving pill.
 struct ReceiveModePicker: View {
+    var compact = false
     @EnvironmentObject private var model: AppModel
 
+    private static let modes: [ReceiveMode] = Array(ReceiveMode.allCases)
+
     var body: some View {
-        Picker("Who can send to this Mac", selection: Binding(get: { model.receiveMode }, set: { model.setReceiveMode($0) })) {
-            ForEach(ReceiveMode.allCases) { mode in
-                Text(mode.title).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .help("My Devices: only devices you paired, invisible to others. Everyone: anyone nearby can ask to send.")
-        .accessibilityLabel("Who can send to this Mac")
+        let modes = ReceiveModePicker.modes
+        SegmentedGlass(choices: modes.indices.map { SegmentChoice(id: $0, label: modes[$0].title) },
+                       selection: Binding(get: { modes.firstIndex(of: model.receiveMode) ?? 0 },
+                                          set: { index in
+                                              guard modes.indices.contains(index) else { return }
+                                              model.setReceiveMode(modes[index])
+                                          }),
+                       accessibilityName: "Who can send to this Mac",
+                       fillsWidth: true,
+                       compact: compact)
+            .help("My Devices: only devices you paired, invisible to others. Everyone: anyone nearby can ask to send.")
     }
 }

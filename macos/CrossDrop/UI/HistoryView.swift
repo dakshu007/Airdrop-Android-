@@ -5,8 +5,10 @@ import CrossDropCore
 
 struct HistoryView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.cdScale) private var ui
     @State private var confirmClear = false
     @State private var query = ""
+    @FocusState private var searchFocused: Bool
 
     private var filtered: [HistoryEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -19,59 +21,66 @@ struct HistoryView: View {
     }
 
     var body: some View {
-        PageScroll {
-            HStack(alignment: .bottom) {
-                PageTitle(title: "History", subtitle: "Stored only on this Mac.")
-                if !model.history.isEmpty {
-                    Button("Clear History…") { confirmClear = true }
-                        .buttonStyle(GlassButtonStyle(destructive: true))
-                }
-            }
+        PageScroll(allowsWide: true) {
+            PageTitle(title: "History", subtitle: "Stored only on this Mac.",
+                      trailing: model.history.isEmpty ? nil : AnyView(
+                        Button("Clear History…") { confirmClear = true }
+                            .buttonStyle(GlassButtonStyle(destructive: true))
+                      ))
             if model.history.isEmpty {
                 StateMessage(symbol: "clock.arrow.circlepath", title: "Nothing here yet",
                              message: "Finished transfers are listed here. The list never leaves this Mac.")
                     .glassPanel(cornerRadius: CDRadius.card)
             } else {
-                HStack(spacing: 8) {
+                HStack(spacing: ui(8)) {
                     Image(systemName: "magnifyingglass")
+                        .font(ui.system(13))
                         .foregroundColor(CDPalette.textTertiary)
+                        .accessibilityHidden(true)
                     TextField("Search files, links or devices", text: $query)
                         .textFieldStyle(.plain)
-                        .font(CDFont.body)
+                        .font(ui.body)
+                        .focused($searchFocused)
                         .accessibilityLabel("Search history")
                     if !query.isEmpty {
                         Button {
                             query = ""
                         } label: {
                             Image(systemName: "xmark.circle.fill")
+                                .font(ui.system(13))
                         }
                         .buttonStyle(.plain)
                         .foregroundColor(CDPalette.textTertiary)
                         .accessibilityLabel("Clear search")
                     }
                 }
-                .padding(.horizontal, CDSpacing.m)
-                .frame(height: 38)
+                .padding(.horizontal, ui.m)
+                .frame(height: ui(38))
                 .glassPanel(cornerRadius: 14, style: .inset)
-                .frame(maxWidth: 420)
+                .modifier(FieldFocusBorder(focused: searchFocused, radius: 14))
+                .frame(maxWidth: ui(420))
 
                 let rows = filtered
                 VStack(spacing: 0) {
                     if rows.isEmpty {
                         Text("Nothing matches \u{201C}\(query)\u{201D}.")
-                            .font(CDFont.callout)
+                            .font(ui.callout)
                             .foregroundColor(CDPalette.textSecondary)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, CDSpacing.l)
+                            .padding(.vertical, ui.l)
                     }
                     ForEach(rows) { entry in
                         HistoryRow(entry: entry)
                         if entry.id != rows.last?.id {
-                            GlassDivider().padding(.leading, 64)
+                            // From the text column to the card's inner edge.
+                            GlassDivider()
+                                .padding(.leading, ui(CDLayout.cardPadding) + ui(32) + ui.m)
+                                .padding(.trailing, ui(CDLayout.cardPadding))
                         }
                     }
                 }
-                .padding(.vertical, 6)
+                // With the rows' own 10pt, the top and bottom match the side inset.
+                .padding(.vertical, ui(CDLayout.cardPadding - 10))
                 .glassPanel(cornerRadius: CDRadius.card)
             }
         }
@@ -86,33 +95,34 @@ struct HistoryView: View {
 
 struct HistoryRow: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.cdScale) private var ui
     let entry: HistoryEntry
     @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: CDSpacing.m) {
+        HStack(spacing: ui.m) {
             ZStack(alignment: .bottomTrailing) {
                 FileIcon(url: savedURLs.first, name: entry.files.first?.name ?? "", size: 32)
                 Image(systemName: entry.isIncoming ? "arrow.down" : "arrow.up")
-                    .font(.system(size: 8, weight: .heavy))
+                    .font(ui.system(8, .heavy))
                     .foregroundColor(.white)
-                    .frame(width: 15, height: 15)
+                    .frame(width: ui(15), height: ui(15))
                     .background(Circle().fill(entry.isIncoming ? CDPalette.mint : CDPalette.ink))
-                    .offset(x: 3, y: 3)
+                    .offset(x: ui(3), y: ui(3))
             }
             .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: ui(2)) {
                 Text(title)
-                    .font(CDFont.body.weight(.medium))
+                    .font(ui.font(13, .medium))
                     .foregroundColor(CDPalette.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(subtitle)
-                    .font(CDFont.caption)
+                    .font(ui.caption)
                     .foregroundColor(CDPalette.textTertiary)
                     .lineLimit(1)
             }
-            Spacer(minLength: CDSpacing.s)
+            Spacer(minLength: ui.s)
             statusChip
             if entry.isIncoming, entry.status == "completed", !savedURLs.isEmpty {
                 Button {
@@ -135,12 +145,12 @@ struct HistoryRow: View {
                 .accessibilityLabel("Send \(title) again")
             }
         }
-        .padding(.horizontal, CDSpacing.l)
-        .padding(.vertical, 10)
+        .padding(.horizontal, ui(CDLayout.cardPadding))
+        .padding(.vertical, ui(10))
         .background(
-            RoundedRectangle(cornerRadius: CDRadius.row, style: .continuous)
+            RoundedRectangle(cornerRadius: ui(CDRadius.row), style: .continuous)
                 .fill(Color.white.opacity(hovering ? 0.7 : 0))
-                .padding(.horizontal, 6)
+                .padding(.horizontal, ui(8))
         )
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
