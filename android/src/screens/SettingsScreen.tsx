@@ -227,6 +227,55 @@ export function SettingsScreen() {
         />
       </GlassCard>
 
+      <SectionHeader title="Experimental" />
+      <GlassCard padding={spacing.sm}>
+        <Row
+          icon="wifi"
+          title="No-router mode (phone hotspot)"
+          detail={
+            snapshot.hotspot.state === 'unsupported'
+              ? 'Needs Android 13 or later.'
+              : 'This phone opens its own Wi‑Fi for your Mac to join, for places without a shared network. Doesn’t share mobile data. Not yet tested on real devices.'
+          }
+          trailing={
+            <Toggle
+              value={
+                snapshot.hotspot.state === 'on' ||
+                snapshot.hotspot.state === 'starting'
+              }
+              disabled={snapshot.hotspot.state === 'unsupported'}
+              onValueChange={v => CrossDrop.setHotspot(v).catch(() => false)}
+              accessibilityLabel="No-router mode, phone hotspot"
+            />
+          }
+        >
+          {snapshot.hotspot.state === 'on' && snapshot.hotspot.ssid ? (
+            <View style={styles.hotspot} accessible>
+              <Text variant="footnote" tone="secondary">
+                On the Mac, join this Wi‑Fi, then use CrossDrop as usual:
+              </Text>
+              <Text variant="callout" mono selectable>
+                {snapshot.hotspot.ssid}
+              </Text>
+              {snapshot.hotspot.password ? (
+                <Text variant="callout" mono selectable>
+                  Password: {snapshot.hotspot.password}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+          {snapshot.hotspot.state === 'failed' ? (
+            <Text variant="footnote" tone="danger">
+              {snapshot.hotspot.error === 'tethering_disallowed'
+                ? 'This phone or carrier doesn’t allow hotspots.'
+                : snapshot.hotspot.error === 'incompatible_mode'
+                ? 'Turn off the regular hotspot first.'
+                : 'Couldn’t start the hotspot.'}
+            </Text>
+          ) : null}
+        </Row>
+      </GlassCard>
+
       <SectionHeader title="Feedback" />
       <GlassCard padding={spacing.sm}>
         <Row
@@ -296,6 +345,7 @@ export function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
+  hotspot: { gap: 4, marginTop: spacing.xs },
   flex: { flex: 1, gap: 1 },
   row: {
     flexDirection: 'row',

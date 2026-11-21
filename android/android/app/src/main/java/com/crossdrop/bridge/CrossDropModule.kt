@@ -133,6 +133,27 @@ class CrossDropModule(private val context: ReactApplicationContext) : NativeCros
 
     override fun copyText(text: String) = engine.copyText(text)
 
+    override fun setHotspot(enabled: Boolean, promise: Promise) {
+        if (!enabled) {
+            engine.hotspot.stop()
+            return promise.resolve(false)
+        }
+        if (Build.VERSION.SDK_INT < 33) return promise.resolve(false)
+        val permission = Manifest.permission.NEARBY_WIFI_DEVICES
+        if (context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+            engine.hotspot.start()
+            return promise.resolve(true)
+        }
+        val activity = context.currentActivity as? PermissionAwareActivity ?: return promise.resolve(false)
+        activity.requestPermissions(arrayOf(permission), HOTSPOT_REQUEST) { requestCode, _, results ->
+            if (requestCode != HOTSPOT_REQUEST) return@requestPermissions false
+            val granted = results.firstOrNull() == PackageManager.PERMISSION_GRANTED
+            if (granted) engine.hotspot.start()
+            promise.resolve(granted)
+            true
+        }
+    }
+
     override fun setScreenshotOffer(enabled: Boolean, promise: Promise) {
         if (!enabled) {
             engine.setScreenshotOffer(false)
@@ -343,5 +364,6 @@ class CrossDropModule(private val context: ReactApplicationContext) : NativeCros
         private const val FOLDER_REQUEST = 4209
         private const val SCAN_REQUEST = 4210
         private const val PHOTOS_REQUEST = 4211
+        private const val HOTSPOT_REQUEST = 4212
     }
 }

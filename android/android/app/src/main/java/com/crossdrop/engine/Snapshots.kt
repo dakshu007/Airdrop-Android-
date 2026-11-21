@@ -131,6 +131,12 @@ object Snapshots {
                 "screenshotOffer" to engine.prefs.screenshotOffer,
             ),
             "screenshotPermission" to s.screenshotPermission,
+            "hotspot" to linkedMapOf(
+                "state" to engine.hotspot.state,
+                "ssid" to engine.hotspot.ssid,
+                "password" to engine.hotspot.password,
+                "error" to engine.hotspot.error,
+            ),
         )
         return Json.write(map)
     }

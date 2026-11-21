@@ -191,6 +191,13 @@ export interface Preferences {
   screenshotOffer: boolean;
 }
 
+export interface HotspotState {
+  state: 'off' | 'starting' | 'on' | 'failed' | 'unsupported';
+  ssid: string | null;
+  password: string | null;
+  error: string | null;
+}
+
 export type PreferenceKey = 'sound' | 'haptics' | 'welcomed';
 
 /** 'tick' when a code digit lands, 'confirm' for a confirmed code, 'done' and 'error' when a transfer ends. */
@@ -218,6 +225,8 @@ export interface Snapshot {
   lastDeviceId: string | null;
   /** Photo access for the screenshot suggestion. */
   screenshotPermission: boolean;
+  /** Experimental no-router mode: a local-only hotspot the Mac joins. */
+  hotspot: HotspotState;
   notificationPermission: NotificationPermission;
   /** Human-readable destination, e.g. "Download/CrossDrop". */
   destinationLabel: string;

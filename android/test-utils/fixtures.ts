@@ -29,6 +29,7 @@ export function emptySnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     sharedText: null,
     lastDeviceId: null,
     screenshotPermission: false,
+    hotspot: { state: 'off', ssid: null, password: null, error: null },
     notificationPermission: 'undetermined',
     destinationLabel: 'Download/CrossDrop',
     appVersion: '0.1.0',

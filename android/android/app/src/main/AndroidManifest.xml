@@ -17,6 +17,11 @@
     <!-- Asked only if the user turns on "Offer to send screenshots". -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!-- Experimental phone hotspot (Android 13+ only): asked when the user turns it on.
+         neverForLocation: CrossDrop doesn't derive location from Wi-Fi. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
 
     <application
       android:name=".MainApplication"

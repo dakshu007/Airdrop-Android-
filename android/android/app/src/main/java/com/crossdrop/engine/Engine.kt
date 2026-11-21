@@ -114,6 +114,8 @@ class Engine private constructor(private val app: Context) {
     private class Endpoint(val host: String, val port: Int, val name: String, val platform: String)
 
     private val screenshots = ScreenshotWatcher(app) { uri, name -> onScreenshot(uri, name) }
+    /** Experimental no-router mode (see HotspotManager). */
+    val hotspot = com.crossdrop.hotspot.HotspotManager(app) { onNetworkChanged() }
 
     /** Receives a full snapshot JSON whenever state changes (coalesced, main thread). */
     var snapshotListener: ((String) -> Unit)? = null
@@ -315,11 +317,11 @@ class Engine private constructor(private val app: Context) {
         main.post {
             val (recv, port, disc) = synchronized(lock) { Triple(receivingEnabled, receivingPort, discoveryWanted) }
             // Re-announce and re-browse on the new network.
-            if (recv && port != null && network.localNetwork) advertise()
+            if (recv && port != null && (network.localNetwork || hotspot.isOn)) advertise()
             if (disc) {
                 discovery.stop()
                 synchronized(lock) { nearby.clear() }
-                if (network.localNetwork) discovery.start()
+                if (network.localNetwork || hotspot.isOn) discovery.start()
             }
             changed()
         }
@@ -945,7 +947,7 @@ class Engine private constructor(private val app: Context) {
     fun snapshotJson(): String = synchronized(lock) {
         Snapshots.build(this, SnapshotState(
             receivingEnabled, receivingPort, receivingError, autoOffAt,
-            discoveryWanted && discovery.isActive, discoveryError, network.localNetwork,
+            discoveryWanted && discovery.isActive, discoveryError, network.localNetwork || hotspot.isOn,
             nearby.values.toList(), transfers.values.toList(), pairing.values.toList(), offers.values.toList(), shared,
             mode = if (!receivingEnabled) "off" else if (everyoneOpen) "everyone" else "mine",
             sharedText = sharedText,

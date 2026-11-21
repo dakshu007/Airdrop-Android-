@@ -61,6 +61,7 @@ jest.mock('./specs/NativeCrossDrop', () => ({
     openLink: jest.fn(),
     copyText: jest.fn(),
     setScreenshotOffer: jest.fn(() => Promise.resolve(true)),
+    setHotspot: jest.fn(() => Promise.resolve(true)),
   },
 }));
 

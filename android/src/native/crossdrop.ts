@@ -104,3 +104,5 @@ export const setPreference = (key: PreferenceKey, value: boolean) =>
   NativeCrossDrop.setPreference(key, value);
 /** Haptics and the done sound; the engine applies the user's preferences. */
 export const feedback = (kind: FeedbackKind) => NativeCrossDrop.feedback(kind);
+export const setHotspot = (enabled: boolean) =>
+  NativeCrossDrop.setHotspot(enabled);

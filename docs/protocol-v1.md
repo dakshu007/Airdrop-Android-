@@ -505,6 +505,9 @@ paired with, or from a device presenting a valid QR token (§9.4).
   can recognise it.
 * Paired devices may remember the address that last worked and try it directly
   when discovery doesn't find the receiver (networks that block multicast).
+  To keep that address useful, both reference apps listen on TCP port 47100
+  when it is free and fall back to any free port otherwise; the port is still
+  announced over DNS-SD and in the QR code, so nothing depends on it.
   The handshake still authenticates the device, so a stale address can at worst
   fail to connect.
 

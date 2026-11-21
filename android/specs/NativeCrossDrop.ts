@@ -38,6 +38,8 @@ export interface Spec extends TurboModule {
   copyText(text: string): void;
   /** Turns the screenshot suggestion on or off, asking for photo access when needed. Resolves to the new state. */
   setScreenshotOffer(enabled: boolean): Promise<boolean>;
+  /** Experimental: starts / stops a local-only hotspot the Mac can join (Android 13+). Resolves to whether it is starting. */
+  setHotspot(enabled: boolean): Promise<boolean>;
   /** mine: "This is my device" — its transfers are accepted without asking from now on. */
   respondToPairing(sessionId: string, accept: boolean, mine: boolean): void;
   respondToOffer(transferId: string, accept: boolean): void;
