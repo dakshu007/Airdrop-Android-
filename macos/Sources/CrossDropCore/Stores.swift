@@ -22,23 +22,35 @@ public enum FileIdentityStore {
     }
 }
 
-/// Trust kept in memory; used by the CLI and tests.
+/// Trust kept in memory; used by the CLI and tests. Honours trust expiry (§9.9).
 public final class InMemoryTrustStore: TrustProvider {
     private let lock = NSLock()
     private var keys: [String: Data] = [:]
     private var autoAccept: Set<String> = []
+    private var expiry: [String: Date] = [:]
 
     public init() {}
+
+    /// Drops `deviceId` if its temporary trust has ended. Call with the lock held.
+    private func purgeIfExpired(_ deviceId: String) {
+        if let end = expiry[deviceId], Date() >= end {
+            keys[deviceId] = nil
+            autoAccept.remove(deviceId)
+            expiry[deviceId] = nil
+        }
+    }
 
     public func trustedIdentityKey(for deviceId: String) -> Data? {
         lock.lock()
         defer { lock.unlock() }
+        purgeIfExpired(deviceId)
         return keys[deviceId]
     }
 
     public func isAutoAccept(deviceId: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        purgeIfExpired(deviceId)
         return autoAccept.contains(deviceId)
     }
 
@@ -51,14 +63,29 @@ public final class InMemoryTrustStore: TrustProvider {
     public func storeTrust(for peer: PeerInfo) {
         lock.lock()
         keys[peer.deviceId] = peer.identityKey
+        expiry[peer.deviceId] = nil
         lock.unlock()
     }
 
     public func storeTrust(for peer: PeerInfo, autoAccept value: Bool) {
+        storeTrust(for: peer, autoAccept: value, expiresAt: nil)
+    }
+
+    public func storeTrust(for peer: PeerInfo, autoAccept value: Bool, expiresAt: Date?) {
         lock.lock()
         keys[peer.deviceId] = peer.identityKey
         if value { autoAccept.insert(peer.deviceId) }
+        expiry[peer.deviceId] = expiresAt
         lock.unlock()
+    }
+
+    public var supportsTrustExpiry: Bool { true }
+
+    public func trustExpiry(for deviceId: String) -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        purgeIfExpired(deviceId)
+        return expiry[deviceId]
     }
 
     public func touch(peer: PeerInfo) {}
@@ -67,6 +94,7 @@ public final class InMemoryTrustStore: TrustProvider {
         lock.lock()
         keys[deviceId] = nil
         autoAccept.remove(deviceId)
+        expiry[deviceId] = nil
         lock.unlock()
     }
 }

@@ -70,6 +70,12 @@ public struct TransferSnapshot: Equatable {
     public var text: String?
     /// Bytes skipped because the receiver kept them from an interrupted attempt (§9.3).
     public var resumedBytes: Int64
+    /// The capture request this transfer answers (§9.7). Incoming: set only when it matched
+    /// a request this device sent to the same peer (and so was accepted without asking).
+    public var requestId: String?
+    /// Seconds after which the sender asks that the received items be deleted (§9.8).
+    /// The receiving app does the deleting; the core only reports it.
+    public var expiresAfter: Int64?
 
     public init(id: String, direction: TransferDirection, peerId: String?, peerName: String,
                 peerPlatform: String?, phase: TransferPhase, files: [TransferFileState]) {
@@ -88,6 +94,8 @@ public struct TransferSnapshot: Equatable {
         self.kind = .files
         self.text = nil
         self.resumedBytes = 0
+        self.requestId = nil
+        self.expiresAfter = nil
     }
 
     public var totalBytes: Int64 { files.reduce(0) { $0 + $1.size } }
@@ -116,6 +124,8 @@ public struct OfferPrompt {
     public let totalBytes: Int64
     public let expiresAt: Date
     public var kind: OfferKind = .files
+    /// Seconds after which the sender asks that the received items be deleted (§9.8).
+    public var expiresAfter: Int64? = nil
 }
 
 /// Callbacks from the engine. Called on background threads.
@@ -127,6 +137,14 @@ public protocol CrossDropDelegate: AnyObject {
     func crossDropOfferReceived(_ offer: OfferPrompt, decision: Decision)
     func crossDropOfferFinished(transferId: String)
     func crossDropTransferUpdated(_ snapshot: TransferSnapshot)
+    /// A paired device asks this one to take a photo or pick files and send them back (§9.7).
+    /// Return true to accept; the app then sends the result to `request.replyEndpoint` with
+    /// `OutgoingTransfer(requestId: request.requestId)`. The requester waits up to the human timeout.
+    func crossDropCaptureRequested(_ request: CaptureRequest) -> Bool
+}
+
+public extension CrossDropDelegate {
+    func crossDropCaptureRequested(_ request: CaptureRequest) -> Bool { false }
 }
 
 /// Thread-safe holder that throttles progress notifications.

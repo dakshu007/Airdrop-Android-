@@ -65,8 +65,11 @@ data class QrPairing(
     val mine: Boolean,
 )
 
-/** Pairing that needs no prompt on this side: a QR token was presented or verified. */
-internal class AutoPair(val mine: Boolean)
+/**
+ * Pairing that needs no prompt on this side: a QR token was presented or verified (§9.4),
+ * or a Drip Room proof was (§9.9). [expiresAt] (epoch ms) makes the stored trust temporary.
+ */
+internal class AutoPair(val mine: Boolean, val expiresAt: Long? = null)
 
 /** An incoming offer awaiting the local user's decision (§6.2). */
 class IncomingOffer internal constructor(
@@ -76,6 +79,13 @@ class IncomingOffer internal constructor(
     val expiresAt: Long,
     /** Files, or a link / text that the receiver handles without saving a file (§9.2). */
     val kind: OfferKind = OfferKind.FILES,
+    /**
+     * Set only when this offer answers a capture request this device sent to the same
+     * peer (§9.7); such an offer is accepted without asking.
+     */
+    val requestId: String? = null,
+    /** Seconds after which the sender asks that the received items be deleted (§9.8). */
+    val expiresAfter: Long? = null,
 ) {
     val totalBytes: Long = files.sumOf { it.size }
     internal val decision = CompletableFuture<Boolean>()
@@ -100,8 +110,21 @@ private class PairingDecision(val prompt: PairingPrompt, val accept: Boolean)
 private class OfferDecision(val offer: IncomingOffer, val accept: Boolean)
 
 internal object Pairing {
-    /** Runs the §5 exchange once `pair.request` has been sent or received. */
-    fun run(conn: Connection, hs: HandshakeResult, role: Role, events: PairingEvents, trust: TrustStore, auto: AutoPair? = null) {
+    /**
+     * Runs the §5 exchange once `pair.request` has been sent or received.
+     * [remoteAlreadyAccepted]: the peer's `pair.confirm true` was already read (§9.9).
+     * [confirmExtra]: fields added to an automatic `pair.confirm` (the room proof, §9.9).
+     */
+    fun run(
+        conn: Connection,
+        hs: HandshakeResult,
+        role: Role,
+        events: PairingEvents,
+        trust: TrustStore,
+        auto: AutoPair? = null,
+        remoteAlreadyAccepted: Boolean = false,
+        confirmExtra: Map<String, Any?> = emptyMap(),
+    ) {
         val deadline = System.currentTimeMillis() + Protocol.HUMAN_DECISION_TIMEOUT_MS
         val prompt = PairingPrompt(UUID.randomUUID().toString(), hs.peer, hs.sas, role, deadline)
         // Only a prompt the user answers feeds a decision into the connection.
@@ -110,10 +133,12 @@ internal object Pairing {
         if (auto == null) events.onPairingPrompt(prompt)
         try {
             var localAccepted = false
-            var remoteAccepted = false
+            var remoteAccepted = remoteAlreadyAccepted
             if (auto != null) {
-                // The QR code already proved who is on each side: answer for the user.
-                mapIo { conn.sendControl(Message.build("pair.confirm", "accepted" to true)) }
+                // The QR code (or room proof) already proved who is on each side: answer for the user.
+                val confirm = Message.build("pair.confirm", "accepted" to true) as MutableMap<String, Any?>
+                confirm.putAll(confirmExtra)
+                mapIo { conn.sendControl(confirm) }
                 localAccepted = true
             }
             while (!(localAccepted && remoteAccepted)) {
@@ -154,7 +179,7 @@ internal object Pairing {
                     else -> throw ProtocolException(ErrorCode.UNEXPECTED_MESSAGE, "data during pairing")
                 }
             }
-            trust.trust(hs.peer, auto?.mine ?: prompt.mine)
+            trust.trust(hs.peer, auto?.mine ?: prompt.mine, auto?.expiresAt)
             paired = true
         } finally {
             prompt.decision.complete(false)

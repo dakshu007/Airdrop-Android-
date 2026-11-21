@@ -169,11 +169,19 @@ public struct TransferOffer: Equatable {
     public let transferId: String
     public let files: [OfferedFile]
     public let kind: OfferKind
+    /// The capture request this offer answers (§9.7), as sent; the receiver only honours
+    /// it when it matches a request it issued to this sender.
+    public let requestId: String?
+    /// Seconds after which the sender asks that the received items be deleted (§9.8).
+    public let expiresAfter: Int64?
 
-    public init(transferId: String, files: [OfferedFile], kind: OfferKind = .files) {
+    public init(transferId: String, files: [OfferedFile], kind: OfferKind = .files,
+                requestId: String? = nil, expiresAfter: Int64? = nil) {
         self.transferId = transferId
         self.files = files
         self.kind = kind
+        self.requestId = requestId
+        self.expiresAfter = expiresAfter
     }
 
     public var totalBytes: Int64 { files.reduce(0) { $0 + $1.size } }
@@ -234,7 +242,21 @@ public struct TransferOffer: Equatable {
         if kind != .files && (files.count != 1 || files[0].size > ProtocolConstants.maxTextPayload) {
             throw bad("bad \(kind.rawValue) payload")
         }
-        return TransferOffer(transferId: transferId, files: files, kind: kind)
+        var requestId: String? = nil
+        if let rawRequestId = message.fields["requestId"], !(rawRequestId is NSNull) {
+            guard let text = rawRequestId as? String, isValidTransferId(text) else { throw bad("invalid requestId") }
+            requestId = text
+        }
+        var expiresAfter: Int64? = nil
+        if let rawExpiry = message.fields["expiresAfter"], !(rawExpiry is NSNull) {
+            guard let value = JSONValue.int(rawExpiry),
+                  (ProtocolConstants.minExpiresAfter...ProtocolConstants.maxExpiresAfter).contains(value) else {
+                throw bad("invalid expiresAfter")
+            }
+            expiresAfter = value
+        }
+        return TransferOffer(transferId: transferId, files: files, kind: kind,
+                             requestId: requestId, expiresAfter: expiresAfter)
     }
 
     /// Splits a `path` field into folder names (§9.1). Each part is sanitised like a
@@ -265,6 +287,8 @@ public struct TransferOffer: Equatable {
         }
         var fields: [String: Any] = ["transferId": transferId, "files": list]
         if kind != .files { fields["kind"] = kind.rawValue }
+        if let requestId = requestId { fields["requestId"] = requestId }
+        if let expiresAfter = expiresAfter { fields["expiresAfter"] = expiresAfter }
         return WireMessage.make("transfer.offer", fields)
     }
 }

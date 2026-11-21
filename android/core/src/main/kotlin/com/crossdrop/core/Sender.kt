@@ -66,6 +66,12 @@ class OutgoingTransfer(
     private val kind: OfferKind = OfferKind.FILES,
     /** Set when pairing from a scanned QR code (§9.4). */
     private val qr: QrPairing? = null,
+    /** The capture request this transfer answers (§9.7); the requester accepts it without asking. */
+    val requestId: String? = null,
+    /** Asks the receiver to delete what it saved after this many seconds (§9.8). */
+    val expiresAfter: Long? = null,
+    /** A Drip Room shared with the receiver (§9.9): pairing proves membership instead of comparing codes. */
+    private val room: Room? = null,
 ) {
     private val cancelled = AtomicBoolean(false)
     @Volatile private var conn: Connection? = null
@@ -73,6 +79,8 @@ class OutgoingTransfer(
 
     init {
         require(files.isNotEmpty() && files.size <= Protocol.MAX_FILES)
+        require(requestId == null || Protocol.isValidTransferId(requestId)) { "bad requestId" }
+        require(expiresAfter == null || expiresAfter in Protocol.MIN_EXPIRES_AFTER..Protocol.MAX_EXPIRES_AFTER) { "expiresAfter out of range" }
     }
 
     fun cancel() {
@@ -132,12 +140,14 @@ class OutgoingTransfer(
         var pairedThisSession = false
         if (trust.get(hs.peer.deviceId) == null) {
             events.onStage(SendStage.PAIRING)
-            QrPairingClient.pair(c, hs, qr, events, trust)
+            QrPairingClient.pair(c, hs, qr, events, trust, room)
             pairedThisSession = true
         }
 
         val offer = Message.build("transfer.offer", "transferId" to transferId, "files" to offerFiles.map { it.toJson() })
         if (kind != OfferKind.FILES) (offer as MutableMap<String, Any?>)["kind"] = kind.wire
+        if (requestId != null) (offer as MutableMap<String, Any?>)["requestId"] = requestId
+        if (expiresAfter != null) (offer as MutableMap<String, Any?>)["expiresAfter"] = expiresAfter
         events.onStage(SendStage.WAITING_FOR_ACCEPTANCE)
         mapIo { c.sendControl(offer) }
         while (true) {
@@ -344,7 +354,11 @@ class OutgoingTransfer(
  * skip its prompt. Without a code it is the usual compare-the-numbers pairing.
  */
 object QrPairingClient {
-    internal fun pair(c: Connection, hs: HandshakeResult, qr: QrPairing?, events: PairingEvents, trust: TrustStore) {
+    internal fun pair(c: Connection, hs: HandshakeResult, qr: QrPairing?, events: PairingEvents, trust: TrustStore, room: Room? = null) {
+        if (qr == null && room != null && room.isActive() && trust.supportsTrustExpiry) {
+            RoomPairingClient.pair(c, hs, room, events, trust)
+            return
+        }
         if (qr == null) {
             mapIo { c.sendControl(Message.build("pair.request")) }
             Pairing.run(c, hs, Role.SENDER, events, trust)
@@ -379,6 +393,85 @@ object QrPairingClient {
             try {
                 val hs = Handshake.client(c, identity, local, trust)
                 pair(c, hs, qr, events, trust)
+                return hs.peer
+            } finally {
+                c.close()
+            }
+        }
+        throw lastError
+    }
+}
+
+/**
+ * Pairing inside a Drip Room (§9.9). The sender proves it holds the room key over this
+ * exact handshake; a receiver in the same room answers at once with its own proof, and
+ * both store trust that ends with the room. Without that answer (unknown room, wrong
+ * key, or an older receiver) it falls back to the normal code comparison.
+ */
+object RoomPairingClient {
+    internal fun pair(c: Connection, hs: HandshakeResult, room: Room, events: PairingEvents, trust: TrustStore) {
+        val request = Message.build(
+            "pair.request",
+            "room" to linkedMapOf("id" to room.id, "proof" to B64.encode(room.proof(hs.transcriptHash))),
+        )
+        mapIo { c.sendControl(request) }
+        // A receiver that accepts the proof answers without a human; anything slower means codes.
+        val first = try {
+            c.next(Protocol.ROOM_ANSWER_WAIT_MS)
+        } catch (e: ProtocolException) {
+            if (e.code != ErrorCode.TIMEOUT) throw e
+            null
+        }
+        if (first == null) {
+            Pairing.run(c, hs, Role.SENDER, events, trust)
+            return
+        }
+        val msg = (first as? Connection.Incoming.Control)?.message
+            ?: throw ProtocolException(ErrorCode.UNEXPECTED_MESSAGE, "data during pairing")
+        if (msg.type != "pair.confirm") Sessions.handleUnexpected(msg)
+        if (!msg.bool("accepted")) throw ProtocolException(ErrorCode.PAIRING_REJECTED, "declined by peer", remote = true)
+        if (confirmProofValid(msg, room, hs.transcriptHash)) {
+            Pairing.run(c, hs, Role.SENDER, events, trust, AutoPair(false, room.expiresAtMillis), remoteAlreadyAccepted = true)
+        } else {
+            // The receiver confirmed without proving the room (it already trusted us): compare codes here.
+            Pairing.run(c, hs, Role.SENDER, events, trust, remoteAlreadyAccepted = true)
+        }
+    }
+
+    private fun confirmProofValid(msg: Message, room: Room, th: ByteArray): Boolean {
+        val raw = msg.fields["room"] as? Map<*, *> ?: return false
+        if (raw["id"] != room.id) return false
+        val proof = (raw["proof"] as? String)?.let { runCatching { java.util.Base64.getDecoder().decode(it) }.getOrNull() } ?: return false
+        return java.security.MessageDigest.isEqual(room.confirmProof(th), proof)
+    }
+
+    /**
+     * Connects to the device that showed a room code, pairs through the room, and closes.
+     * The device must hold the key named by the code's fingerprint. Returns the paired peer.
+     */
+    fun pairOnly(
+        identity: IdentityKey,
+        local: LocalInfo,
+        trust: TrustStore,
+        invite: RoomInvite,
+        events: PairingEvents,
+    ): PeerInfo {
+        require(trust.supportsTrustExpiry) { "room pairing needs a trust store that can expire trust" }
+        var lastError: ProtocolException = ProtocolException(ErrorCode.UNREACHABLE, "no address")
+        for (host in invite.hosts) {
+            val socket = Socket()
+            try {
+                socket.connect(InetSocketAddress(host, invite.port), Protocol.CONNECT_TIMEOUT_MS)
+            } catch (e: IOException) {
+                runCatching { socket.close() }
+                lastError = ProtocolException(ErrorCode.UNREACHABLE, "connect failed")
+                continue
+            }
+            val c = Connection(socket)
+            try {
+                val hs = Handshake.client(c, identity, local, trust)
+                if (hs.peer.fingerprint != invite.fingerprint) throw ProtocolException(ErrorCode.AUTH_FAILED, "not the device in the room code")
+                pair(c, hs, invite.room, events, trust)
                 return hs.peer
             } finally {
                 c.close()

@@ -6,27 +6,54 @@ import CrossDropCore
 
 struct MainWindow: View {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var zoom = UIZoom.shared
+
+    var body: some View {
+        // The window size sets the UI scale: larger windows (maximised, full screen)
+        // draw everything larger instead of leaving the UI small in a sea of mint.
+        GeometryReader { proxy in
+            let scale = CDScale.forWindow(proxy.size, zoom: zoom.level)
+            WindowContent(scale: scale)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .environment(\.cdScale, scale)
+        }
+        .ignoresSafeArea()
+        .frame(minWidth: CDLayout.minWindow.width, minHeight: CDLayout.minWindow.height)
+        .onAppear { model.beginDiscovery() }
+        .onDisappear { model.endDiscovery() }
+    }
+}
+
+/// Sidebar and page, with prompts, toasts and the celebration above them.
+private struct WindowContent: View {
+    let scale: CDScale
+    @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        let ui = scale
+        let prompting = !model.prompts.isEmpty
         MintCanvas(mood: model.activeTransfers.isEmpty ? .idle : .active) {
             ZStack {
-                HStack(alignment: .top, spacing: CDSpacing.l) {
+                HStack(alignment: .top, spacing: 0) {
                     Sidebar()
-                        .frame(width: 224)
+                        .frame(width: ui(CDLayout.sidebarWidth))
+                        .padding(.top, CDLayout.chromeTop)
+                        .padding(.leading, ui(CDLayout.windowInset))
+                        .padding(.bottom, ui(CDLayout.windowInset))
                     page
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
-                .padding(14)
+                // Soften the window behind a prompt (a real blur of the content, so no
+                // grey material tint).
+                .blur(radius: prompting ? ui(8) : 0)
+                .animation(CDMotion.layout(reduceMotion), value: prompting)
 
                 PromptLayer()
             }
             .overlay(alignment: .bottom) { NoticeToast() }
             .overlay(alignment: .bottomTrailing) { CelebrationCard() }
         }
-        .frame(minWidth: 900, minHeight: 620)
-        .onAppear { model.beginDiscovery() }
-        .onDisappear { model.endDiscovery() }
     }
 
     @ViewBuilder
@@ -45,22 +72,65 @@ struct MainWindow: View {
     }
 }
 
-/// Scrollable page body with consistent margins.
+/// Scrollable page body: a centred column (wider on large windows), with insets wide
+/// enough that card shadows and focus rings are never clipped. The scroll view runs to
+/// the window's top, right and bottom edges, and content fades out softly at the top
+/// and bottom instead of being cut at a hard line.
 struct PageScroll<Content: View>: View {
-    @ViewBuilder let content: Content
+    /// The page has a two-column layout for wide windows.
+    let allowsWide: Bool
+    let content: Content
+    @Environment(\.cdScale) private var ui
+
+    init(allowsWide: Bool = false, @ViewBuilder content: () -> Content) {
+        self.allowsWide = allowsWide
+        self.content = content()
+    }
 
     var body: some View {
+        let column = allowsWide && ui.wide ? CDLayout.wideColumn : CDLayout.column
         ScrollView {
-            VStack(alignment: .leading, spacing: CDSpacing.l) {
+            VStack(alignment: .leading, spacing: ui(CDLayout.cardGap)) {
                 content
             }
-            .padding(.top, 30)
-            .padding(.bottom, CDSpacing.xl)
-            .padding(.trailing, 4)
-            .frame(maxWidth: 860, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: ui(column), alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, CDLayout.chromeTop + ui(CDLayout.titleTop))
+            .padding(.bottom, ui(CDLayout.pageBottom))
+            .padding(.horizontal, ui(CDLayout.pageInset))
         }
         .scrollIndicators(.never)
+        .mask(
+            VStack(spacing: 0) {
+                LinearGradient(colors: [Color.black.opacity(0), Color.black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: CDLayout.chromeTop)
+                Rectangle().fill(Color.black)
+                LinearGradient(colors: [Color.black, Color.black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: ui(CDLayout.pageBottom) * 0.6)
+            }
+        )
+        .ignoresSafeArea()
+    }
+}
+
+/// Two equal columns for wide windows.
+struct TwoColumns<Leading: View, Trailing: View>: View {
+    let leading: Leading
+    let trailing: Trailing
+    @Environment(\.cdScale) private var ui
+
+    init(@ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
+        self.leading = leading()
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: ui(CDLayout.cardGap)) {
+            VStack(alignment: .leading, spacing: ui(CDLayout.cardGap)) { leading }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            VStack(alignment: .leading, spacing: ui(CDLayout.cardGap)) { trailing }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
     }
 }
 
@@ -70,41 +140,45 @@ struct Sidebar: View {
     @EnvironmentObject private var model: AppModel
     @Namespace private var selection
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: ui(4)) {
+            HStack(spacing: ui(10)) {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
                     .interpolation(.high)
-                    .frame(width: 30, height: 30)
+                    .frame(width: ui(30), height: ui(30))
                     .accessibilityHidden(true)
                 Text("CrossDrop")
-                    .font(CDFont.poppins(18, .bold))
+                    .font(ui.font(18, .bold))
                     .foregroundColor(CDPalette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .legibleText()
-            .padding(.top, 38) // clears the window buttons, which sit on the glass
-            .padding(.horizontal, 8)
-            .padding(.bottom, 18)
+            .padding(.top, ui(CDLayout.brandTop))
+            .padding(.horizontal, ui(SidebarRowStyle.inset))
+            .padding(.bottom, ui(16))
 
             ForEach(AppTab.allCases) { tab in
                 Button {
                     withAnimation(CDMotion.layout(reduceMotion)) { model.selectedTab = tab }
                 } label: {
-                    HStack(spacing: 12) {
+                    HStack(spacing: ui(12)) {
                         Image(systemName: tab.symbol)
-                            .font(.system(size: 15, weight: .medium))
-                            .frame(width: 20)
+                            .font(ui.system(15, .medium))
+                            .frame(width: ui(20))
                         Text(tab.title)
-                            .font(CDFont.poppins(13.5, model.selectedTab == tab ? .semibold : .medium))
+                            .font(ui.font(13.5, model.selectedTab == tab ? .semibold : .medium))
+                            .lineLimit(1)
                         Spacer(minLength: 0)
                         if let count = badge(for: tab), count > 0 {
                             Text("\(count)")
-                                .font(.system(size: 10, weight: .bold).monospacedDigit())
+                                .font(ui.system(10, .bold).monospacedDigit())
                                 .foregroundColor(.white)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
+                                .padding(.horizontal, ui(6))
+                                .padding(.vertical, ui(2))
                                 .background(Capsule().fill(CDPalette.mint))
                         }
                     }
@@ -115,10 +189,10 @@ struct Sidebar: View {
                 .accessibilityAddTraits(model.selectedTab == tab ? .isSelected : [])
             }
 
-            Spacer(minLength: CDSpacing.l)
+            Spacer(minLength: ui.l)
             ReceivingPill()
         }
-        .padding(10)
+        .padding(ui(CDLayout.sidebarPadding))
         .frame(maxHeight: .infinity, alignment: .top)
         .glassPanel(cornerRadius: CDRadius.panel)
     }
@@ -135,6 +209,10 @@ struct Sidebar: View {
 /// 42pt row: ink pill when selected (slides between rows), white on hover,
 /// green ring on keyboard focus.
 struct SidebarRowStyle: ButtonStyle {
+    /// Leading inset of row content; the brand row and the receiving pill use it too,
+    /// so icons, the logo and the status dot share one edge.
+    static let inset: CGFloat = 12
+
     let selected: Bool
     let namespace: Namespace.ID
     let reduceMotion: Bool
@@ -148,14 +226,15 @@ struct SidebarRowStyle: ButtonStyle {
         let selected: Bool
         let namespace: Namespace.ID
         let reduceMotion: Bool
+        @Environment(\.cdScale) private var ui
         @State private var hovering = false
 
         var body: some View {
-            let shape = RoundedRectangle(cornerRadius: CDRadius.row, style: .continuous)
+            let shape = RoundedRectangle(cornerRadius: ui(CDRadius.row), style: .continuous)
             configuration.label
                 .foregroundColor(selected ? .white : Color(hex: 0x2B3D33))
-                .padding(.horizontal, 12)
-                .frame(height: 42)
+                .padding(.horizontal, ui(SidebarRowStyle.inset))
+                .frame(height: ui(42))
                 .background(
                     ZStack {
                         if selected {
@@ -182,28 +261,32 @@ struct SidebarRowStyle: ButtonStyle {
 /// Bottom of the sidebar: whether this Mac can receive right now, with its switch.
 struct ReceivingPill: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: ui(10)) {
+            HStack(alignment: .top, spacing: ui(8)) {
                 StatusDot(color: ReceiverText.color(model.receiverStatus))
-                VStack(alignment: .leading, spacing: 1) {
+                    .padding(.top, ui(5))
+                VStack(alignment: .leading, spacing: ui(1)) {
                     Text(title)
-                        .font(CDFont.poppins(12.5, .semibold))
+                        .font(ui.font(12.5, .semibold))
                         .foregroundColor(CDPalette.textPrimary)
+                        .lineLimit(1)
                     Text(ReceiverText.detail(model))
-                        .font(CDFont.poppins(11))
+                        .font(ui.font(11))
                         .foregroundColor(CDPalette.textSecondary)
                         .lineLimit(2)
                         .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .accessibilityElement(children: .combine)
-            ReceiveModePicker()
-                .controlSize(.small)
+            ReceiveModePicker(compact: true)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, ui(SidebarRowStyle.inset))
+        .padding(.vertical, ui(12))
+        .frame(maxWidth: .infinity, alignment: .leading)
         .glassPanel(cornerRadius: 16, style: .inset)
     }
 
@@ -241,29 +324,49 @@ enum ReceiverText {
 
 // MARK: - Prompts
 
-/// Pairing and incoming-offer prompts: a glass card over a frosted, softly dimmed window.
+/// Pairing and incoming-offer prompts: a glass card over the softly blurred window.
+/// Shrinks to fit short windows, and scrolls as a last resort.
 struct PromptLayer: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
+        let fitted = ui.fitting(height: 700)
         ZStack {
             if let prompt = model.prompts.first {
                 ZStack {
-                    Rectangle().fill(.ultraThinMaterial)
-                    Color(hex: 0x0F1D16, opacity: 0.12)
+                    Color.white.opacity(reduceTransparency ? 0.8 : 0.35)
+                    CDPalette.ink.opacity(0.08)
                 }
+                .contentShape(Rectangle())
                 .ignoresSafeArea()
                 .transition(.opacity)
                 .accessibilityHidden(true)
 
-                PromptCard(prompt: prompt)
-                    .frame(width: 460)
-                    .id(prompt.id)
-                    .transition(reduceMotion ? .opacity : .scale(scale: 0.94).combined(with: .opacity))
+                ViewThatFits(in: .vertical) {
+                    card(prompt, scale: fitted)
+                    ScrollView {
+                        card(prompt, scale: fitted)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .scrollIndicators(.automatic)
+                }
+                .id(prompt.id)
+                .transition(reduceMotion ? .opacity : .scale(scale: 0.94).combined(with: .opacity))
             }
         }
         .animation(CDMotion.layout(reduceMotion), value: model.prompts.first?.id)
+    }
+
+    private func card(_ prompt: PromptItem, scale: CDScale) -> some View {
+        PromptCard(prompt: prompt)
+            .frame(width: scale(460))
+            .padding(.horizontal, scale(24))
+            .padding(.top, CDLayout.chromeTop)
+            .padding(.bottom, scale(24))
+            .environment(\.cdScale, scale)
     }
 }
 
@@ -273,25 +376,27 @@ struct PromptLayer: View {
 struct CelebrationCard: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
         ZStack {
             if let celebration = model.celebration {
-                HStack(spacing: CDSpacing.m) {
+                HStack(spacing: ui.m) {
                     ZStack {
                         ConfettiBurst()
                         DripView(pose: .done, size: 96, motion: .pop)
                     }
-                    .frame(width: 96, height: 96)
-                    VStack(alignment: .leading, spacing: 4) {
+                    .frame(width: ui(96), height: ui(96))
+                    VStack(alignment: .leading, spacing: ui(4)) {
                         Text("All done!")
-                            .font(CDFont.poppins(20, .bold))
+                            .font(ui.font(20, .bold))
                             .foregroundColor(CDPalette.textPrimary)
                         Text(celebration.message)
-                            .font(CDFont.callout)
+                            .font(ui.callout)
                             .foregroundColor(CDPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    Spacer(minLength: 0)
                     Button {
                         model.celebration = nil
                     } label: {
@@ -300,12 +405,12 @@ struct CelebrationCard: View {
                     .buttonStyle(IconButtonStyle(size: 24))
                     .accessibilityLabel("Dismiss")
                 }
-                .padding(.leading, 10)
-                .padding(.trailing, 14)
-                .padding(.vertical, 10)
-                .frame(width: 380)
-                .glassPanel(cornerRadius: 24)
-                .padding(22)
+                .padding(.leading, ui(10))
+                .padding(.trailing, ui(14))
+                .padding(.vertical, ui(10))
+                .frame(width: ui(380))
+                .glassPanel(cornerRadius: 24, style: .floating)
+                .padding(ui(CDLayout.pageInset))
                 .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
                 .id(celebration.id)
                 .accessibilityElement(children: .combine)
@@ -321,15 +426,17 @@ struct CelebrationCard: View {
 struct NoticeToast: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
         ZStack {
             if let notice = model.notice {
-                HStack(spacing: CDSpacing.m) {
+                HStack(spacing: ui.m) {
                     Image(systemName: "info.circle.fill")
+                        .font(ui.system(14))
                         .foregroundColor(CDPalette.mint)
                     Text(notice.text)
-                        .font(CDFont.callout)
+                        .font(ui.callout)
                         .foregroundColor(CDPalette.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     Button {
@@ -340,12 +447,13 @@ struct NoticeToast: View {
                     .buttonStyle(IconButtonStyle(size: 24))
                     .accessibilityLabel("Dismiss")
                 }
-                .padding(.leading, 16)
-                .padding(.trailing, 10)
-                .padding(.vertical, 10)
-                .frame(maxWidth: 520)
-                .glassPanel(cornerRadius: 18)
-                .padding(.bottom, 22)
+                .padding(.leading, ui(16))
+                .padding(.trailing, ui(10))
+                .padding(.vertical, ui(10))
+                .frame(maxWidth: ui(520))
+                .glassPanel(cornerRadius: 18, style: .floating)
+                .padding(.horizontal, ui(CDLayout.pageInset))
+                .padding(.bottom, ui(CDLayout.pageInset))
                 .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                 .id(notice.id)
             }

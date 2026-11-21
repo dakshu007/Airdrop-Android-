@@ -13,6 +13,14 @@ enum AppSettings {
         static let soundOnDone = "soundOnDone"
         static let receiveMode = "receiveMode"
         static let heicToJpeg = "heicToJpeg"
+        static let uiZoom = "uiZoom"
+    }
+
+    /// View › Zoom level of the main window (1 = actual size), on top of the automatic
+    /// scale for large windows.
+    static var uiZoom: Double {
+        get { defaults.object(forKey: Key.uiZoom) as? Double ?? 1 }
+        set { defaults.set(newValue, forKey: Key.uiZoom) }
     }
 
     /// "off", "mine" (paired devices only, invisible to others) or "everyone".

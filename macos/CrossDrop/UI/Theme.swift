@@ -4,11 +4,19 @@ import UniformTypeIdentifiers
 
 // Mint Air (design/canvas): a light, airy mint backdrop, white glass with a
 // bright rim, dark ink type, a black pill for the main action, and Drip.
+//
+// Every size in this file is a design value at 100 %. Views read the current
+// `CDScale` from the environment (`@Environment(\.cdScale) private var ui`) and
+// multiply through it: `ui(16)` for a length, `ui.body` / `ui.font(13)` for text,
+// `ui.system(15)` for SF Symbols. Components (glass, buttons, Drip, avatars, icons,
+// chips) scale their own sizes, so callers pass design values, never `ui(...)`.
 
 // MARK: - Tokens
 
 enum CDRadius {
     static let row: CGFloat = 12
+    static let field: CGFloat = 12
+    static let tile: CGFloat = 16
     static let card: CGFloat = 22
     static let panel: CGFloat = 28
 }
@@ -20,6 +28,177 @@ enum CDSpacing {
     static let l: CGFloat = 16
     static let xl: CGFloat = 24
     static let xxl: CGFloat = 32
+}
+
+/// The page rhythm shared by every screen of the main window.
+enum CDLayout {
+    /// Room above the sidebar for the window's close/minimise/zoom buttons. System
+    /// chrome doesn't scale, so this one stays in plain points.
+    static let chromeTop: CGFloat = 32
+    /// Sidebar distance from the window's left and bottom edges.
+    static let windowInset: CGFloat = 14
+    static let sidebarWidth: CGFloat = 224
+    /// Space between the sidebar and the page column, and between the column and the
+    /// window's right edge. Wide enough that card shadows are never cut off.
+    static let pageInset: CGFloat = 24
+    /// Sidebar padding and the brand row's top padding, used to line the page title up
+    /// with the brand row.
+    static let sidebarPadding: CGFloat = 10
+    static let brandTop: CGFloat = 12
+    /// Page title top, below `chromeTop`, so its line centres on the brand row.
+    static let titleTop: CGFloat = 15
+    /// Widest page column, single and two-column.
+    static let column: CGFloat = 880
+    static let wideColumn: CGFloat = 1240
+    /// Page width (at 100 %) from which pages may show two columns.
+    static let wideThreshold: CGFloat = 1100
+    /// Space between cards, and the extra space under a page title.
+    static let cardGap: CGFloat = 16
+    static let titleGap: CGFloat = 8
+    /// Inner padding of every card, and the vertical padding of a row inside one.
+    static let cardPadding: CGFloat = 20
+    static let rowPadding: CGFloat = 12
+    static let pageBottom: CGFloat = 36
+
+    static let defaultWindow = CGSize(width: 1040, height: 700)
+    static let minWindow = CGSize(width: 900, height: 620)
+    /// The smallest layout (at 100 %) every page is designed for; the scale never
+    /// grows so far that the window holds less than this.
+    static let minLogical = CGSize(width: 860, height: 540)
+
+    /// Width a page column gets in a window of `logicalWidth` (at 100 %).
+    static func pageWidth(forLogicalWidth logicalWidth: CGFloat) -> CGFloat {
+        logicalWidth - windowInset - sidebarWidth - pageInset * 2
+    }
+}
+
+// MARK: - Scale
+
+/// How large the main window's UI is drawn. 1.0 at the default 1040×700 window; it
+/// grows smoothly to 1.35 as the window gets large (maximised, full screen), times the
+/// user's View › Zoom level. Fonts are re-laid out at the new size, so text stays crisp.
+struct CDScale: Equatable {
+    var factor: CGFloat = 1
+    /// Width available to a page column, at 100 % (unscaled points).
+    var pageWidth: CGFloat = CDLayout.pageWidth(forLogicalWidth: CDLayout.defaultWindow.width)
+    /// The window's content size in points.
+    var window: CGSize = CDLayout.defaultWindow
+
+    /// Scales a design length, rounded to half a point so edges stay sharp.
+    func callAsFunction(_ value: CGFloat) -> CGFloat {
+        (value * factor * 2).rounded() / 2
+    }
+
+    /// Room for two columns on pages that offer them.
+    var wide: Bool { pageWidth >= CDLayout.wideThreshold }
+
+    // Spacing
+    var xs: CGFloat { self(CDSpacing.xs) }
+    var s: CGFloat { self(CDSpacing.s) }
+    var m: CGFloat { self(CDSpacing.m) }
+    var l: CGFloat { self(CDSpacing.l) }
+    var xl: CGFloat { self(CDSpacing.xl) }
+    var xxl: CGFloat { self(CDSpacing.xxl) }
+
+    // Type
+    func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        CDFont.poppins(size * factor, weight)
+    }
+
+    func system(_ size: CGFloat, _ weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
+        Font.system(size: size * factor, weight: weight, design: design)
+    }
+
+    var display: Font { font(34, .bold) }
+    var largeTitle: Font { font(30, .bold) }
+    var title: Font { font(20, .bold) }
+    var headline: Font { font(14, .semibold) }
+    var body: Font { font(13) }
+    var callout: Font { font(12) }
+    var caption: Font { font(11) }
+
+    /// Native controls (segmented pickers) only come in a few sizes.
+    var controlSize: ControlSize { factor >= 1.2 ? .large : .regular }
+
+    /// The same scale, shrunk if needed so something `height` points tall (at 100 %)
+    /// fits the window: used by prompts and sheets.
+    func fitting(height: CGFloat) -> CDScale {
+        var copy = self
+        let limit = window.height / max(height, 1)
+        copy.factor = (max(min(factor, limit), 0.75) * 100).rounded() / 100
+        return copy
+    }
+
+    /// The scale for a window of `size` at the user's zoom level.
+    static func forWindow(_ size: CGSize, zoom: CGFloat) -> CDScale {
+        guard size.width > 1, size.height > 1 else { return CDScale() }
+        // 0 at the default window, 1 at about 1900×1150 and beyond.
+        let growWidth = min(max((size.width - CDLayout.defaultWindow.width) / 860, 0), 1)
+        let growHeight = min(max((size.height - CDLayout.defaultWindow.height) / 450, 0), 1)
+        let automatic = 1 + 0.35 * min(growWidth, growHeight)
+        // Never so large that the window holds less than the smallest designed layout.
+        let roomWidth = size.width / CDLayout.minLogical.width
+        let roomHeight = size.height / CDLayout.minLogical.height
+        var factor = min(automatic * zoom, roomWidth, roomHeight)
+        factor = max(factor, 0.8)
+        factor = (factor * 100).rounded() / 100
+        return CDScale(factor: factor,
+                       pageWidth: CDLayout.pageWidth(forLogicalWidth: size.width / factor),
+                       window: size)
+    }
+}
+
+private struct CDScaleKey: EnvironmentKey {
+    static let defaultValue = CDScale()
+}
+
+extension EnvironmentValues {
+    /// The UI scale. 1.0 unless the main window sets it (the menu bar panel stays at 1.0).
+    var cdScale: CDScale {
+        get { self[CDScaleKey.self] }
+        set { self[CDScaleKey.self] = newValue }
+    }
+}
+
+/// View › Zoom In / Zoom Out / Actual Size for the main window, remembered between launches.
+final class UIZoom: ObservableObject {
+    static let shared = UIZoom()
+    static let minimum: CGFloat = 0.85
+    static let maximum: CGFloat = 1.6
+    private static let steps: [CGFloat] = [0.85, 0.92, 1.0, 1.1, 1.2, 1.32, 1.45, 1.6]
+
+    @Published private(set) var level: CGFloat
+
+    private init() {
+        level = UIZoom.clamp(CGFloat(AppSettings.uiZoom))
+    }
+
+    var canZoomIn: Bool { level < UIZoom.maximum - 0.001 }
+    var canZoomOut: Bool { level > UIZoom.minimum + 0.001 }
+
+    func zoomIn() {
+        set(UIZoom.steps.first(where: { $0 > level + 0.001 }) ?? UIZoom.maximum)
+    }
+
+    func zoomOut() {
+        set(UIZoom.steps.last(where: { $0 < level - 0.001 }) ?? UIZoom.minimum)
+    }
+
+    func reset() {
+        set(1)
+    }
+
+    private func set(_ value: CGFloat) {
+        let clamped = UIZoom.clamp(value)
+        guard abs(clamped - level) > 0.0001 else { return }
+        level = clamped
+        AppSettings.uiZoom = Double(clamped)
+    }
+
+    private static func clamp(_ value: CGFloat) -> CGFloat {
+        guard value.isFinite else { return 1 }
+        return min(max(value, minimum), maximum)
+    }
 }
 
 extension Color {
@@ -45,7 +224,12 @@ enum CDPalette {
     static let amber = Color(hex: 0xB07A00)
     static let coral = Color(hex: 0xC9573B)
     static let focus = Color(hex: 0x149A5B)
-    static let hairline = Color(hex: 0xE1EEE5)
+    /// Row separators inside a card.
+    static let hairline = Color(hex: 0xD6E7DC)
+    /// Edge of fields, chips and small controls sitting on a card.
+    static let controlBorder = Color(hex: 0xD5E7DB)
+    /// Soft green of the glass shadows.
+    static let shadow = Color(hex: 0x185434)
 
     static let textPrimary = ink
     static let textSecondary = Color(hex: 0x4B5B52)
@@ -53,6 +237,7 @@ enum CDPalette {
 }
 
 /// Poppins (bundled, OFL; registered at launch). Falls back to the system font if missing.
+/// Sizes here are at 100 %; views use `CDScale.font(_:_:)` so text follows the UI scale.
 enum CDFont {
     static func poppins(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         let face: String
@@ -174,42 +359,92 @@ struct MintCanvas<Content: View>: View {
 // MARK: - Glass
 
 enum GlassStyle {
-    /// Cards and panels: white glass with a soft green shadow.
+    /// Cards and panels on the page: crisp white glass with a short, soft shadow.
     case regular
+    /// Prompts, toasts and the celebration card, lifted above the page.
+    case floating
     /// Smaller elements on top of a panel (rows, fields, chips).
     case inset
     /// The selected item: solid ink.
     case selected
 }
 
+/// A drop shadow drawn only outside `shape`, so it never shows through the translucent
+/// glass above it (that show-through is what turned card bottoms grey).
+private struct OuterShadow: View {
+    let shape: RoundedRectangle
+    let color: Color
+    let radius: CGFloat
+    let y: CGFloat
+
+    var body: some View {
+        let reach = radius * 2 + abs(y) + 4
+        shape
+            .fill(Color.white)
+            .shadow(color: color, radius: radius, x: 0, y: y)
+            .mask(
+                ZStack {
+                    Rectangle().padding(-reach)
+                    shape.blendMode(.destinationOut)
+                }
+                .compositingGroup()
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// White glass: a translucent white fill (no system material, which reads grey over
+/// the mint), a 1 px bright inner rim, and a soft outer shadow on page cards.
+/// `radius` is a design value; the panel scales it.
 struct GlassPanel: ViewModifier {
     let radius: CGFloat
     let style: GlassStyle
+    @Environment(\.cdScale) private var ui
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: ui(radius), style: .continuous)
         return content
-            .background(background(shape))
+            .background(
+                ZStack {
+                    switch style {
+                    case .regular:
+                        OuterShadow(shape: shape, color: CDPalette.shadow.opacity(0.07), radius: ui(10), y: ui(4))
+                    case .floating:
+                        OuterShadow(shape: shape, color: CDPalette.shadow.opacity(0.16), radius: ui(26), y: ui(12))
+                    case .inset, .selected:
+                        EmptyView()
+                    }
+                    fill(shape)
+                }
+            )
             .overlay(
-                shape.strokeBorder(Color.white.opacity(style == .selected ? 0.1 : 0.95), lineWidth: 1)
+                shape.strokeBorder(borderColor, lineWidth: 1)
                     .allowsHitTesting(false)
             )
-            .shadow(color: Color(hex: 0x185434, opacity: style == .regular ? 0.10 : 0), radius: 20, x: 0, y: 12)
+    }
+
+    private var borderColor: Color {
+        switch style {
+        case .regular, .floating: return Color.white.opacity(0.95)
+        case .inset: return CDPalette.controlBorder
+        case .selected: return Color.white.opacity(0.1)
+        }
     }
 
     @ViewBuilder
-    private func background(_ shape: RoundedRectangle) -> some View {
+    private func fill(_ shape: RoundedRectangle) -> some View {
         switch style {
-        case .regular:
+        case .regular, .floating:
             ZStack {
-                shape.fill(.ultraThinMaterial)
-                shape.fill(Color.white.opacity(0.62))
-                shape.fill(LinearGradient(stops: [.init(color: Color.white.opacity(0.5), location: 0),
-                                                  .init(color: Color.white.opacity(0), location: 0.45)],
+                shape.fill(Color.white.opacity(style == .floating ? 0.9 : 0.74))
+                // A soft specular sheen across the top.
+                shape.fill(LinearGradient(stops: [.init(color: Color.white.opacity(0.45), location: 0),
+                                                  .init(color: Color.white.opacity(0), location: 0.5)],
                                           startPoint: .top, endPoint: .bottom))
             }
         case .inset:
-            shape.fill(Color.white.opacity(0.82))
+            shape.fill(Color.white.opacity(0.88))
         case .selected:
             shape.fill(CDPalette.ink)
         }
@@ -217,7 +452,7 @@ struct GlassPanel: ViewModifier {
 }
 
 extension View {
-    /// White glass over the mint backdrop.
+    /// White glass over the mint backdrop. `cornerRadius` is a design value (scaled).
     func glassPanel(cornerRadius: CGFloat = CDRadius.card, style: GlassStyle = .regular) -> some View {
         self.modifier(GlassPanel(radius: cornerRadius, style: style))
     }
@@ -241,6 +476,21 @@ struct FocusRing<S: InsettableShape>: ViewModifier {
     }
 }
 
+/// Border for a glass text field: mint while it's being typed in.
+struct FieldFocusBorder: ViewModifier {
+    let focused: Bool
+    let radius: CGFloat
+    @Environment(\.cdScale) private var ui
+
+    func body(content: Content) -> some View {
+        content.overlay(
+            RoundedRectangle(cornerRadius: ui(radius), style: .continuous)
+                .strokeBorder(CDPalette.focus.opacity(focused ? 0.9 : 0), lineWidth: 2)
+                .allowsHitTesting(false)
+        )
+    }
+}
+
 // MARK: - Buttons
 
 /// Black pill with white text: the one obvious action on a screen.
@@ -256,15 +506,20 @@ struct PrimaryButtonStyle: ButtonStyle {
         let large: Bool
         @Environment(\.isEnabled) private var isEnabled
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @Environment(\.cdScale) private var ui
 
         var body: some View {
             configuration.label
-                .font(CDFont.poppins(large ? 14 : 13, .semibold))
+                .font(ui.font(large ? 14 : 13, .semibold))
                 .foregroundColor(.white)
-                .padding(.horizontal, large ? 22 : 18)
-                .frame(minHeight: large ? 44 : 34)
-                .background(Capsule().fill(CDPalette.ink.opacity(configuration.isPressed ? 0.82 : 1)))
-                .shadow(color: CDPalette.ink.opacity(isEnabled ? 0.22 : 0), radius: 12, x: 0, y: 8)
+                .lineLimit(1)
+                .padding(.horizontal, ui(large ? 22 : 18))
+                .frame(minHeight: ui(large ? 44 : 34))
+                .background(
+                    Capsule()
+                        .fill(CDPalette.ink.opacity(configuration.isPressed ? 0.82 : 1))
+                        .shadow(color: CDPalette.ink.opacity(isEnabled ? 0.18 : 0), radius: ui(8), x: 0, y: ui(4))
+                )
                 .opacity(isEnabled ? 1 : 0.4)
                 .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
                 .animation(reduceMotion ? nil : CDMotion.quick, value: configuration.isPressed)
@@ -286,16 +541,18 @@ struct GlassButtonStyle: ButtonStyle {
         let configuration: ButtonStyleConfiguration
         let destructive: Bool
         @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.cdScale) private var ui
         @State private var hovering = false
 
         var body: some View {
             configuration.label
-                .font(CDFont.poppins(12, .semibold))
+                .font(ui.font(12, .semibold))
                 .foregroundColor(destructive ? CDPalette.coral : CDPalette.ink)
-                .padding(.horizontal, 14)
-                .frame(minHeight: 30)
+                .lineLimit(1)
+                .padding(.horizontal, ui(14))
+                .frame(minHeight: ui(30))
                 .background(Capsule().fill(Color.white.opacity(configuration.isPressed ? 0.6 : (hovering ? 1 : 0.85))))
-                .overlay(Capsule().strokeBorder(Color(hex: 0xD5E7DB), lineWidth: 1))
+                .overlay(Capsule().strokeBorder(CDPalette.controlBorder, lineWidth: 1))
                 .opacity(isEnabled ? 1 : 0.4)
                 .contentShape(Capsule())
                 .onHover { hovering = $0 }
@@ -304,7 +561,7 @@ struct GlassButtonStyle: ButtonStyle {
     }
 }
 
-/// Round white glass icon button.
+/// Round white glass icon button. `size` is a design value (scaled).
 struct IconButtonStyle: ButtonStyle {
     var size: CGFloat = 28
 
@@ -315,18 +572,50 @@ struct IconButtonStyle: ButtonStyle {
     private struct IconBody: View {
         let configuration: ButtonStyleConfiguration
         let size: CGFloat
+        @Environment(\.cdScale) private var ui
         @State private var hovering = false
 
         var body: some View {
             configuration.label
-                .font(.system(size: size * 0.42, weight: .semibold))
+                .font(ui.system(size * 0.42, .semibold))
                 .foregroundColor(CDPalette.ink)
-                .frame(width: size, height: size)
+                .frame(width: ui(size), height: ui(size))
                 .background(Circle().fill(Color.white.opacity(configuration.isPressed ? 0.6 : (hovering ? 1 : 0.8))))
-                .overlay(Circle().strokeBorder(Color(hex: 0xD5E7DB), lineWidth: 1))
+                .overlay(Circle().strokeBorder(CDPalette.controlBorder, lineWidth: 1))
                 .contentShape(Circle())
                 .onHover { hovering = $0 }
                 .modifier(FocusRing(shape: Circle().inset(by: -3)))
+        }
+    }
+}
+
+/// White tile that lifts slightly on hover.
+struct TileButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        TileBody(configuration: configuration)
+    }
+
+    private struct TileBody: View {
+        let configuration: ButtonStyleConfiguration
+        @State private var hovering = false
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @Environment(\.cdScale) private var ui
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: ui(CDRadius.tile), style: .continuous)
+            configuration.label
+                .background(
+                    shape
+                        .fill(Color.white.opacity(configuration.isPressed ? 0.7 : (hovering ? 1 : 0.86)))
+                        .shadow(color: CDPalette.shadow.opacity(hovering ? 0.10 : 0.04),
+                                radius: ui(hovering ? 8 : 4), x: 0, y: ui(hovering ? 3 : 1))
+                )
+                .overlay(shape.strokeBorder(hovering ? CDPalette.controlBorder : Color.white.opacity(0.95), lineWidth: 1))
+                .contentShape(shape)
+                .scaleEffect(hovering && !reduceMotion ? 1.015 : 1)
+                .animation(reduceMotion ? nil : CDMotion.quick, value: hovering)
+                .onHover { hovering = $0 }
+                .modifier(FocusRing(shape: shape))
         }
     }
 }
@@ -340,19 +629,20 @@ struct GlassToggleStyle: ToggleStyle {
     private struct GlassToggleBody: View {
         let configuration: ToggleStyleConfiguration
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @Environment(\.cdScale) private var ui
 
         var body: some View {
-            HStack(spacing: CDSpacing.m) {
+            HStack(spacing: ui.l) {
                 configuration.label
-                Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 ZStack(alignment: configuration.isOn ? .trailing : .leading) {
                     Capsule().fill(configuration.isOn ? CDPalette.mint : Color(hex: 0xD5E2D9))
                     Circle()
                         .fill(Color.white)
                         .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
-                        .padding(2)
+                        .padding(ui(2))
                 }
-                .frame(width: 40, height: 24)
+                .frame(width: ui(40), height: ui(24))
                 .animation(reduceMotion ? nil : CDMotion.quick, value: configuration.isOn)
                 .onTapGesture { configuration.isOn.toggle() }
             }
@@ -422,7 +712,7 @@ enum DripPose: String {
 }
 
 /// Drip with gentle life: bobbing, the occasional blink, a pop-in for celebrations.
-/// All motion stops with Reduce Motion.
+/// All motion stops with Reduce Motion. `size` is a design value (scaled).
 struct DripView: View {
     enum Motion { case bob, float, pop, still }
 
@@ -431,6 +721,7 @@ struct DripView: View {
     var motion: Motion = .bob
     var label: String? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cdScale) private var ui
     @State private var up = false
     @State private var shown = false
 
@@ -444,8 +735,8 @@ struct DripView: View {
                 }
             }
         }
-        .frame(width: size, height: size)
-        .offset(y: motion == .bob ? (up ? -6 : 0) : motion == .float ? (up ? -10 : 0) : 0)
+        .frame(width: ui(size), height: ui(size))
+        .offset(y: motion == .bob ? (up ? -ui(6) : 0) : motion == .float ? (up ? -ui(10) : 0) : 0)
         .rotationEffect(.degrees(motion == .float ? (up ? 2 : -2) : 0))
         .scaleEffect(motion == .pop ? (shown ? 1 : 0.6) : 1)
         .opacity(motion == .pop ? (shown ? 1 : 0) : 1)
@@ -481,6 +772,7 @@ struct DripView: View {
 /// One-shot confetti burst from the centre. Hidden with Reduce Motion.
 struct ConfettiBurst: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cdScale) private var ui
     @State private var fired = false
 
     private let pieces: [(CGFloat, CGFloat, Color)] = [
@@ -495,11 +787,11 @@ struct ConfettiBurst: View {
             if !reduceMotion {
                 ForEach(0..<pieces.count, id: \.self) { index in
                     let piece = pieces[index]
-                    RoundedRectangle(cornerRadius: 3)
+                    RoundedRectangle(cornerRadius: ui(3))
                         .fill(piece.2)
-                        .frame(width: 9, height: 13)
+                        .frame(width: ui(9), height: ui(13))
                         .rotationEffect(.degrees(fired ? 260 : 0))
-                        .offset(x: fired ? piece.0 : 0, y: fired ? piece.1 : 0)
+                        .offset(x: fired ? ui(piece.0) : 0, y: fired ? ui(piece.1) : 0)
                         .opacity(fired ? 0 : 1)
                         .animation(.timingCurve(0.15, 0.7, 0.3, 1, duration: 1.6).delay(Double(index) * 0.025), value: fired)
                 }
@@ -515,20 +807,22 @@ struct ConfettiBurst: View {
 struct CodeTiles: View {
     let code: String
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cdScale) private var ui
     @State private var shown = false
 
     var body: some View {
         let digits = Array(code)
-        HStack(spacing: 6) {
+        let tile = RoundedRectangle(cornerRadius: ui(14), style: .continuous)
+        HStack(spacing: ui(6)) {
             ForEach(0..<digits.count, id: \.self) { index in
-                if index == 3 { Spacer().frame(width: 8) }
+                if index == 3 { Spacer().frame(width: ui(8)) }
                 Text(String(digits[index]))
-                    .font(CDFont.poppins(30, .bold).monospacedDigit())
+                    .font(ui.font(30, .bold).monospacedDigit())
                     .foregroundColor(CDPalette.ink)
-                    .frame(width: 44, height: 58)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.95)))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color(hex: 0xD5E7DB), lineWidth: 1))
-                    .shadow(color: Color(hex: 0x185434, opacity: 0.1), radius: 7, x: 0, y: 4)
+                    .frame(width: ui(44), height: ui(58))
+                    .background(tile.fill(Color.white.opacity(0.95)))
+                    .overlay(tile.strokeBorder(CDPalette.controlBorder, lineWidth: 1))
+                    .shadow(color: CDPalette.shadow.opacity(0.08), radius: ui(5), x: 0, y: ui(3))
                     .rotation3DEffect(.degrees(shown ? 0 : -90), axis: (x: 1, y: 0, z: 0), perspective: 0.5)
                     .opacity(shown ? 1 : 0)
                     .animation(reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.7).delay(Double(index) * 0.09),
@@ -543,32 +837,35 @@ struct CodeTiles: View {
 
 // MARK: - Components
 
-/// Platform glyph on a soft mint tile.
+/// Platform glyph on a soft mint tile. `size` is a design value (scaled).
 struct DeviceAvatar: View {
     let platform: String?
     var size: CGFloat = 44
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
         Image(systemName: platform == "macos" ? "laptopcomputer" : "iphone.gen3")
-            .font(.system(size: size * 0.42, weight: .regular))
+            .font(ui.system(size * 0.42))
             .foregroundColor(CDPalette.sky)
-            .frame(width: size, height: size)
-            .background(RoundedRectangle(cornerRadius: size * 0.3, style: .continuous).fill(CDPalette.mintSoft))
+            .frame(width: ui(size), height: ui(size))
+            .background(RoundedRectangle(cornerRadius: ui(size * 0.3), style: .continuous).fill(CDPalette.mintSoft))
             .accessibilityHidden(true)
     }
 }
 
 /// Finder icon for a file (or for its type when the file isn't on this Mac).
+/// `size` is a design value (scaled).
 struct FileIcon: View {
     let url: URL?
     let name: String
     var size: CGFloat = 32
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
         Image(nsImage: icon)
             .resizable()
             .interpolation(.high)
-            .frame(width: size, height: size)
+            .frame(width: ui(size), height: ui(size))
             .accessibilityHidden(true)
     }
 
@@ -587,6 +884,7 @@ struct CapsuleProgress: View {
     let value: Double
     var tint: Color = CDPalette.mint
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
         GeometryReader { proxy in
@@ -594,10 +892,10 @@ struct CapsuleProgress: View {
                 Capsule().fill(CDPalette.mint.opacity(0.14))
                 Capsule()
                     .fill(LinearGradient(colors: [CDPalette.mintLight, tint], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: max(8, proxy.size.width * CGFloat(min(max(value, 0), 1))))
+                    .frame(width: max(ui(8), proxy.size.width * CGFloat(min(max(value, 0), 1))))
             }
         }
-        .frame(height: 8)
+        .frame(height: ui(8))
         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: value)
         .accessibilityElement()
         .accessibilityLabel("Progress")
@@ -608,16 +906,21 @@ struct CapsuleProgress: View {
 struct SectionHeader: View {
     let title: String
     var detail: String? = nil
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: CDSpacing.s) {
+        HStack(alignment: .firstTextBaseline, spacing: ui.s) {
             Text(title)
-                .font(CDFont.poppins(15, .semibold))
+                .font(ui.font(15, .semibold))
                 .foregroundColor(CDPalette.textPrimary)
+                .lineLimit(1)
+                .layoutPriority(1)
             if let detail = detail {
                 Text(detail)
-                    .font(CDFont.caption)
+                    .font(ui.caption)
                     .foregroundColor(CDPalette.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             Spacer(minLength: 0)
         }
@@ -625,28 +928,36 @@ struct SectionHeader: View {
     }
 }
 
-/// Large page title used at the top of each section.
+/// Large page title used at the top of each section. Carries the extra gap above the
+/// first card, so every page starts the same way.
 struct PageTitle: View {
     let title: String
     let subtitle: String
     var trailing: AnyView? = nil
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: CDSpacing.l) {
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .bottom, spacing: ui.l) {
+            VStack(alignment: .leading, spacing: ui(4)) {
                 Text(title)
-                    .font(CDFont.largeTitle)
+                    .font(ui.largeTitle)
                     .foregroundColor(CDPalette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(subtitle)
-                    .font(CDFont.poppins(14))
+                    .font(ui.font(14))
                     .foregroundColor(CDPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
-            if let trailing = trailing { trailing }
+            if let trailing = trailing {
+                trailing
+                    .padding(.bottom, ui(2))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, ui(CDLayout.titleGap))
     }
 }
 
@@ -654,16 +965,21 @@ struct PageTitle: View {
 struct StatusPill: View {
     let text: String
     var dot: Color = CDPalette.mint
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
-        HStack(spacing: 8) {
-            Circle().fill(dot).frame(width: 7, height: 7)
-            Text(text).font(CDFont.poppins(12.5, .medium)).foregroundColor(Color(hex: 0x2B3D33))
+        HStack(spacing: ui(8)) {
+            Circle().fill(dot).frame(width: ui(7), height: ui(7))
+            Text(text)
+                .font(ui.font(12.5, .medium))
+                .foregroundColor(Color(hex: 0x2B3D33))
+                .lineLimit(1)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(Capsule().fill(Color.white.opacity(0.78)))
+        .padding(.horizontal, ui(14))
+        .padding(.vertical, ui(7))
+        .background(Capsule().fill(Color.white.opacity(0.8)))
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.95), lineWidth: 1))
+        .fixedSize()
         .accessibilityElement(children: .combine)
     }
 }
@@ -675,31 +991,34 @@ struct StateMessage: View {
     let message: String
     var tint: Color = CDPalette.sky
     var pose: DripPose? = nil
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
-        VStack(spacing: CDSpacing.s) {
+        VStack(spacing: ui.s) {
             if let pose = pose {
                 DripView(pose: pose, size: 150, motion: .bob)
             } else {
                 Image(systemName: symbol)
-                    .font(.system(size: 22, weight: .regular))
+                    .font(ui.system(22))
                     .foregroundColor(tint)
-                    .frame(width: 52, height: 52)
-                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(CDPalette.mintSoft))
+                    .frame(width: ui(52), height: ui(52))
+                    .background(RoundedRectangle(cornerRadius: ui(16), style: .continuous).fill(CDPalette.mintSoft))
                     .accessibilityHidden(true)
             }
             Text(title)
-                .font(CDFont.poppins(16, .semibold))
+                .font(ui.font(16, .semibold))
                 .foregroundColor(CDPalette.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             Text(message)
-                .font(CDFont.callout)
+                .font(ui.callout)
                 .foregroundColor(CDPalette.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 420)
+                .frame(maxWidth: ui(420))
         }
-        .padding(.vertical, CDSpacing.xl)
-        .padding(.horizontal, CDSpacing.l)
+        .padding(.vertical, ui.xl)
+        .padding(.horizontal, ui(CDLayout.cardPadding))
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
     }
@@ -707,10 +1026,11 @@ struct StateMessage: View {
 
 struct StatusDot: View {
     let color: Color
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
         Circle().fill(color)
-            .frame(width: 8, height: 8)
+            .frame(width: ui(8), height: ui(8))
             .accessibilityHidden(true)
     }
 }
@@ -720,19 +1040,23 @@ struct Chip: View {
     let text: String
     var symbol: String? = nil
     var tint: Color = CDPalette.textSecondary
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: ui(4)) {
             if let symbol = symbol {
-                Image(systemName: symbol).font(.system(size: 9, weight: .bold))
+                Image(systemName: symbol).font(ui.system(9, .bold))
             }
-            Text(text).font(CDFont.poppins(11, .medium).monospacedDigit())
+            Text(text)
+                .font(ui.font(11, .medium).monospacedDigit())
+                .lineLimit(1)
         }
         .foregroundColor(tint)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
+        .padding(.horizontal, ui(9))
+        .padding(.vertical, ui(4))
         .background(Capsule().fill(Color.white.opacity(0.85)))
-        .overlay(Capsule().strokeBorder(Color(hex: 0xD5E7DB), lineWidth: 1))
+        .overlay(Capsule().strokeBorder(CDPalette.controlBorder, lineWidth: 1))
+        .fixedSize()
     }
 }
 
@@ -767,9 +1091,73 @@ struct RadarView: View {
     }
 }
 
-/// Hairline divider for rows inside a glass panel.
+/// One-pixel separator between rows inside a glass panel.
 struct GlassDivider: View {
+    @Environment(\.displayScale) private var displayScale
+
     var body: some View {
-        Rectangle().fill(CDPalette.hairline).frame(height: 1)
+        Rectangle()
+            .fill(CDPalette.hairline)
+            .frame(height: 1 / max(displayScale, 1))
+            .frame(maxWidth: .infinity)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Glass segmented control for a handful of choices.
+struct SegmentChoice: Identifiable {
+    let id: Int
+    let label: String
+}
+
+struct SegmentedGlass: View {
+    let choices: [SegmentChoice]
+    @Binding var selection: Int
+    var accessibilityName: String = ""
+    @Namespace private var namespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cdScale) private var ui
+
+    var body: some View {
+        HStack(spacing: ui(2)) {
+            ForEach(choices) { choice in
+                let selected = selection == choice.id
+                Button {
+                    withAnimation(CDMotion.layout(reduceMotion)) { selection = choice.id }
+                } label: {
+                    Text(choice.label)
+                        .font(ui.font(11, selected ? .semibold : .medium))
+                        .foregroundColor(selected ? .white : CDPalette.textPrimary)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, ui(10))
+                        .frame(height: ui(26))
+                        .background {
+                            if selected {
+                                Capsule().fill(CDPalette.ink)
+                                    .matchedGeometryEffect(id: "segment", in: namespace)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(SegmentButtonStyle())
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(ui(3))
+        .background(Capsule().fill(Color.white.opacity(0.85)))
+        .overlay(Capsule().strokeBorder(CDPalette.controlBorder, lineWidth: 1))
+        .fixedSize()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilityName)
+    }
+}
+
+/// Plain segment with a focus ring for keyboard navigation.
+private struct SegmentButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.75 : 1)
+            .modifier(FocusRing(shape: Capsule()))
     }
 }

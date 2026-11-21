@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 /// Receiver side of one connection (server role).
 final class IncomingSession {
@@ -12,6 +13,8 @@ final class IncomingSession {
     private let isReceiving: () -> Bool
     private let privateMode: () -> Bool
     private let pairingTokens: PairingTokens
+    private let rooms: Rooms
+    private let captureRequests: CaptureRequests
 
     private let lock = NSLock()
     private var publisher: SnapshotPublisher?
@@ -20,7 +23,8 @@ final class IncomingSession {
 
     init(transport: NWTransport, identity: DeviceIdentity, local: LocalInfo, trust: TrustProvider,
          delegate: CrossDropDelegate?, destination: @escaping () -> URL, isReceiving: @escaping () -> Bool,
-         privateMode: @escaping () -> Bool = { false }, pairingTokens: PairingTokens = PairingTokens()) {
+         privateMode: @escaping () -> Bool = { false }, pairingTokens: PairingTokens = PairingTokens(),
+         rooms: Rooms = Rooms(), captureRequests: CaptureRequests = CaptureRequests()) {
         self.channel = SecureChannel(transport: transport)
         self.identity = identity
         self.local = local
@@ -30,6 +34,8 @@ final class IncomingSession {
         self.isReceiving = isReceiving
         self.privateMode = privateMode
         self.pairingTokens = pairingTokens
+        self.rooms = rooms
+        self.captureRequests = captureRequests
     }
 
     var transferId: String? {
@@ -88,7 +94,7 @@ final class IncomingSession {
                 return
             }
             let result = try await Handshake.runServer(channel: channel, identity: identity, local: local, trust: trust)
-            try await serve(peer: result.peer, sas: result.sas)
+            try await serve(peer: result.peer, sas: result.sas, transcriptHash: result.transcriptHash)
         } catch let error as CrossDropError {
             let effective = wasCancelled ? CrossDropError.local(ErrorCode.cancelled) : error
             currentPublisher?.finish(effective.isCancellation ? .cancelled : .failed, error: effective)
@@ -101,7 +107,7 @@ final class IncomingSession {
         channel.transport.close()
     }
 
-    private func serve(peer: PeerInfo, sas: String) async throws {
+    private func serve(peer: PeerInfo, sas: String, transcriptHash: Data) async throws {
         var paired = false
         while true {
             let message: WireMessage
@@ -115,12 +121,44 @@ final class IncomingSession {
             switch message.type {
             case "pair.request":
                 let mine = message.string("token").flatMap { $0.utf8.count <= 64 ? pairingTokens.redeem($0) : nil }
-                if untrusted && mine == nil && privateMode() { try await refuseStranger() }
+                let room = try verifyRoom(message, transcriptHash: transcriptHash)
+                if untrusted && mine == nil && room == nil && privateMode() { try await refuseStranger() }
+                // Precedence (same as the Kotlin core): QR token, then permanent trust we already
+                // hold, then a valid room proof, then temporary trust we already hold (§9.9).
+                let knownExpiry = untrusted ? nil : trust.trustExpiry(for: peer.deviceId)
+                var autoConfirm = !untrusted
+                var autoMine = mine
+                var autoExpiresAt: Date? = nil
+                if mine == nil {
+                    if !untrusted && knownExpiry == nil {
+                        // Permanent trust: keep it as it is.
+                    } else if let room = room {
+                        autoConfirm = false
+                        autoMine = false
+                        autoExpiresAt = max(room.expiryDate, knownExpiry ?? room.expiryDate)
+                    } else if let knownExpiry = knownExpiry {
+                        autoExpiresAt = knownExpiry
+                    }
+                }
+                var extra: [String: Any] = [:]
+                if let room = room {
+                    extra["room"] = ["id": room.id,
+                                     "proof": room.confirmProof(transcriptHash: transcriptHash).base64EncodedString()]
+                }
                 try await PairingFlow.run(channel: channel, peer: peer, sas: sas, role: .receiver,
-                                          autoConfirm: !untrusted, autoMine: mine, trust: trust, delegate: delegate,
+                                          autoConfirm: autoConfirm, autoMine: autoMine, autoExpiresAt: autoExpiresAt,
+                                          confirmExtra: extra, trust: trust, delegate: delegate,
                                           onDecision: { [weak self] d in self?.setPending(d) })
                 setPending(nil)
                 paired = true
+            case "capture.request":
+                if untrusted {
+                    if privateMode() { try await refuseStranger() }
+                    // No pairing in this flow (§9.7): the requester must already be paired.
+                    try await refuse(ErrorCode.pairingRequired, "capture from unpaired device")
+                }
+                try await handleCapture(message, peer: peer)
+                return
             case "transfer.offer":
                 if untrusted {
                     if privateMode() { try await refuseStranger() }
@@ -142,11 +180,72 @@ final class IncomingSession {
     /// "My devices only" (§9.5): tells an unpaired device this Mac is not receiving.
     /// Reads briefly before closing so the refusal is not lost to a TCP reset.
     private func refuseStranger() async throws -> Never {
-        try? await channel.sendControl(WireMessage.error(ErrorCode.notReceiving, "paired devices only"))
+        try await refuse(ErrorCode.notReceiving, "paired devices only")
+    }
+
+    /// Sends `error{code}`, reads briefly so it is not lost to a TCP reset, then ends the session.
+    private func refuse(_ code: String, _ reason: String) async throws -> Never {
+        try? await channel.sendControl(WireMessage.error(code, reason))
         for _ in 0..<3 {
             guard (try? await channel.receiveRecord(timeout: 1)) != nil else { break }
         }
-        throw CrossDropError.local(ErrorCode.notReceiving, "paired devices only")
+        throw CrossDropError.local(code, reason)
+    }
+
+    /// The room a `pair.request` proves membership of (§9.9), or nil. A malformed `room`
+    /// field is `bad_message`; an unknown room or a wrong proof just means no room, so
+    /// pairing falls back to comparing codes. Only providers that can expire trust take part.
+    private func verifyRoom(_ message: WireMessage, transcriptHash: Data) throws -> Room? {
+        guard let raw = message.fields["room"], !(raw is NSNull) else { return nil }
+        let bad = CrossDropError.violation(ErrorCode.badMessage, "invalid room")
+        guard let entry = raw as? [String: Any],
+              let id = entry["id"] as? String, Rooms.isValidId(id),
+              let proofText = entry["proof"] as? String, proofText.utf8.count <= 128,
+              let proof = Data(base64Encoded: proofText), proof.count == 32 else { throw bad }
+        guard trust.supportsTrustExpiry else { return nil }
+        return rooms.verify(id: id, proof: proof, transcriptHash: transcriptHash)
+    }
+
+    /// §9.7: validate, ask the app, answer `capture.ack`, done.
+    private func handleCapture(_ message: WireMessage, peer: PeerInfo) async throws {
+        let bad = { (why: String) in CrossDropError.violation(ErrorCode.badMessage, why) }
+        let requestId = try message.requireString("requestId", maxBytes: 64)
+        guard TransferOffer.isValidTransferId(requestId) else { throw bad("invalid requestId") }
+        guard let kindText = message.string("kind"), let kind = CaptureKind(rawValue: kindText) else {
+            throw bad("unknown capture kind")
+        }
+        var replyPort: UInt16? = nil
+        if let rawPort = message.fields["port"], !(rawPort is NSNull) {
+            guard let value = JSONValue.int(rawPort), (1...65535).contains(value) else { throw bad("invalid port") }
+            replyPort = UInt16(value)
+        }
+        guard let host = Self.remoteHost(of: channel.transport) else {
+            throw CrossDropError.violation(ErrorCode.internalError, "no peer address")
+        }
+        let request = CaptureRequest(requestId: requestId, kind: kind, peer: peer, replyHost: host, replyPort: replyPort)
+        let accepted = delegate?.crossDropCaptureRequested(request) ?? false
+        try await channel.sendControl(WireMessage.make("capture.ack", ["requestId": requestId, "accepted": accepted]))
+        // Give the requester a moment to read the answer and close first.
+        _ = try? await channel.transport.receive(exactly: 1, timeout: 2)
+    }
+
+    /// The numeric address this connection came from (IPv4 when it is an IPv4-mapped address).
+    static func remoteHost(of transport: NWTransport) -> String? {
+        let endpoint = transport.connection.currentPath?.remoteEndpoint ?? transport.connection.endpoint
+        guard case let .hostPort(host, _) = endpoint else { return nil }
+        switch host {
+        case .ipv4(let address):
+            // An interface suffix ("%en0") means nothing for IPv4.
+            return "\(address)".split(separator: "%").first.map { String($0) }
+        case .ipv6(let address):
+            let text = "\(address)"
+            if text.lowercased().hasPrefix("::ffff:"), text.contains(".") { return String(text.dropFirst(7)) }
+            return text
+        case .name(let name, _):
+            return name
+        @unknown default:
+            return nil
+        }
     }
 
     private func setPending(_ decision: Decision?) {
@@ -157,6 +256,8 @@ final class IncomingSession {
 
     private func handleOffer(_ message: WireMessage, peer: PeerInfo) async throws {
         let offer = try TransferOffer.parse(message)
+        // Only an answer to a capture request we sent to this very device counts (§9.7).
+        let requestId = offer.requestId.flatMap { captureRequests.redeem($0, deviceId: peer.deviceId) ? $0 : nil }
         let directory = destination()
         let snapshot = TransferSnapshot(
             id: offer.transferId, direction: .incoming, peerId: peer.deviceId, peerName: peer.name,
@@ -164,6 +265,8 @@ final class IncomingSession {
             files: offer.files.map { TransferFileState(name: $0.displayPath, size: $0.size, mime: $0.mime, sha256: $0.sha256) })
         var initial = snapshot
         initial.kind = offer.kind
+        initial.requestId = requestId
+        initial.expiresAfter = offer.expiresAfter
         let publisher = SnapshotPublisher(initial, delegate: delegate)
         lock.lock()
         self.publisher = publisher
@@ -203,7 +306,7 @@ final class IncomingSession {
 
         var nextMessage: Task<WireMessage, Error>? = nil
         let outcome: Decision.Outcome
-        if trust.isAutoAccept(deviceId: peer.deviceId) {
+        if requestId != nil || trust.isAutoAccept(deviceId: peer.deviceId) {
             outcome = .accepted
         } else {
             let decision = Decision(id: offer.transferId)
@@ -221,7 +324,7 @@ final class IncomingSession {
             let prompt = OfferPrompt(transferId: offer.transferId, peer: peer, files: offer.files,
                                      totalBytes: offer.totalBytes,
                                      expiresAt: Date().addingTimeInterval(ProtocolConstants.humanTimeout),
-                                     kind: offer.kind)
+                                     kind: offer.kind, expiresAfter: offer.expiresAfter)
             delegate?.crossDropOfferReceived(prompt, decision: decision)
             outcome = await decision.wait(timeout: ProtocolConstants.humanTimeout)
             setPending(nil)

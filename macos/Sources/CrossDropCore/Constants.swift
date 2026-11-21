@@ -27,6 +27,19 @@ public enum ProtocolConstants {
     public static let pairingTokenTTL: TimeInterval = 5 * 60
     /// How long an interrupted file is kept for resuming (§9.3).
     public static let resumeKeep: TimeInterval = 24 * 60 * 60
+    /// How long a capture request stays answerable (§9.7).
+    public static let captureRequestTTL: TimeInterval = 10 * 60
+    /// Range of `expiresAfter` on an offer, in seconds (§9.8): 1 minute to 30 days.
+    public static let minExpiresAfter: Int64 = 60
+    public static let maxExpiresAfter: Int64 = 2_592_000
+    /// Longest lifetime of a Drip Room, in seconds (§9.9).
+    public static let roomMaxTTL: Int64 = 4 * 60 * 60
+    /// Clock difference tolerated when checking a room's expiry from another device (§9.9).
+    public static let roomClockSkew: Int64 = 5 * 60
+    /// How long a room joiner waits for the receiver's room-proved `pair.confirm` before showing codes (§9.9).
+    public static let roomAnswerWait: TimeInterval = 5
+    /// Room hints advertised in one TXT record (§9.9).
+    public static let maxRoomHints = 4
 
     public static let recordKindControl: UInt8 = 0x01
     public static let recordKindData: UInt8 = 0x02
@@ -39,4 +52,6 @@ enum Labels {
     static let sas = Data("CrossDrop/1 sas".utf8)
     static let clientProof = Data("CrossDrop/1 client-proof".utf8)
     static let serverProof = Data("CrossDrop/1 server-proof".utf8)
+    static let room = Data("CrossDrop/1 room|".utf8)
+    static let roomConfirm = Data("CrossDrop/1 room-confirm|".utf8)
 }

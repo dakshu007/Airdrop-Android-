@@ -6,13 +6,19 @@ enum PairingFlow {
     /// and trust was stored; throws otherwise.
     ///
     /// - autoConfirm: this side already trusts the peer, so no local prompt is shown.
-    /// - autoMine: a QR code stood in for the prompt (§9.4); its "This is my device" choice.
+    /// - autoMine: a QR code or room proof stood in for the prompt (§9.4, §9.9); its "This is my device" choice.
+    /// - autoExpiresAt: the stored trust ends then (Drip Room, §9.9); nil = permanent.
+    /// - confirmExtra: fields added to an automatic `pair.confirm` (the room proof, §9.9).
+    /// - pendingAnswer: a read of the peer's next message that is already running (§9.9).
     static func run(channel: SecureChannel,
                     peer: PeerInfo,
                     sas: String,
                     role: PairingPrompt.Role,
                     autoConfirm: Bool,
                     autoMine: Bool? = nil,
+                    autoExpiresAt: Date? = nil,
+                    confirmExtra: [String: Any] = [:],
+                    pendingAnswer: Task<WireMessage, Error>? = nil,
                     trust: TrustProvider,
                     delegate: CrossDropDelegate?,
                     onDecision: ((Decision) -> Void)? = nil) async throws {
@@ -23,7 +29,12 @@ enum PairingFlow {
         // decline or disconnect on the other side dismisses our prompt.
         let peerAnswer = Task<WireMessage, Error> {
             do {
-                let message = try await channel.receiveControl(timeout: ProtocolConstants.humanTimeout + 15)
+                let message: WireMessage
+                if let pending = pendingAnswer {
+                    message = try await pending.value
+                } else {
+                    message = try await channel.receiveControl(timeout: ProtocolConstants.humanTimeout + 15)
+                }
                 if !(message.type == "pair.confirm" && message.bool("accepted") == true) {
                     decision.cancel()
                 }
@@ -54,8 +65,12 @@ enum PairingFlow {
 
         switch outcome {
         case .accepted:
+            var confirm: [String: Any] = ["accepted": true]
+            if !prompted {
+                for (key, value) in confirmExtra { confirm[key] = value }
+            }
             do {
-                try await channel.sendControl(WireMessage.make("pair.confirm", ["accepted": true]))
+                try await channel.sendControl(WireMessage.make("pair.confirm", confirm))
             } catch {
                 // The peer may have declined and closed before our confirmation went out;
                 // report its answer rather than the broken connection.
@@ -92,7 +107,9 @@ enum PairingFlow {
             // Cancelled locally without an answer from the user.
             throw CrossDropError.local(ErrorCode.cancelled)
         }
-        if autoConfirm && autoMine == nil {
+        if let expiresAt = autoExpiresAt, !prompted {
+            trust.storeTrust(for: peer, autoAccept: false, expiresAt: expiresAt)
+        } else if autoConfirm && autoMine == nil {
             trust.storeTrust(for: peer)
         } else {
             trust.storeTrust(for: peer, autoAccept: decision.mine)

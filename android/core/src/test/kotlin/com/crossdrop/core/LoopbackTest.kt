@@ -36,6 +36,9 @@ class LoopbackTest {
     @Volatile var onStarted: ((IncomingTransfer) -> Unit)? = null
     @Volatile var privateMode = false
     @Volatile var receivedText: Pair<OfferKind, String>? = null
+    @Volatile var acceptCapture = true
+    private val captures = Collections.synchronizedList(ArrayList<CaptureRequest>())
+    private val finished = Collections.synchronizedList(ArrayList<IncomingTransfer>())
 
     private val events = object : ReceiverEvents {
         override fun isReceiving() = receiving
@@ -47,7 +50,14 @@ class LoopbackTest {
         override fun onOffer(offer: IncomingOffer) = offer.respond(acceptOffer)
         override fun onTransferStarted(transfer: IncomingTransfer) { onStarted?.invoke(transfer) }
         override fun onFileSaved(transfer: IncomingTransfer, fileIndex: Int, saved: SavedFile) { this@LoopbackTest.saved.add(saved) }
-        override fun onCompleted(transfer: IncomingTransfer) = completed.countDown()
+        override fun onCompleted(transfer: IncomingTransfer) {
+            finished.add(transfer)
+            completed.countDown()
+        }
+        override fun onCaptureRequest(peer: PeerInfo, request: CaptureRequest): Boolean {
+            captures.add(request)
+            return acceptCapture
+        }
         override fun onTextReceived(transfer: IncomingTransfer, kind: OfferKind, text: String) { receivedText = kind to text }
         override fun onFailed(transfer: IncomingTransfer?, peer: PeerInfo?, error: ProtocolException) {
             failures.add(error.code)
@@ -85,10 +95,82 @@ class LoopbackTest {
         toPort: Int = port,
         kind: OfferKind = OfferKind.FILES,
         qr: QrPairing? = null,
+        expiresAfter: Long? = null,
+        room: Room? = null,
+        identity: IdentityKey = clientIdentity,
+        trust: TrustStore = clientTrust,
     ) = OutgoingTransfer(
-        clientIdentity, LocalInfo("Test Phone", Platform.ANDROID, "test"), clientTrust, "127.0.0.1", toPort,
-        serverIdentity.deviceId, files, ev, kind = kind, qr = qr,
+        identity, LocalInfo("Test Phone", Platform.ANDROID, "test"), trust, "127.0.0.1", toPort,
+        serverIdentity.deviceId, files, ev, kind = kind, qr = qr, expiresAfter = expiresAfter, room = room,
     )
+
+    private val clientLocal = LocalInfo("Test Phone", Platform.ANDROID, "test")
+
+    /** Events that fail the test if any prompt is shown. */
+    private val noPrompt = object : SenderEvents {
+        override fun onStage(stage: SendStage) {}
+        override fun onPairingPrompt(prompt: PairingPrompt) = error("must not prompt")
+        override fun onPairingClosed(prompt: PairingPrompt, paired: Boolean) {}
+    }
+
+    /** A second server: the requester's own receiver, which gets the answer to a capture request (§9.7). */
+    private inner class Requester {
+        val dir: java.nio.file.Path = Files.createTempDirectory("crossdrop-requester")
+        @Volatile var acceptOffer = false
+        val prompts = Collections.synchronizedList(ArrayList<IncomingOffer>())
+        val done = Collections.synchronizedList(ArrayList<IncomingTransfer>())
+        val server = CrossDropServer(
+            clientIdentity, { LocalInfo("Test Mac", Platform.MACOS, "test") }, clientTrust, DirectoryStorage(dir),
+            object : ReceiverEvents {
+                override fun isReceiving() = true
+                override fun onPairingPrompt(prompt: PairingPrompt) = prompt.respond(true)
+                override fun onPairingClosed(prompt: PairingPrompt, paired: Boolean) {}
+                override fun onOffer(offer: IncomingOffer) {
+                    prompts.add(offer)
+                    offer.respond(acceptOffer)
+                }
+                override fun onCompleted(transfer: IncomingTransfer) { done.add(transfer) }
+            },
+        )
+        val port = server.start(0, InetAddress.getLoopbackAddress())
+
+        /** Sends [data] to the requester as [fromIdentity] (trusting via [fromTrust]), answering [requestId]. */
+        fun answer(requestId: String?, fromIdentity: IdentityKey = serverIdentity, fromTrust: TrustStore = serverTrust, expected: String? = clientIdentity.deviceId) =
+            OutgoingTransfer(
+                fromIdentity, LocalInfo("Phone", Platform.ANDROID, "test"), fromTrust, "127.0.0.1", port, expected,
+                listOf(bytesFile("photo.jpg", byteArrayOf(1, 2, 3))), ClientEvents(), requestId = requestId,
+            ).run()
+
+        fun close() {
+            server.stop()
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    private fun requestCapture(r: Requester, kind: CaptureKind = CaptureKind.PHOTO) =
+        CaptureClient.request(clientIdentity, clientLocal, clientTrust, "127.0.0.1", port, serverIdentity.deviceId, kind, r.port, r.server.captureRequests)
+
+    private fun pairClientWithServer() {
+        transfer(listOf(bytesFile("warmup.txt", byteArrayOf(0)))).run()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+    }
+
+    /** Sends a hand-made `transfer.offer` with [extra] fields as the (paired) client; returns the server's answer. */
+    private fun rawOffer(extra: Map<String, Any?>): Message {
+        val c = Connection(Socket("127.0.0.1", port))
+        try {
+            Handshake.client(c, clientIdentity, clientLocal, clientTrust)
+            val offer = Message.build(
+                "transfer.offer", "transferId" to "raw-offer-1",
+                "files" to listOf(mapOf("fileId" to 0, "name" to "a.txt", "size" to 1, "sha256" to "0".repeat(64))),
+            ) as MutableMap<String, Any?>
+            offer.putAll(extra)
+            c.sendControl(offer)
+            return (c.next(5_000) as Connection.Incoming.Control).message
+        } finally {
+            c.close()
+        }
+    }
 
     private val serverFingerprint get() = Hashing.sha256(serverIdentity.publicKey).toHex()
 
@@ -344,5 +426,195 @@ class LoopbackTest {
         assertEquals("video.bin", saved.last().displayName)
         assertTrue(count.forwarded < 2_500_000, "only the rest is sent again (sent ${count.forwarded})")
         assertTrue(dir.toFile().listFiles()!!.none { it.name.startsWith(".crossdrop-") })
+    }
+
+    // ---- §9.7 capture requests ----
+
+    @Test
+    fun captureRequestIsAcceptedAndItsAnswerArrivesWithoutPromptOnce() {
+        pairClientWithServer()
+        val r = Requester()
+        try {
+            val id = requestCapture(r)
+            assertEquals(1, captures.size)
+            val req = captures[0]
+            assertEquals(id, req.requestId)
+            assertEquals(CaptureKind.PHOTO, req.kind)
+            assertEquals(clientIdentity.deviceId, req.peer.deviceId)
+            assertEquals("127.0.0.1", req.replyHost)
+            assertEquals(r.port, req.replyPort)
+            assertEquals(1, r.server.captureRequests.outstanding)
+
+            // The phone answers: accepted without a prompt (the requester would decline one).
+            r.answer(id)
+            assertTrue(r.prompts.isEmpty())
+            assertEquals(id, r.done.single().requestId)
+
+            // Single use: the same requestId again is just a normal offer, which is prompted (and declined).
+            val e = assertFailsWith<TransferRejectedException> { r.answer(id) }
+            assertEquals("declined", e.reason)
+            assertEquals(1, r.prompts.size)
+            assertEquals(null, r.prompts[0].requestId)
+        } finally {
+            r.close()
+        }
+    }
+
+    @Test
+    fun captureAnswerOnlyCountsFromTheDeviceItWasSentTo() {
+        pairClientWithServer()
+        val r = Requester()
+        val otherIdentity = SoftwareIdentity.generate().first
+        val otherTrust = InMemoryTrustStore()
+        try {
+            // Another device the requester has also paired with.
+            r.acceptOffer = true
+            r.answer(null, otherIdentity, otherTrust)
+            r.acceptOffer = false
+            r.prompts.clear()
+
+            val id = requestCapture(r)
+            val e = assertFailsWith<TransferRejectedException> { r.answer(id, otherIdentity, otherTrust) }
+            assertEquals("declined", e.reason)
+            assertEquals(1, r.prompts.size, "a foreign requestId is ignored, so the offer is prompted")
+            // The real device still gets its answer through.
+            r.answer(id)
+            assertEquals(1, r.prompts.size)
+            assertEquals(id, r.done.last().requestId)
+        } finally {
+            r.close()
+        }
+    }
+
+    @Test
+    fun declinedCaptureRequestIsForgotten() {
+        pairClientWithServer()
+        acceptCapture = false
+        val r = Requester()
+        try {
+            val e = assertFailsWith<TransferRejectedException> { requestCapture(r, CaptureKind.PICK) }
+            assertEquals("declined", e.reason)
+            assertEquals(CaptureKind.PICK, captures.single().kind)
+            assertEquals(0, r.server.captureRequests.outstanding)
+        } finally {
+            r.close()
+        }
+    }
+
+    @Test
+    fun captureRequestFromUnpairedDeviceIsRefused() {
+        val r = Requester()
+        try {
+            // Not paired on either side: the client refuses to ask.
+            val local = assertFailsWith<ProtocolException> { requestCapture(r) }
+            assertEquals(ErrorCode.PAIRING_REQUIRED, local.code)
+            // The client trusts the server, but the server doesn't know the client: pairing_required, no pairing.
+            clientTrust.trust(PeerInfo(serverIdentity.deviceId, "Test Mac", Platform.MACOS, "t", serverIdentity.publicKey))
+            val e = assertFailsWith<ProtocolException> { requestCapture(r) }
+            assertEquals(ErrorCode.PAIRING_REQUIRED, e.code)
+            assertTrue(e.remote)
+            assertTrue(captures.isEmpty())
+            assertEquals(null, serverTrust.get(clientIdentity.deviceId))
+            assertEquals(null, serverSas)
+            assertEquals(0, r.server.captureRequests.outstanding)
+        } finally {
+            r.close()
+        }
+    }
+
+    @Test
+    fun captureRequestsExpireAndAreBoundToOneDevice() {
+        val reqs = CaptureRequests()
+        reqs.expect("request-0001", "a".repeat(32))
+        assertEquals(false, reqs.redeem("request-0001", "b".repeat(32)))
+        assertEquals(true, reqs.redeem("request-0001", "a".repeat(32)))
+        assertEquals(false, reqs.redeem("request-0001", "a".repeat(32)))
+        reqs.expect("request-0002", "a".repeat(32), ttlMs = -1)
+        assertEquals(false, reqs.redeem("request-0002", "a".repeat(32)))
+        assertFailsWith<IllegalArgumentException> { reqs.expect("bad id!", "a".repeat(32)) }
+    }
+
+    // ---- §9.8 expiring drops ----
+
+    @Test
+    fun expiresAfterRoundTripsAndOutOfRangeIsRejected() {
+        transfer(listOf(bytesFile("a.txt", byteArrayOf(1))), expiresAfter = 3600).run()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+        assertEquals(3600L, finished.single().expiresAfter)
+
+        assertFailsWith<IllegalArgumentException> { transfer(listOf(bytesFile("a.txt", byteArrayOf(1))), expiresAfter = 59) }
+        assertFailsWith<IllegalArgumentException> { transfer(listOf(bytesFile("a.txt", byteArrayOf(1))), expiresAfter = 2_592_001) }
+        for (bad in listOf<Any>(59L, 2_592_001L, "3600", 60.5)) {
+            val answer = rawOffer(mapOf("expiresAfter" to bad))
+            assertEquals("error", answer.type)
+            assertEquals("bad_message", answer.fields["code"])
+        }
+        val badRequestId = rawOffer(mapOf("requestId" to "no spaces allowed"))
+        assertEquals("bad_message", badRequestId.fields["code"])
+    }
+
+    // ---- §9.9 Drip Rooms ----
+
+    @Test
+    fun roomPairsWithoutPromptsAndTrustIsTemporary() {
+        val room = server.rooms.create("Standup", 3600)
+        acceptPairing = false // the server must not ask its user
+        val ev = object : SenderEvents by noPrompt {
+            val stages = Collections.synchronizedList(ArrayList<SendStage>())
+            override fun onStage(stage: SendStage) { stages.add(stage) }
+        }
+        transfer(listOf(bytesFile("slides.pdf", byteArrayOf(1, 2))), ev, room = room).run()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+        assertTrue(SendStage.PAIRING in ev.stages)
+        assertEquals(null, serverSas)
+        val onServer = assertNotNull(serverTrust.get(clientIdentity.deviceId))
+        val onClient = assertNotNull(clientTrust.get(serverIdentity.deviceId))
+        assertEquals(room.expiresAtMillis, onServer.expiresAt)
+        assertEquals(room.expiresAtMillis, onClient.expiresAt)
+        assertEquals(false, onServer.autoAccept)
+
+        // When the room ends, so does the trust: the next transfer has to pair again, with codes.
+        serverTrust.trust(PeerInfo(clientIdentity.deviceId, "Test Phone", Platform.ANDROID, "t", clientIdentity.publicKey), false, System.currentTimeMillis() - 1)
+        assertEquals(null, serverTrust.get(clientIdentity.deviceId))
+        acceptPairing = true
+        transfer(listOf(bytesFile("b.txt", byteArrayOf(3)))).run()
+        assertNotNull(serverSas, "expired room trust means comparing codes again")
+        assertEquals(null, serverTrust.get(clientIdentity.deviceId)?.expiresAt)
+    }
+
+    @Test
+    fun wrongRoomKeyFallsBackToCodeComparison() {
+        val room = server.rooms.create("Standup", 3600)
+        val forged = Room(room.id, ByteArray(32) { 9 }, room.name, room.expiresAt)
+        val ev = ClientEvents()
+        transfer(listOf(bytesFile("a.txt", byteArrayOf(1))), ev, room = forged).run()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+        assertNotNull(serverSas)
+        assertEquals(ev.sas, serverSas)
+        assertEquals(null, serverTrust.get(clientIdentity.deviceId)?.expiresAt, "code-compared trust is permanent")
+    }
+
+    @Test
+    fun privateModeAcceptsRoomProofAndRoomCodeNamesTheHost() {
+        privateMode = true
+        val room = server.rooms.create("Standup", 3600)
+        val invite = RoomInvite(room, listOf("127.0.0.1"), port, serverFingerprint)
+        val parsed = assertNotNull(RoomInvite.parse(invite.toUri()))
+
+        // A code naming another device's key is refused before pairing.
+        val wrongHost = RoomInvite(parsed.room, parsed.hosts, parsed.port, "0".repeat(64))
+        val e = assertFailsWith<ProtocolException> { RoomPairingClient.pairOnly(clientIdentity, clientLocal, clientTrust, wrongHost, noPrompt) }
+        assertEquals(ErrorCode.AUTH_FAILED, e.code)
+
+        acceptPairing = false
+        val peer = RoomPairingClient.pairOnly(clientIdentity, clientLocal, clientTrust, parsed, noPrompt)
+        assertEquals(serverIdentity.deviceId, peer.deviceId)
+        val deadline = System.currentTimeMillis() + 3000
+        while (serverTrust.get(clientIdentity.deviceId) == null && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        assertEquals(room.expiresAtMillis, serverTrust.get(clientIdentity.deviceId)?.expiresAt)
+        // Now a (temporary) paired device, it gets through "My devices only".
+        transfer(listOf(bytesFile("a.txt", byteArrayOf(1))), noPrompt).run()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+        assertEquals(null, serverSas)
     }
 }

@@ -25,6 +25,8 @@ public enum ErrorCode {
     public static let cancelled = "cancelled"
     public static let peerChangedIdentity = "peer_changed_identity"
     public static let noNetwork = "no_network"
+    /// The other device said no to a capture request (§9.7).
+    public static let declined = "declined"
 }
 
 public struct CrossDropError: Error, Equatable, CustomStringConvertible {

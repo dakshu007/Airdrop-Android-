@@ -75,7 +75,8 @@ start_receiver() { # name receiver port extra-args...
 fail_with_logs() { echo "$1"; for f in "$WORK"/*.log; do echo "--- $f"; cat "$f"; done; exit 1; }
 
 # v1 extensions (docs/protocol-v1.md §9): links, folders, QR pairing with
-# "my devices only", and resuming a dropped transfer.
+# "my devices only", resuming a dropped transfer, capture requests, expiring
+# drops and Drip Rooms.
 run_extras() {
   local name="$1" receiver="$2" sender="$3" port="$4"
   echo "=== extras $name: $(basename "$sender") -> $(basename "$receiver") ==="
@@ -118,7 +119,40 @@ run_extras() {
   kill "$RPID" 2>/dev/null || true; wait "$RPID" 2>/dev/null || true
   [[ "$(shasum -a 256 "$WORK/out-$name-resume/random 5MB.bin" | awk '{print $1}')" == "$(shasum -a 256 "$WORK/in/random 5MB.bin" | awk '{print $1}')" ]] \
     || fail_with_logs "resumed file differs"
-  echo "ok: link, folder, QR + my-devices-only, resume ($(grep '^RESUMED' "$WORK/$name-resume-2.log"))"
+  local resumed; resumed=$(grep '^RESUMED' "$WORK/$name-resume-2.log")
+
+  # Capture request (§9.7): the sender's CLI asks the receiver's CLI for a photo; the
+  # receiver acknowledges, then sends a file back whose offer carries the requestId, and
+  # the requester accepts it without a prompt.
+  start_receiver "$name-cap" "$receiver" $((port + 4)) --capture-file "$WORK/in/one-byte.bin"
+  mkdir -p "$WORK/out-$name-capreply"
+  "$sender" capture --host 127.0.0.1 --port $((port + 4)) --listen $((port + 5)) --dir "$WORK/out-$name-capreply" \
+    --identity "$WORK/$name-requester.key" --name "Requester" --kind photo > "$WORK/$name-cap-send.log" 2>&1 \
+    || fail_with_logs "capture request failed"
+  local rid; rid=$(grep '^ACK ' "$WORK/$name-cap-send.log" | awk '{print $2}')
+  [[ -n "$rid" ]] || fail_with_logs "capture request not acknowledged"
+  grep -q "^CAPTURE photo $rid\$" "$WORK/$name-cap-recv.log" || fail_with_logs "receiver did not see the capture request"
+  grep -q "^REPLY $rid\$" "$WORK/$name-cap-send.log" || fail_with_logs "answer did not carry the requestId"
+  if grep -q '^PROMPT' "$WORK/$name-cap-send.log"; then fail_with_logs "the answer to a capture request must not prompt"; fi
+  [[ -f "$WORK/out-$name-capreply/one-byte.bin" ]] || fail_with_logs "capture answer not saved"
+  kill "$RPID" 2>/dev/null || true; wait "$RPID" 2>/dev/null || true
+
+  # Expiring drop (§9.8): expiresAfter reaches the receiver.
+  start_receiver "$name-exp" "$receiver" $((port + 6)) --once
+  "$sender" send --host 127.0.0.1 --port $((port + 6)) --identity "$WORK/$name-send.key" --expires-after 3600 "$WORK/in/one-byte.bin" \
+    > "$WORK/$name-exp-send.log" 2>&1 || fail_with_logs "expiring send failed"
+  wait "$RPID" || fail_with_logs "expiring receiver failed"
+  grep -q '^EXPIRES 3600$' "$WORK/$name-exp-recv.log" || fail_with_logs "expiresAfter not seen by the receiver"
+
+  # Drip Room (§9.9): a private receiver accepts a room member without comparing codes.
+  start_receiver "$name-room" "$receiver" $((port + 7)) --private --room-out "$WORK/$name-room"
+  "$sender" send --host 127.0.0.1 --port $((port + 7)) --identity "$WORK/$name-roomer.key" --room "$(cat "$WORK/$name-room")" "$WORK/in/one-byte.bin" \
+    > "$WORK/$name-room-send.log" 2>&1 || fail_with_logs "room send failed"
+  if grep -q '^SAS' "$WORK/$name-room-send.log" "$WORK/$name-room-recv.log"; then fail_with_logs "room pairing must not show codes"; fi
+  grep -q '^COMPLETE ' "$WORK/$name-room-recv.log" || fail_with_logs "room transfer not received"
+  kill "$RPID" 2>/dev/null || true; wait "$RPID" 2>/dev/null || true
+
+  echo "ok: link, folder, QR + my-devices-only, resume ($resumed), capture, expiring drop, room"
 }
 
 if [[ "${INTEROP_EXTRAS_ONLY:-}" != "1" ]]; then

@@ -1,5 +1,8 @@
 package com.crossdrop.core.cli
 
+import com.crossdrop.core.CaptureClient
+import com.crossdrop.core.CaptureKind
+import com.crossdrop.core.CaptureRequest
 import com.crossdrop.core.CrossDropServer
 import com.crossdrop.core.DirectoryStorage
 import com.crossdrop.core.Hashing
@@ -18,6 +21,7 @@ import com.crossdrop.core.Protocol
 import com.crossdrop.core.ProtocolException
 import com.crossdrop.core.QrPairing
 import com.crossdrop.core.ReceiverEvents
+import com.crossdrop.core.RoomInvite
 import com.crossdrop.core.SavedFile
 import com.crossdrop.core.SendStage
 import com.crossdrop.core.SenderEvents
@@ -35,12 +39,19 @@ import kotlin.system.exitProcess
  * Interface shared with the Swift `crossdrop-cli`:
  *   receive --port <p> --dir <dir> --identity <file> [--name <n>] [--once]
  *           [--private] [--token-out <file>]     (writes "<token> <fingerprint>")
+ *           [--room-out <file>]                  (creates a Drip Room, writes its crossdrop://room URI)
+ *           [--capture-file <file>]              (answers capture requests by sending this file back)
  *   send --host <h> --port <p> --identity <file> [--name <n>] <file>...
  *        [--path <a/b>] [--kind link|text --text <s>] [--qr <token>:<fingerprint>]
  *        [--die-after <bytes>]                   (exit abruptly mid-transfer)
+ *        [--expires-after <seconds>] [--room <crossdrop://room URI>] [--request-id <id>]
+ *   capture --host <h> --port <p> --identity <file> --listen <port> --dir <dir> [--kind photo|pick]
+ *        (asks the receiver for a photo, then waits for the answer on its own listening port)
  * Optional: --platform macos to present as a Mac (the emulator UI run uses it).
  * Output lines: SAS <code>, RECEIVED <name> <sha256>, TEXT <kind> <base64>,
- * RESUMED <bytes>, COMPLETE <id>, LISTENING <port>; errors go to stderr.
+ * RESUMED <bytes>, COMPLETE <id>, LISTENING <port>, PROMPT <id> (an offer asked the user),
+ * CAPTURE <kind> <requestId>, ACK <requestId>, REPLY <requestId> (an answer to our request),
+ * EXPIRES <seconds>; errors go to stderr.
  */
 fun main(args: Array<String>) {
     if (args.isEmpty()) usage()
@@ -67,6 +78,7 @@ fun main(args: Array<String>) {
     when (args[0]) {
         "receive" -> receive(identity, local, opts["port"]?.toInt() ?: usage(), File(opts["dir"] ?: usage()), opts.containsKey("once"), opts)
         "send" -> send(identity, local, opts["host"] ?: usage(), opts["port"]?.toInt() ?: usage(), positional, opts)
+        "capture" -> capture(identity, local, opts["host"] ?: usage(), opts["port"]?.toInt() ?: usage(), opts)
         else -> usage()
     }
 }
@@ -74,6 +86,7 @@ fun main(args: Array<String>) {
 private fun usage(): Nothing {
     System.err.println("usage: crossdrop-cli receive --port <p> --dir <dir> --identity <file> [--name <n>] [--once]")
     System.err.println("       crossdrop-cli send --host <h> --port <p> --identity <file> [--name <n>] <file>...")
+    System.err.println("       crossdrop-cli capture --host <h> --port <p> --identity <file> --listen <port> --dir <dir> [--kind photo|pick]")
     exitProcess(2)
 }
 
@@ -91,43 +104,119 @@ private fun out(line: String) {
     }
 }
 
+/** Receiver events shared by `receive` and `capture`: auto-confirm, auto-accept, print what happened. */
+private open class CliReceiverEvents(private val once: Boolean, private val done: CountDownLatch) : ReceiverEvents {
+    @Volatile var exitCode = 0
+    override fun isReceiving() = true
+    override fun onPairingPrompt(prompt: PairingPrompt) {
+        out("SAS ${prompt.code}")
+        prompt.respond(true)
+    }
+    override fun onPairingClosed(prompt: PairingPrompt, paired: Boolean) {}
+    override fun onOffer(offer: IncomingOffer) {
+        out("PROMPT ${offer.transferId}")
+        offer.respond(true)
+    }
+    override fun onFileSaved(transfer: IncomingTransfer, fileIndex: Int, saved: SavedFile) {
+        out("RECEIVED ${saved.displayName} ${sha256(File(saved.location))}")
+    }
+    override fun onTextReceived(transfer: IncomingTransfer, kind: OfferKind, text: String) {
+        out("TEXT ${kind.wire} ${java.util.Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))}")
+    }
+    override fun onCompleted(transfer: IncomingTransfer) {
+        transfer.expiresAfter?.let { out("EXPIRES $it") }
+        transfer.requestId?.let { out("REPLY $it") }
+        out("COMPLETE ${transfer.transferId}")
+        if (once) done.countDown()
+    }
+    override fun onFailed(transfer: IncomingTransfer?, peer: PeerInfo?, error: ProtocolException) {
+        System.err.println("ERROR ${error.code.wire}")
+        if (once) {
+            exitCode = 1
+            done.countDown()
+        }
+    }
+}
+
 private fun receive(identity: IdentityKey, local: LocalInfo, port: Int, dir: File, once: Boolean, opts: Map<String, String>) {
     val done = CountDownLatch(1)
-    var exitCode = 0
-    val events = object : ReceiverEvents {
-        override fun isReceiving() = true
-        override fun onPairingPrompt(prompt: PairingPrompt) {
-            out("SAS ${prompt.code}")
-            prompt.respond(true)
-        }
-        override fun onPairingClosed(prompt: PairingPrompt, paired: Boolean) {}
-        override fun onOffer(offer: IncomingOffer) = offer.respond(true)
-        override fun onFileSaved(transfer: IncomingTransfer, fileIndex: Int, saved: SavedFile) {
-            out("RECEIVED ${saved.displayName} ${sha256(File(saved.location))}")
-        }
-        override fun onTextReceived(transfer: IncomingTransfer, kind: OfferKind, text: String) {
-            out("TEXT ${kind.wire} ${java.util.Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))}")
-        }
-        override fun onCompleted(transfer: IncomingTransfer) {
-            out("COMPLETE ${transfer.transferId}")
-            if (once) done.countDown()
-        }
-        override fun onFailed(transfer: IncomingTransfer?, peer: PeerInfo?, error: ProtocolException) {
-            System.err.println("ERROR ${error.code.wire}")
-            if (once) {
-                exitCode = 1
-                done.countDown()
-            }
+    val trust = InMemoryTrustStore()
+    val captureFile = opts["capture-file"]?.let { File(it) }
+    val events = object : CliReceiverEvents(once, done) {
+        override fun onCaptureRequest(peer: PeerInfo, request: CaptureRequest): Boolean {
+            out("CAPTURE ${request.kind.wire} ${request.requestId}")
+            val file = captureFile ?: return true
+            val replyPort = request.replyPort ?: return true
+            // Like the phone app after the photo is taken: send it back, answering the request.
+            Thread {
+                Thread.sleep(300)
+                val reply = OutgoingTransfer(
+                    identity, local, trust, request.replyHost, replyPort, peer.deviceId,
+                    listOf(OutgoingFile(file.name, file.length(), null) { file.inputStream() }), QuietSenderEvents,
+                    requestId = request.requestId,
+                )
+                try {
+                    reply.run()
+                    out("REPLIED ${request.requestId}")
+                } catch (e: ProtocolException) {
+                    System.err.println("ERROR reply:${e.code.wire}")
+                } catch (e: TransferRejectedException) {
+                    System.err.println("ERROR reply:rejected:${e.reason}")
+                }
+            }.apply { isDaemon = true }.start()
+            return true
         }
     }
     val private = opts.containsKey("private")
-    val server = CrossDropServer(identity, { local }, InMemoryTrustStore(), DirectoryStorage(dir.toPath()), events, { private })
+    val server = CrossDropServer(identity, { local }, trust, DirectoryStorage(dir.toPath()), events, { private })
     opts["token-out"]?.let { File(it).writeText("${server.pairingTokens.issue(mine = false)} ${Hashing.sha256(identity.publicKey).toHex()}\n") }
     val bound = server.start(port)
+    opts["room-out"]?.let {
+        val room = server.rooms.create("Interop room", 3600)
+        File(it).writeText(RoomInvite(room, listOf("127.0.0.1"), bound, Hashing.sha256(identity.publicKey).toHex()).toUri() + "\n")
+    }
     out("LISTENING $bound")
     done.await()
     server.stop()
-    exitProcess(exitCode)
+    exitProcess(events.exitCode)
+}
+
+/** Sender events that auto-confirm pairing and print the code. */
+private object QuietSenderEvents : SenderEvents {
+    override fun onStage(stage: SendStage) {}
+    override fun onPairingPrompt(prompt: PairingPrompt) {
+        out("SAS ${prompt.code}")
+        prompt.respond(true)
+    }
+    override fun onPairingClosed(prompt: PairingPrompt, paired: Boolean) {}
+}
+
+/** Asks [host] for a capture, then receives the answer on our own server (§9.7). */
+private fun capture(identity: IdentityKey, local: LocalInfo, host: String, port: Int, opts: Map<String, String>) {
+    val done = CountDownLatch(1)
+    val trust = InMemoryTrustStore()
+    val events = CliReceiverEvents(once = true, done = done)
+    val dir = File(opts["dir"] ?: usage())
+    val server = CrossDropServer(identity, { local }, trust, DirectoryStorage(dir.toPath()), events)
+    val bound = server.start(opts["listen"]?.toInt() ?: usage())
+    out("LISTENING $bound")
+    val kind = CaptureKind.fromWire(opts["kind"] ?: "photo")
+    try {
+        val id = CaptureClient.request(identity, local, trust, host, port, null, kind, bound, server.captureRequests, QuietSenderEvents)
+        out("ACK $id")
+    } catch (e: ProtocolException) {
+        System.err.println("ERROR ${e.code.wire}")
+        exitProcess(1)
+    } catch (e: TransferRejectedException) {
+        System.err.println("ERROR rejected:${e.reason}")
+        exitProcess(1)
+    }
+    if (!done.await(60, java.util.concurrent.TimeUnit.SECONDS)) {
+        System.err.println("ERROR no answer")
+        exitProcess(1)
+    }
+    server.stop()
+    exitProcess(events.exitCode)
 }
 
 private fun send(identity: IdentityKey, local: LocalInfo, host: String, port: Int, paths: List<String>, opts: Map<String, String>) {
@@ -149,6 +238,10 @@ private fun send(identity: IdentityKey, local: LocalInfo, host: String, port: In
         }
     }
     val qr = opts["qr"]?.split(':')?.let { QrPairing(it[0], it[1], mine = false) }
+    val room = opts["room"]?.let { uri ->
+        val invite = RoomInvite.parse(uri.trim()) ?: run { System.err.println("ERROR bad room code"); exitProcess(2) }
+        invite.room
+    }
     var firstSent: Long? = null
     val events = object : SenderEvents {
         override fun onStage(stage: SendStage) {}
@@ -165,7 +258,10 @@ private fun send(identity: IdentityKey, local: LocalInfo, host: String, port: In
         }
         override fun onPairingClosed(prompt: PairingPrompt, paired: Boolean) {}
     }
-    val transfer = OutgoingTransfer(identity, local, InMemoryTrustStore(), host, port, null, files, events, kind = kind, qr = qr)
+    val transfer = OutgoingTransfer(
+        identity, local, InMemoryTrustStore(), host, port, null, files, events, kind = kind, qr = qr,
+        requestId = opts["request-id"], expiresAfter = opts["expires-after"]?.toLong(), room = room,
+    )
     try {
         transfer.run()
         out("COMPLETE ${transfer.transferId}")

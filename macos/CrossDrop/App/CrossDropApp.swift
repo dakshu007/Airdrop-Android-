@@ -89,6 +89,15 @@ struct CrossDropCommands: Commands {
             }
             .keyboardShortcut("o", modifiers: .command)
         }
+        CommandGroup(after: .toolbar) {
+            Button("Zoom In") { UIZoom.shared.zoomIn() }
+                .keyboardShortcut("+", modifiers: .command)
+            Button("Zoom Out") { UIZoom.shared.zoomOut() }
+                .keyboardShortcut("-", modifiers: .command)
+            Button("Actual Size") { UIZoom.shared.reset() }
+                .keyboardShortcut("0", modifiers: .command)
+            Divider()
+        }
         CommandMenu("Transfer") {
             Button("Turn Receiving On or Off") { model.setReceiving(!model.receivingEnabled) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])

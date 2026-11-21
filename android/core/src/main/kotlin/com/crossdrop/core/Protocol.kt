@@ -34,6 +34,19 @@ object Protocol {
     const val PAIRING_TOKEN_TTL_MS = 5 * 60_000L
     /** How long an interrupted file is kept for resuming (§9.3). */
     const val RESUME_KEEP_MS = 24 * 60 * 60_000L
+    /** How long a capture request stays answerable (§9.7). */
+    const val CAPTURE_REQUEST_TTL_MS = 10 * 60_000L
+    /** Range of `expiresAfter` on an offer, in seconds (§9.8): 1 minute to 30 days. */
+    const val MIN_EXPIRES_AFTER = 60L
+    const val MAX_EXPIRES_AFTER = 2_592_000L
+    /** Longest lifetime of a Drip Room, in seconds (§9.9). */
+    const val ROOM_MAX_TTL_S = 4 * 60 * 60L
+    /** Clock difference tolerated when checking a room's expiry from another device (§9.9). */
+    const val ROOM_CLOCK_SKEW_S = 5 * 60L
+    /** How long a room joiner waits for the receiver's room-proved `pair.confirm` before showing codes (§9.9). */
+    const val ROOM_ANSWER_WAIT_MS = 5_000L
+    /** Room hints advertised in one TXT record (§9.9). */
+    const val MAX_ROOM_HINTS = 4
 
     val LABEL_TRANSCRIPT = "CrossDrop/1 transcript".toByteArray(Charsets.US_ASCII)
     val LABEL_CLIENT_PROOF = "CrossDrop/1 client-proof".toByteArray(Charsets.US_ASCII)
@@ -41,6 +54,8 @@ object Protocol {
     val LABEL_C2S = "CrossDrop/1 c2s".toByteArray(Charsets.US_ASCII)
     val LABEL_S2C = "CrossDrop/1 s2c".toByteArray(Charsets.US_ASCII)
     val LABEL_SAS = "CrossDrop/1 sas".toByteArray(Charsets.US_ASCII)
+    val LABEL_ROOM = "CrossDrop/1 room|".toByteArray(Charsets.US_ASCII)
+    val LABEL_ROOM_CONFIRM = "CrossDrop/1 room-confirm|".toByteArray(Charsets.US_ASCII)
 
     private val TRANSFER_ID = Regex("^[A-Za-z0-9-]{8,64}$")
     private val HEX64 = Regex("^[0-9a-f]{64}$")

@@ -6,14 +6,15 @@ import CrossDropCore
 
 struct ReceiveView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
-        PageScroll {
+        PageScroll(allowsWide: true) {
             PageTitle(title: "Receive", subtitle: "Let nearby devices find this Mac and send you files.",
                       trailing: AnyView(StatusPill(text: model.receivingEnabled ? "Visible nearby" : "Not visible",
                                                    dot: ReceiverText.color(model.receiverStatus))))
             ReceiveToggleCard()
-            HStack(alignment: .top, spacing: CDSpacing.l) {
+            HStack(alignment: .top, spacing: ui(CDLayout.cardGap)) {
                 DestinationCard()
                 PrivacyCard()
             }
@@ -21,9 +22,19 @@ struct ReceiveView: View {
             let incoming = model.incomingTransfers
             if !incoming.isEmpty {
                 SectionHeader(title: "Incoming", detail: "This session")
-                    .padding(.top, CDSpacing.s)
-                ForEach(incoming) { item in
-                    TransferCard(item: item)
+                    .padding(.top, ui.s)
+                if ui.wide {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: ui(CDLayout.cardGap), alignment: .top),
+                                        GridItem(.flexible(), spacing: ui(CDLayout.cardGap), alignment: .top)],
+                              alignment: .leading, spacing: ui(CDLayout.cardGap)) {
+                        ForEach(incoming) { item in
+                            TransferCard(item: item)
+                        }
+                    }
+                } else {
+                    ForEach(incoming) { item in
+                        TransferCard(item: item)
+                    }
                 }
             }
         }
@@ -32,6 +43,7 @@ struct ReceiveView: View {
 
 struct ReceiveToggleCard: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.cdScale) private var ui
 
     private var headline: String {
         switch model.receiveMode {
@@ -50,113 +62,120 @@ struct ReceiveToggleCard: View {
     }
 
     var body: some View {
-        HStack(spacing: CDSpacing.l) {
+        HStack(spacing: ui.xl) {
             // Drip naps while this Mac is hidden and waves while it's visible.
             DripView(pose: model.receivingEnabled ? .welcome : .sleepy, size: 104, motion: .bob)
                 .id(model.receivingEnabled)
-                .frame(width: 104, height: 90)
+                .frame(width: ui(104), height: ui(96))
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: ui(10)) {
+                HStack(spacing: ui(8)) {
                     Text(headline)
-                        .font(CDFont.title)
+                        .font(ui.title)
                         .foregroundColor(CDPalette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
                     StatusDot(color: ReceiverText.color(model.receiverStatus))
                 }
                 Text(explanation)
-                    .font(CDFont.body)
+                    .font(ui.body)
                     .foregroundColor(CDPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 ReceiveModePicker()
-                    .frame(maxWidth: 360)
+                    .frame(maxWidth: ui(360))
                 if let date = model.autoOffDate {
                     Text("Back to My Devices at \(date.formatted(date: .omitted, time: .shortened))")
-                        .font(CDFont.caption)
+                        .font(ui.caption)
                         .foregroundColor(CDPalette.textTertiary)
+                }
+                if model.receiverStatus == .localNetworkDenied {
+                    Label("Allow CrossDrop in System Settings › Privacy & Security › Local Network.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(ui.caption)
+                        .foregroundColor(CDPalette.amber)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .legibleText()
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(CDSpacing.xl)
-        .glassPanel(cornerRadius: CDRadius.panel)
-        .overlay(alignment: .bottomLeading) {
-            if model.receiverStatus == .localNetworkDenied {
-                Text("Allow CrossDrop in System Settings › Privacy & Security › Local Network.")
-                    .font(CDFont.caption)
-                    .foregroundColor(CDPalette.amber)
-                    .padding(.leading, 96)
-                    .padding(.bottom, 10)
-            }
-        }
+        .padding(ui(CDLayout.cardPadding))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassPanel(cornerRadius: CDRadius.card)
     }
 }
 
 struct DestinationCard: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.cdScale) private var ui
 
     var body: some View {
-        VStack(alignment: .leading, spacing: CDSpacing.m) {
+        VStack(alignment: .leading, spacing: ui.m) {
             Label("Saved to", systemImage: "folder")
-                .font(CDFont.headline)
+                .font(ui.headline)
                 .foregroundColor(CDPalette.textPrimary)
-            HStack(spacing: CDSpacing.m) {
+                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: ui.m) {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: model.destination.path))
                     .resizable()
-                    .frame(width: 34, height: 34)
+                    .interpolation(.high)
+                    .frame(width: ui(34), height: ui(34))
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: ui(2)) {
                     Text(model.destination.lastPathComponent)
-                        .font(CDFont.body.weight(.medium))
+                        .font(ui.font(13, .medium))
                         .foregroundColor(CDPalette.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     Text(model.destination.deletingLastPathComponent().path)
-                        .font(CDFont.caption)
+                        .font(ui.caption)
                         .foregroundColor(CDPalette.textTertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
             }
-            HStack(spacing: CDSpacing.s) {
+            HStack(spacing: ui.s) {
                 Button("Change…") { model.chooseDestination() }
                     .buttonStyle(GlassButtonStyle())
                 Button("Open") { NSWorkspace.shared.open(model.destination) }
                     .buttonStyle(GlassButtonStyle())
             }
             Text("Nothing is overwritten. A second copy becomes “photo (1).jpg”.")
-                .font(CDFont.caption)
+                .font(ui.caption)
                 .foregroundColor(CDPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(CDSpacing.l)
+        .padding(ui(CDLayout.cardPadding))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .glassPanel(cornerRadius: CDRadius.card)
     }
 }
 
 struct PrivacyCard: View {
+    @Environment(\.cdScale) private var ui
+
     var body: some View {
-        VStack(alignment: .leading, spacing: CDSpacing.m) {
+        VStack(alignment: .leading, spacing: ui.m) {
             Label("Private by design", systemImage: "lock.shield")
-                .font(CDFont.headline)
+                .font(ui.headline)
                 .foregroundColor(CDPalette.textPrimary)
             point("wifi", "Files travel directly over your local network. No cloud, no account.")
             point("number", "New devices confirm a matching 6-digit code on both screens.")
             point("checkmark.seal", "Every file is checked (SHA-256) before it appears.")
         }
-        .padding(CDSpacing.l)
+        .padding(ui(CDLayout.cardPadding))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .glassPanel(cornerRadius: CDRadius.card)
         .accessibilityElement(children: .combine)
     }
 
     private func point(_ symbol: String, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: ui(10)) {
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
+                .font(ui.system(11, .semibold))
                 .foregroundColor(CDPalette.textPrimary)
-                .frame(width: 14)
+                .frame(width: ui(14))
             Text(text)
-                .font(CDFont.callout)
+                .font(ui.callout)
                 .foregroundColor(CDPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

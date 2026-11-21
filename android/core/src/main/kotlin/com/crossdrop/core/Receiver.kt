@@ -82,6 +82,14 @@ interface ReceiverEvents : PairingEvents {
 
     /** A link or text offer arrived and was verified (§9.2). Nothing is saved to storage. */
     fun onTextReceived(transfer: IncomingTransfer, kind: OfferKind, text: String) {}
+
+    /**
+     * A paired device asks this one to take a photo or pick files and send them back (§9.7).
+     * Return true to accept; the app then sends the result to `request.replyHost` /
+     * `request.replyPort` with `OutgoingTransfer(requestId = request.requestId)`.
+     * Called on the connection's thread; the requester waits up to the human timeout.
+     */
+    fun onCaptureRequest(peer: PeerInfo, request: CaptureRequest): Boolean = false
 }
 
 /** An accepted incoming transfer; [cancel] may be called from any thread. */
@@ -91,6 +99,10 @@ class IncomingTransfer internal constructor(
     val files: List<OfferFile>,
     private val conn: Connection,
     val kind: OfferKind = OfferKind.FILES,
+    /** Set when this transfer answers a capture request this device sent (§9.7). */
+    val requestId: String? = null,
+    /** Seconds after which the sender asks that the received items be deleted (§9.8); the app does the deleting. */
+    val expiresAfter: Long? = null,
 ) {
     val totalBytes: Long = files.sumOf { it.size }
     internal val cancelled = AtomicBoolean(false)
@@ -112,11 +124,16 @@ class CrossDropServer(
     private val trust: TrustStore,
     private val storage: ReceiveStorage,
     private val events: ReceiverEvents,
-    /** "My devices only" (§9.5): only paired devices, or a valid QR token, get past the handshake. */
+    /** "My devices only" (§9.5): only paired devices, or a valid QR token or room proof, get past the handshake. */
     private val privateMode: () -> Boolean = { false },
+    /** Drip Rooms this device is in (§9.9); pass the same registry to outgoing transfers. */
+    val rooms: Rooms = Rooms(),
 ) {
     /** Tokens for pairing QR codes shown by this device (§9.4). */
     val pairingTokens = PairingTokens()
+
+    /** Capture requests this device sent and expects an answer to (§9.7). */
+    val captureRequests = CaptureRequests()
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
     private val active = AtomicInteger(0)
@@ -217,13 +234,35 @@ class CrossDropServer(
                 when (msg.type) {
                     "pair.request" -> {
                         val mine = msg.optString("token", 64)?.let { pairingTokens.redeem(it) }
-                        if (untrusted && mine == null && privateMode()) throw ProtocolException(ErrorCode.NOT_RECEIVING, "paired devices only")
+                        val room = verifyRoom(msg, hs)
+                        if (untrusted && mine == null && room == null && privateMode()) throw ProtocolException(ErrorCode.NOT_RECEIVING, "paired devices only")
                         // Already paired with this exact key (the sender forgot us): confirm without asking
-                        // again, keeping the existing auto-accept choice. The sender still compares codes.
+                        // again, keeping the existing auto-accept choice. The sender still compares codes,
+                        // unless it proved room membership and we prove ours back (§9.9).
                         val known = trust.get(hs.peer.deviceId)?.takeIf { it.identityKey.contentEquals(hs.peer.identityKey) }
-                        val auto = mine?.let { AutoPair(it) } ?: known?.let { AutoPair(it.autoAccept) }
-                        Pairing.run(conn, hs, Role.RECEIVER, events, trust, auto)
+                        val auto = when {
+                            mine != null -> AutoPair(mine)
+                            known != null && known.expiresAt == null -> AutoPair(known.autoAccept)
+                            room != null -> AutoPair(false, maxOf(room.expiresAtMillis, known?.expiresAt ?: 0L))
+                            known != null -> AutoPair(known.autoAccept, known.expiresAt)
+                            else -> null
+                        }
+                        val extra: Map<String, Any?> = if (room != null) {
+                            mapOf("room" to linkedMapOf("id" to room.id, "proof" to B64.encode(room.confirmProof(hs.transcriptHash))))
+                        } else {
+                            emptyMap()
+                        }
+                        Pairing.run(conn, hs, Role.RECEIVER, events, trust, auto, confirmExtra = extra)
                         paired = true
+                    }
+                    "capture.request" -> {
+                        if (untrusted) {
+                            if (privateMode()) throw ProtocolException(ErrorCode.NOT_RECEIVING, "paired devices only")
+                            // No pairing in this flow (§9.7): the requester must already be paired.
+                            throw ProtocolException(ErrorCode.PAIRING_REQUIRED, "capture from unpaired device")
+                        }
+                        handleCapture(hs.peer, msg)
+                        return
                     }
                     "transfer.offer" -> {
                         if (untrusted) {
@@ -237,6 +276,35 @@ class CrossDropServer(
                     else -> Sessions.handleUnexpected(msg)
                 }
             }
+        }
+
+        /**
+         * The room a `pair.request` proves membership of (§9.9), or null. A malformed `room`
+         * field is `bad_message`; an unknown room or a wrong proof just means no room, so
+         * pairing falls back to comparing codes. Only stores that can expire trust take part.
+         */
+        private fun verifyRoom(msg: Message, hs: HandshakeResult): Room? {
+            val raw = msg.fields["room"] ?: return null
+            @Suppress("UNCHECKED_CAST")
+            val m = Message(((raw as? Map<String, Any?>) ?: throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad room")) + mapOf("type" to "room", "v" to 1L))
+            val id = m.string("id", 64)
+            if (!Rooms.isValidId(id)) throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad room id")
+            val proof = m.bytes("proof", 32)
+            if (!trust.supportsTrustExpiry) return null
+            return rooms.verify(id, proof, hs.transcriptHash)
+        }
+
+        /** §9.7: validate, ask the app, answer `capture.ack`, done. */
+        private fun handleCapture(peer: PeerInfo, msg: Message) {
+            val requestId = msg.string("requestId", 64)
+            if (!Protocol.isValidTransferId(requestId)) throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad requestId")
+            val kind = CaptureKind.fromWire(msg.string("kind", 16))
+            val replyPort = if (msg.fields["port"] == null) null else msg.long("port", 1, 65535).toInt()
+            val host = conn.socket.inetAddress?.hostAddress ?: throw ProtocolException(ErrorCode.INTERNAL, "no peer address")
+            val accepted = events.onCaptureRequest(peer, CaptureRequest(requestId, kind, peer, host, replyPort))
+            mapIo { conn.sendControl(Message.build("capture.ack", "requestId" to requestId, "accepted" to accepted)) }
+            // Give the requester a moment to read the answer and close first.
+            runCatching { conn.next(2_000) }
         }
 
         private fun nextControl(timeoutMs: Long): Message {
@@ -253,7 +321,12 @@ class CrossDropServer(
             val transferId = msg.transferId()
             val files = OfferFile.parseOffer(msg)
             val kind = OfferFile.parseKind(msg, files)
-            val offer = IncomingOffer(transferId, peer, files, System.currentTimeMillis() + Protocol.HUMAN_DECISION_TIMEOUT_MS, kind)
+            val expiresAfter = if (msg.fields["expiresAfter"] == null) null else msg.long("expiresAfter", Protocol.MIN_EXPIRES_AFTER, Protocol.MAX_EXPIRES_AFTER)
+            val rawRequestId = msg.optString("requestId", 64)
+            if (rawRequestId != null && !Protocol.isValidTransferId(rawRequestId)) throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad requestId")
+            // Only an answer to a capture request we sent to this very device counts (§9.7).
+            val requestId = rawRequestId?.takeIf { captureRequests.redeem(it, peer.deviceId) }
+            val offer = IncomingOffer(transferId, peer, files, System.currentTimeMillis() + Protocol.HUMAN_DECISION_TIMEOUT_MS, kind, requestId, expiresAfter)
 
             if (!events.isReceiving()) {
                 reject(transferId, "not_receiving")
@@ -266,7 +339,7 @@ class CrossDropServer(
                 return
             }
 
-            val accepted = if (trust.get(peer.deviceId)?.autoAccept == true) {
+            val accepted = if (requestId != null || trust.get(peer.deviceId)?.autoAccept == true) {
                 true
             } else {
                 events.onOffer(offer)
@@ -297,7 +370,7 @@ class CrossDropServer(
                 (accept as MutableMap<String, Any?>)["resume"] = resumeAt.map { (id, offset) -> linkedMapOf("fileId" to id, "offset" to offset) }
             }
             mapIo { conn.sendControl(accept) }
-            val t = IncomingTransfer(transferId, peer, files, conn, kind)
+            val t = IncomingTransfer(transferId, peer, files, conn, kind, requestId, expiresAfter)
             transfer = t
             events.onTransferStarted(t)
             if (kind == OfferKind.FILES) receiveFiles(t, resumeAt) else receiveText(t)

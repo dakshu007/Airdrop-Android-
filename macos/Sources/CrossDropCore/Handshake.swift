@@ -53,17 +53,36 @@ public protocol TrustProvider: AnyObject {
     func touch(peer: PeerInfo)
     /// Called after pairing; `autoAccept` is the "This is my device" choice (§9.4).
     func storeTrust(for peer: PeerInfo, autoAccept: Bool)
+    /// Trust that ends at `expiresAt` (nil = permanent), from a Drip Room (§9.9). Once it has
+    /// expired, `trustedIdentityKey(for:)` must return nil. Providers that keep the default
+    /// cannot expire trust: set `supportsTrustExpiry` only when implementing this, otherwise
+    /// rooms fall back to comparing codes.
+    func storeTrust(for peer: PeerInfo, autoAccept: Bool, expiresAt: Date?)
+    /// True when this provider honours `expiresAt`; room pairing is only offered or accepted then.
+    var supportsTrustExpiry: Bool { get }
+    /// When the stored trust for `deviceId` ends; nil when permanent or not trusted.
+    func trustExpiry(for deviceId: String) -> Date?
 }
 
 public extension TrustProvider {
     func storeTrust(for peer: PeerInfo, autoAccept: Bool) {
         storeTrust(for: peer)
     }
+
+    func storeTrust(for peer: PeerInfo, autoAccept: Bool, expiresAt: Date?) {
+        storeTrust(for: peer, autoAccept: autoAccept)
+    }
+
+    var supportsTrustExpiry: Bool { false }
+
+    func trustExpiry(for deviceId: String) -> Date? { nil }
 }
 
 struct HandshakeResult {
     let peer: PeerInfo
     let sas: String
+    /// TH (§4.4); room proofs are bound to it (§9.9).
+    let transcriptHash: Data
 }
 
 /// docs/protocol-v1.md §4.
@@ -132,7 +151,7 @@ enum Handshake {
 
         let peer = PeerInfo(deviceId: peerId, name: peerName, platform: peerPlatform,
                             appVersion: peerVersion, identityKey: serverIdentity)
-        return HandshakeResult(peer: peer, sas: CDCrypto.sas(transcriptHash: th))
+        return HandshakeResult(peer: peer, sas: CDCrypto.sas(transcriptHash: th), transcriptHash: th)
     }
 
     static func runServer(channel: SecureChannel, identity: DeviceIdentity, local: LocalInfo, trust: TrustProvider) async throws -> HandshakeResult {
@@ -198,6 +217,6 @@ enum Handshake {
 
         let peer = PeerInfo(deviceId: peerId, name: peerName, platform: peerPlatform,
                             appVersion: peerVersion, identityKey: clientIdentity)
-        return HandshakeResult(peer: peer, sas: CDCrypto.sas(transcriptHash: th))
+        return HandshakeResult(peer: peer, sas: CDCrypto.sas(transcriptHash: th), transcriptHash: th)
     }
 }
