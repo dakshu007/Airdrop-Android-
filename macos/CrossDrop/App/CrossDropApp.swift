@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 #if canImport(CrossDropCore)
 import CrossDropCore
 #endif
@@ -9,29 +10,24 @@ struct CrossDropApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel.shared
 
+    // The main window and the menu bar icon are AppKit-owned (see AppDelegate) so the
+    // icon can take dropped files. SwiftUI keeps the menu commands.
     var body: some Scene {
-        Window("CrossDrop", id: "main") {
-            MainWindow()
-                .environmentObject(model)
+        Settings {
+            EmptyView()
         }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1040, height: 700)
         .commands {
             CrossDropCommands(model: model)
         }
-
-        MenuBarExtra {
-            MenuBarView()
-                .environmentObject(model)
-        } label: {
-            MenuBarLabel()
-                .environmentObject(model)
-        }
-        .menuBarExtraStyle(.window)
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: StatusItemController?
+    private var mainWindow: MainWindowController?
+    private let services = ServicesProvider()
+    private var subscriptions = Set<AnyCancellable>()
+
     func applicationWillFinishLaunching(_ notification: Notification) {
         BundledFonts.register()
     }
@@ -40,7 +36,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationManager.shared.configure()
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(didWake(_:)), name: NSWorkspace.didWakeNotification, object: nil)
-        AppModel.shared.start()
+
+        let model = AppModel.shared
+        let window = MainWindowController(model: model)
+        mainWindow = window
+        statusItem = StatusItemController(model: model)
+        model.$windowRequest
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.statusItem?.close()
+                self?.mainWindow?.show()
+            }
+            .store(in: &subscriptions)
+
+        NSApp.servicesProvider = services
+        NSUpdateDynamicServices()
+        model.start()
+        window.show()
     }
 
     @objc private func didWake(_ notification: Notification) {
@@ -53,7 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { AppModel.shared.requestMainWindow() }
+        if !flag { mainWindow?.show() }
         return true
     }
 }
@@ -79,6 +92,18 @@ struct CrossDropCommands: Commands {
         CommandMenu("Transfer") {
             Button("Turn Receiving On or Off") { model.setReceiving(!model.receivingEnabled) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
+            Button("Send Clipboard…") {
+                if model.takeClipboard() {
+                    model.selectedTab = .send
+                    model.requestMainWindow()
+                }
+            }
+            .keyboardShortcut("v", modifiers: [.command, .shift])
+            Button("Pair a Phone…") {
+                model.selectedTab = .devices
+                model.showingPairSheet = true
+                model.requestMainWindow()
+            }
             Divider()
             Button("Send") { model.selectedTab = .send }
                 .keyboardShortcut("1", modifiers: .command)
@@ -92,18 +117,3 @@ struct CrossDropCommands: Commands {
     }
 }
 
-/// Menu bar icon. Also the one view that is always alive, so it opens the main
-/// window when the model asks (incoming offer, pairing request).
-struct MenuBarLabel: View {
-    @EnvironmentObject private var model: AppModel
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Image(systemName: model.activeTransfers.isEmpty ? "arrow.up.arrow.down.circle" : "arrow.up.arrow.down.circle.fill")
-            .accessibilityLabel("CrossDrop")
-            .onReceive(model.$windowRequest.dropFirst()) { _ in
-                openWindow(id: "main")
-                NSApp.activate(ignoringOtherApps: true)
-            }
-    }
-}

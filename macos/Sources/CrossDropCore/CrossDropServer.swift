@@ -68,17 +68,7 @@ public final class CrossDropServer {
             throw CrossDropError.local(ErrorCode.internalError, "listener: \(error)")
         }
         if advertise {
-            // In "my devices only" mode the name is random, so strangers nearby do not
-            // see this Mac's name; paired devices recognise it by `id` (§9.5).
-            let isPrivate = configuration.privateMode()
-            let name = isPrivate ? "CrossDrop-\(UUID().uuidString.prefix(8).lowercased())"
-                                 : Self.serviceName(configuration.local.wireName)
-            listener.service = NWListener.Service(name: name,
-                                                  type: ProtocolConstants.serviceType,
-                                                  domain: nil,
-                                                  txtRecord: Self.txtRecord(deviceId: configuration.identity.deviceId,
-                                                                            platform: configuration.local.platform,
-                                                                            privateMode: isPrivate))
+            listener.service = makeService()
         }
         listener.stateUpdateHandler = { [weak self, weak listener] state in
             guard let self = self else { return }
@@ -107,6 +97,28 @@ public final class CrossDropServer {
         lock.unlock()
         onStateChange?(.starting)
         listener.start(queue: queue)
+    }
+
+    /// Bonjour record for the current mode. In "my devices only" mode the name is
+    /// random, so strangers nearby do not see this Mac's name; paired devices
+    /// recognise it by `id` (§9.5).
+    private func makeService() -> NWListener.Service {
+        let isPrivate = configuration.privateMode()
+        let name = isPrivate ? "CrossDrop-\(UUID().uuidString.prefix(8).lowercased())"
+                             : Self.serviceName(configuration.local.wireName)
+        return NWListener.Service(name: name, type: ProtocolConstants.serviceType, domain: nil,
+                                  txtRecord: Self.txtRecord(deviceId: configuration.identity.deviceId,
+                                                            platform: configuration.local.platform,
+                                                            privateMode: isPrivate))
+    }
+
+    /// Re-announces after the private mode changed, without dropping connections.
+    public func refreshAdvertisement() {
+        lock.lock()
+        let listener = self.listener
+        lock.unlock()
+        guard let listener = listener, listener.service != nil else { return }
+        listener.service = makeService()
     }
 
     /// Stops listening and drops every open connection.

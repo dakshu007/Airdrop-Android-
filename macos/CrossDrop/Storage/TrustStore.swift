@@ -12,6 +12,9 @@ struct TrustedDeviceRecord: Codable, Identifiable, Equatable {
     var pairedAt: Date
     var lastUsedAt: Date?
     var autoAccept: Bool
+    /// Last IPv4 address and port that worked, for networks that block discovery (§9.5).
+    var lastHost: String?
+    var lastPort: UInt16?
 
     var fingerprint: String { CDCrypto.fingerprint(of: identityKey) }
 }
@@ -64,7 +67,9 @@ final class TrustStore: TrustProvider {
             records[peer.deviceId] = TrustedDeviceRecord(
                 deviceId: peer.deviceId, identityKey: peer.identityKey, name: peer.name, platform: peer.platform,
                 pairedAt: Date(), lastUsedAt: Date(),
-                autoAccept: previous?.identityKey == peer.identityKey ? (previous?.autoAccept ?? false) : false)
+                autoAccept: previous?.identityKey == peer.identityKey ? (previous?.autoAccept ?? false) : false,
+                lastHost: previous?.identityKey == peer.identityKey ? previous?.lastHost : nil,
+                lastPort: previous?.identityKey == peer.identityKey ? previous?.lastPort : nil)
         }
     }
 
@@ -87,6 +92,19 @@ final class TrustStore: TrustProvider {
 
     func forget(_ deviceId: String) {
         mutate { $0[deviceId] = nil }
+    }
+
+    /// Remembers where a paired device answered. Only for paired devices; the handshake
+    /// still proves identity, so a stale address can only fail to connect.
+    func rememberAddress(_ host: String, port: UInt16, for deviceId: String) {
+        lock.lock()
+        let same = records[deviceId].map { $0.lastHost == host && $0.lastPort == port } ?? true
+        lock.unlock()
+        guard !same else { return }
+        mutate { records in
+            records[deviceId]?.lastHost = host
+            records[deviceId]?.lastPort = port
+        }
     }
 
     func setAutoAccept(_ value: Bool, for deviceId: String) {

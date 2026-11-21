@@ -11,6 +11,7 @@ struct DevicesView: View {
         PageScroll {
             PageTitle(title: "Devices", subtitle: "Devices you've paired by confirming the same code on both screens.")
             ThisDeviceCard()
+            PairPhoneCard()
             SectionHeader(title: "Paired",
                           detail: model.trustedDevices.isEmpty ? nil : "\(model.trustedDevices.count)")
                 .padding(.top, CDSpacing.s)
@@ -26,6 +27,9 @@ struct DevicesView: View {
                 }
             }
         }
+        .sheet(isPresented: $model.showingPairSheet) {
+            PairPhoneSheet().environmentObject(model)
+        }
         .confirmationDialog(
             "Forget \(pendingForget?.name ?? "this device")?",
             isPresented: Binding(get: { pendingForget != nil }, set: { if !$0 { pendingForget = nil } }),
@@ -37,6 +41,36 @@ struct DevicesView: View {
         } message: { _ in
             Text("You'll confirm a pairing code again before exchanging files with this device.")
         }
+    }
+}
+
+/// Entry point for QR pairing: no numbers to compare, works where discovery is blocked.
+struct PairPhoneCard: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        HStack(spacing: CDSpacing.l) {
+            Image(systemName: "qrcode")
+                .font(.system(size: 26, weight: .medium))
+                .foregroundColor(CDPalette.ink)
+                .frame(width: 50, height: 50)
+                .background(Circle().fill(Color(hex: 0xE9F4EC)))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pair a phone with a QR code")
+                    .font(CDFont.headline)
+                    .foregroundColor(CDPalette.textPrimary)
+                Text("Scan it with CrossDrop on your phone. Nothing to compare, and it works even on networks where devices can't see each other.")
+                    .font(CDFont.callout)
+                    .foregroundColor(CDPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: CDSpacing.s)
+            Button("Show Code") { model.showingPairSheet = true }
+                .buttonStyle(PrimaryButtonStyle())
+        }
+        .padding(CDSpacing.l)
+        .glassPanel(cornerRadius: CDRadius.card)
     }
 }
 

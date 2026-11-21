@@ -7,6 +7,20 @@ public struct DiscoveredDevice: Identifiable, Equatable {
     public let name: String
     public let platform: String
     public let endpoint: NWEndpoint
+    /// Advertised as "My devices only" (protocol §9.5): list it only when paired.
+    public let isPrivate: Bool
+    /// Not found by discovery: a paired device at the address that last worked.
+    public let isRemembered: Bool
+
+    public init(deviceId: String, name: String, platform: String, endpoint: NWEndpoint,
+                isPrivate: Bool = false, isRemembered: Bool = false) {
+        self.deviceId = deviceId
+        self.name = name
+        self.platform = platform
+        self.endpoint = endpoint
+        self.isPrivate = isPrivate
+        self.isRemembered = isRemembered
+    }
 }
 
 /// Browses `_crossdrop._tcp`. Run it only while a send UI is visible.
@@ -77,7 +91,8 @@ public final class BonjourBrowser {
             guard let id = entries["id"], Hex.isLowerHex(id, length: 32), id != ownDeviceId,
                   let platform = entries["p"], platform == "android" || platform == "macos",
                   let version = entries["v"].flatMap({ Int($0) }), version >= 1 else { continue }
-            devices[id] = DiscoveredDevice(deviceId: id, name: name, platform: platform, endpoint: result.endpoint)
+            devices[id] = DiscoveredDevice(deviceId: id, name: name, platform: platform, endpoint: result.endpoint,
+                                           isPrivate: entries["m"] == "1")
         }
         let sorted = devices.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         onDevicesChanged?(sorted)

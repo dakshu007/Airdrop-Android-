@@ -37,6 +37,53 @@ struct SelectedFile: Identifiable, Equatable {
     let url: URL
     let name: String
     let size: Int64
+    /// Folders above the file inside a dropped folder, outermost first (§9.1).
+    var path: [String] = []
+
+    var displayName: String { (path + [name]).joined(separator: "/") }
+}
+
+/// Who can send to this Mac (AirDrop-style).
+enum ReceiveMode: String, CaseIterable, Identifiable {
+    /// Paired devices only; invisible to everyone else (§9.5).
+    case mine
+    case everyone
+    case off
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .mine: return "My Devices"
+        case .everyone: return "Everyone"
+        case .off: return "Off"
+        }
+    }
+}
+
+/// A link or text waiting to be sent (§9.2).
+struct PendingText: Equatable {
+    let kind: OfferKind
+    let text: String
+
+    /// A lone http(s) URL becomes a link; other text up to the protocol limit stays text.
+    static func from(_ raw: String) -> PendingText? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, Int64(text.utf8.count) <= ProtocolConstants.maxTextPayload else { return nil }
+        let lower = text.lowercased()
+        let isLink = text.count <= 2048 && !text.contains(where: { $0.isWhitespace })
+            && (lower.hasPrefix("https://") || lower.hasPrefix("http://")) && URL(string: text)?.host != nil
+        return PendingText(kind: isLink ? .link : .text, text: text)
+    }
+}
+
+/// Thread-safe flag the engine reads on its own threads.
+final class AtomicFlag {
+    private let lock = NSLock()
+    private var value: Bool
+    init(_ value: Bool) { self.value = value }
+    func get() -> Bool { lock.lock(); defer { lock.unlock() }; return value }
+    func set(_ newValue: Bool) { lock.lock(); value = newValue; lock.unlock() }
 }
 
 enum ReceiverStatus: Equatable {
@@ -140,6 +187,7 @@ final class AppModel: ObservableObject, CrossDropDelegate {
 
     // Receiving and discovery
     @Published private(set) var receivingEnabled: Bool
+    @Published private(set) var receiveMode: ReceiveMode
     @Published private(set) var receiverStatus: ReceiverStatus = .off
     @Published private(set) var discoveryStatus: DiscoveryStatus = .idle
     @Published private(set) var nearby: [DiscoveredDevice] = []
@@ -148,6 +196,11 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     // Sending
     @Published var selectedFiles: [SelectedFile] = []
     @Published var selectedDeviceId: String?
+    /// A link or text to send instead of files.
+    @Published var pendingText: PendingText?
+    /// "Send to several": devices ticked for one send.
+    @Published var multiSelecting = false
+    @Published var multiSelection: Set<String> = []
     @Published private(set) var transfers: [TransferItem] = []
 
     // Prompts
@@ -165,6 +218,11 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     @Published private(set) var notificationsEnabled: Bool
     @Published private(set) var autoOffDate: Date?
     @Published private(set) var soundOnDone: Bool
+    @Published private(set) var heicToJpeg: Bool
+    /// Port the receiver listens on, once ready (shown in the pairing QR code).
+    @Published private(set) var listeningPort: UInt16?
+    /// The "Pair a phone" QR sheet.
+    @Published var showingPairSheet = false
 
     // UI
     @Published var selectedTab: AppTab = .send
@@ -179,10 +237,17 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     private let historyStore = HistoryStore()
 
     private var server: CrossDropServer?
+    /// Read by the engine on its own threads: refuse unpaired devices (§9.5).
+    private let privateFlag = AtomicFlag(false)
+    /// Try a stable port first so paired phones can reach this Mac at its last address.
+    private var usePreferredPort = true
+    private var discovered: [DiscoveredDevice] = []
     private lazy var browser: BonjourBrowser = makeBrowser()
     private var discoveryClients = 0
     private var outgoing: [String: OutgoingTransfer] = [:]
-    private var retryInfo: [String: (files: [OutgoingFile], deviceId: String)] = [:]
+    private var retryInfo: [String: (files: [OutgoingFile], deviceId: String, kind: OfferKind)] = [:]
+    /// Link / text sent per transfer id, kept for history ("Send again" for links).
+    private var sentText: [String: String] = [:]
     private var recordedIds: Set<String> = []
     private var autoOffTimer: Timer?
     private var pathMonitor: NWPathMonitor?
@@ -193,7 +258,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         let loaded = IdentityStore.loadOrCreate()
         identity = loaded.0
         identityLocation = loaded.1
-        receivingEnabled = AppSettings.receivingEnabled
+        let mode = ReceiveMode(rawValue: AppSettings.receiveMode) ?? .everyone
+        receiveMode = mode
+        receivingEnabled = mode != .off
+        heicToJpeg = AppSettings.heicToJpeg
         deviceName = AppSettings.deviceName
         destination = AppSettings.destination
         autoOffMinutes = AppSettings.autoOffMinutes
@@ -202,8 +270,19 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         trustedDevices = trustStore.all
         history = historyStore.entries
         trustStore.onChange = { [weak self] list in
-            DispatchQueue.main.async { self?.trustedDevices = list }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let before = Set(self.trustedDevices.map(\.deviceId))
+                self.trustedDevices = list
+                self.refreshNearby()
+                // A new pairing while the QR sheet is up: that's the phone that scanned it.
+                if self.showingPairSheet, let added = list.first(where: { !before.contains($0.deviceId) }) {
+                    self.showingPairSheet = false
+                    self.show("Paired with \(added.name).")
+                }
+            }
         }
+        privateFlag.set(mode == .mine)
     }
 
     /// Called once at launch.
@@ -211,6 +290,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         guard !started else { return }
         started = true
         NotificationManager.shared.onOpen = { [weak self] in self?.requestMainWindow() }
+        NotificationManager.shared.onOfferAction = { [weak self] transferId, accept in
+            guard let self = self, let prompt = self.prompts.first(where: { $0.id == "offer-" + transferId }) else { return }
+            self.respond(to: prompt, accept: accept)
+        }
         startPathMonitor()
         if receivingEnabled { startServer() }
     }
@@ -221,16 +304,30 @@ final class AppModel: ObservableObject, CrossDropDelegate {
 
     // MARK: - Receiving
 
+    /// On: visible to everyone. Off: nobody can send.
     func setReceiving(_ enabled: Bool) {
-        guard enabled != receivingEnabled else { return }
-        receivingEnabled = enabled
-        AppSettings.receivingEnabled = enabled
-        if enabled {
-            if notificationsEnabled { NotificationManager.shared.requestAuthorization { _ in } }
-            startServer()
-        } else {
+        setReceiveMode(enabled ? .everyone : .off)
+    }
+
+    func setReceiveMode(_ mode: ReceiveMode) {
+        guard mode != receiveMode else { return }
+        let wasOff = receiveMode == .off
+        receiveMode = mode
+        receivingEnabled = mode != .off
+        AppSettings.receiveMode = mode.rawValue
+        privateFlag.set(mode == .mine)
+        if mode == .off {
             stopServer()
             receiverStatus = .off
+            return
+        }
+        if wasOff, notificationsEnabled { NotificationManager.shared.requestAuthorization { _ in } }
+        if wasOff || server == nil {
+            startServer()
+        } else {
+            // Same listener (transfers in progress keep going); only the announcement changes.
+            server?.refreshAdvertisement()
+            scheduleAutoOff()
         }
     }
 
@@ -244,9 +341,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
             receiverStatus = .noNetwork
             return
         }
+        let flag = privateFlag
         let server = CrossDropServer(configuration: .init(
             identity: identity, local: localInfo, trust: trustStore,
-            destination: { AppSettings.destination }))
+            destination: { AppSettings.destination }, privateMode: { flag.get() }))
         server.delegate = self
         server.onStateChange = { [weak self, weak server] state in
             DispatchQueue.main.async {
@@ -255,7 +353,7 @@ final class AppModel: ObservableObject, CrossDropDelegate {
             }
         }
         do {
-            try server.start(port: nil, advertise: true)
+            try server.start(port: usePreferredPort ? Self.preferredPort : nil, advertise: true)
             self.server = server
             receiverStatus = .starting
         } catch {
@@ -264,9 +362,12 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         scheduleAutoOff()
     }
 
+    static let preferredPort: UInt16 = 47100
+
     private func stopServer() {
         server?.stop()
         server = nil
+        listeningPort = nil
         autoOffTimer?.invalidate()
         autoOffTimer = nil
         autoOffDate = nil
@@ -276,9 +377,18 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         switch state {
         case .stopped: receiverStatus = receivingEnabled ? .starting : .off
         case .starting: receiverStatus = .starting
-        case .ready: receiverStatus = .ready
+        case .ready(let port):
+            receiverStatus = .ready
+            listeningPort = port
         case .localNetworkDenied: receiverStatus = .localNetworkDenied
-        case .failed: receiverStatus = .failed("Receiving stopped unexpectedly.")
+        case .failed:
+            if usePreferredPort {
+                // The stable port is taken (another app, or a second copy): any free port works too.
+                usePreferredPort = false
+                startServer()
+                return
+            }
+            receiverStatus = .failed("Receiving stopped unexpectedly.")
         }
     }
 
@@ -286,7 +396,8 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         autoOffTimer?.invalidate()
         autoOffTimer = nil
         autoOffDate = nil
-        guard receivingEnabled, autoOffMinutes > 0 else { return }
+        // Only "Everyone" times out; "My devices" stays on (it is invisible to others).
+        guard receiveMode == .everyone, autoOffMinutes > 0 else { return }
         let date = Date().addingTimeInterval(TimeInterval(autoOffMinutes * 60))
         autoOffDate = date
         let timer = Timer(fire: date, interval: 0, repeats: false) { [weak self] _ in
@@ -304,8 +415,8 @@ final class AppModel: ObservableObject, CrossDropDelegate {
             autoOffTimer = timer
             return
         }
-        setReceiving(false)
-        show("Receiving turned off to save energy.")
+        setReceiveMode(.mine)
+        show("No longer visible to everyone. Your paired devices can still send.")
     }
 
     // MARK: - Discovery
@@ -358,14 +469,40 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     }
 
     private func updateNearby(_ devices: [DiscoveredDevice]) {
+        discovered = devices
+        refreshNearby()
+    }
+
+    /// Discovered devices (private ones only when paired), plus paired devices that
+    /// discovery can't see but that answered at a known address before.
+    private func refreshNearby() {
+        let trusted = Dictionary(trustedDevices.map { ($0.deviceId, $0) }, uniquingKeysWith: { a, _ in a })
+        var devices = discovered.filter { !$0.isPrivate || trusted[$0.deviceId] != nil }.map { device -> DiscoveredDevice in
+            guard let record = trusted[device.deviceId] else { return device }
+            // Show the name the user knows (a private device advertises a random one).
+            return DiscoveredDevice(deviceId: device.deviceId, name: record.name, platform: device.platform,
+                                    endpoint: device.endpoint, isPrivate: device.isPrivate)
+        }
+        let seen = Set(devices.map(\.deviceId))
+        for record in trustedDevices where !seen.contains(record.deviceId) {
+            guard let host = record.lastHost, let port = record.lastPort, let nwPort = NWEndpoint.Port(rawValue: port) else { continue }
+            devices.append(DiscoveredDevice(deviceId: record.deviceId, name: record.name, platform: record.platform,
+                                            endpoint: .hostPort(host: NWEndpoint.Host(host), port: nwPort),
+                                            isRemembered: true))
+        }
         nearby = devices
+        multiSelection = multiSelection.filter { id in devices.contains { $0.deviceId == id } }
         if let selected = selectedDeviceId, !devices.contains(where: { $0.deviceId == selected }) {
             selectedDeviceId = nil
         }
         if selectedDeviceId == nil, devices.count == 1 {
             selectedDeviceId = devices[0].deviceId
         }
+        discoveredCount = discovered.count
     }
+
+    /// Devices found by discovery right now (not counting remembered ones).
+    @Published private(set) var discoveredCount = 0
 
     func isTrusted(_ deviceId: String) -> Bool {
         trustedDevices.contains { $0.deviceId == deviceId }
@@ -421,9 +558,9 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     func chooseFiles() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
-        panel.message = "Choose files to send. Folders aren't supported yet."
+        panel.message = "Choose files or folders to send. Folders arrive with their structure."
         panel.prompt = "Add"
         NSApp.activate(ignoringOtherApps: true)
         panel.begin { [weak self] response in
@@ -449,21 +586,72 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     }
 
     func addFiles(_ urls: [URL]) {
-        var skippedFolders = 0
+        var added = 0
+        var skipped = 0
         for url in urls {
-            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .isRegularFileKey])
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            if values?.isSymbolicLink == true { skipped += 1; continue }
             if values?.isDirectory == true {
-                skippedFolders += 1
+                let (count, rest) = addFolder(url)
+                added += count
+                skipped += rest
                 continue
             }
-            guard values?.isRegularFile ?? true else { continue }
-            if selectedFiles.contains(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) { continue }
-            selectedFiles.append(SelectedFile(url: url, name: url.lastPathComponent, size: Int64(values?.fileSize ?? 0)))
+            if add(url, path: []) { added += 1 }
         }
-        if skippedFolders > 0 {
-            show(skippedFolders == 1 ? "Folders aren't supported yet. Add the files inside it instead."
-                                     : "\(skippedFolders) folders were skipped. Folders aren't supported yet.")
+        if selectedFiles.count > ProtocolConstants.maxFilesPerOffer {
+            selectedFiles = Array(selectedFiles.prefix(ProtocolConstants.maxFilesPerOffer))
+            show("Up to \(ProtocolConstants.maxFilesPerOffer) files can go in one send; the rest were left out.")
+        } else if skipped > 0 {
+            show(skipped == 1 ? "1 item was skipped (a link or an unreadable file)."
+                              : "\(skipped) items were skipped (links or unreadable files).")
         }
+        if added > 0 { pendingText = nil }
+    }
+
+    /// Adds every regular file under `folder`, keeping its structure (§9.1).
+    /// Hidden files and symbolic links are skipped.
+    private func addFolder(_ folder: URL) -> (added: Int, skipped: Int) {
+        let base = folder.standardizedFileURL.pathComponents
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
+        guard let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys,
+                                                          options: [.skipsHiddenFiles, .skipsPackageDescendants]) else {
+            return (0, 1)
+        }
+        var added = 0
+        var skipped = 0
+        for case let url as URL in walker {
+            guard selectedFiles.count < ProtocolConstants.maxFilesPerOffer + 1 else { break }
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            if values?.isSymbolicLink == true { skipped += 1; continue }
+            guard values?.isRegularFile == true else { continue }
+            let parts = url.standardizedFileURL.deletingLastPathComponent().pathComponents
+            let inside = Array(parts.dropFirst(base.count))
+            let path = [folder.lastPathComponent] + inside
+            if path.count > ProtocolConstants.maxPathComponents { skipped += 1; continue }
+            if add(url, path: path) { added += 1 }
+        }
+        return (added, skipped)
+    }
+
+    private func add(_ url: URL, path: [String]) -> Bool {
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        guard values?.isRegularFile ?? true else { return false }
+        if selectedFiles.contains(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) { return false }
+        selectedFiles.append(SelectedFile(url: url, name: url.lastPathComponent, size: Int64(values?.fileSize ?? 0), path: path))
+        return true
+    }
+
+    /// Takes a link or text from the clipboard to send. Only when the user asks.
+    @discardableResult
+    func takeClipboard() -> Bool {
+        guard let raw = NSPasteboard.general.string(forType: .string), let text = PendingText.from(raw) else {
+            show("The clipboard has no link or text to send.")
+            return false
+        }
+        pendingText = text
+        selectedFiles.removeAll()
+        return true
     }
 
     func removeFile(_ file: SelectedFile) {
@@ -472,7 +660,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
 
     func clearSelection() {
         selectedFiles.removeAll()
+        pendingText = nil
     }
+
+    var hasSomethingToSend: Bool { !selectedFiles.isEmpty || pendingText != nil }
 
     var selectedTotalBytes: Int64 {
         selectedFiles.reduce(0) { $0 + $1.size }
@@ -481,24 +672,56 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     // MARK: - Sending
 
     func sendSelection(to device: DiscoveredDevice) {
-        guard !selectedFiles.isEmpty else { return }
-        let files = selectedFiles.map { file in
-            OutgoingFile(url: file.url, name: file.name,
-                         mime: UTType(filenameExtension: file.url.pathExtension)?.preferredMIMEType)
-        }
-        startTransfer(files: files, to: device)
-        selectedFiles.removeAll()
+        sendSelection(to: [device])
     }
 
-    private func startTransfer(files: [OutgoingFile], to device: DiscoveredDevice) {
+    /// Sends what is selected (files, or a link / text) to each device; every device
+    /// gets its own transfer, verified separately.
+    func sendSelection(to devices: [DiscoveredDevice]) {
+        guard !devices.isEmpty else { return }
+        if let text = pendingText {
+            let name = text.kind == .link ? "Link" : "Text"
+            for device in devices {
+                startTransfer(files: [OutgoingFile.text(text.text, name: name)], to: device, kind: text.kind,
+                              text: text.kind == .link ? text.text : nil)
+            }
+            pendingText = nil
+        } else {
+            guard !selectedFiles.isEmpty else { return }
+            let files = selectedFiles.map { file in
+                OutgoingFile(url: file.url, name: file.name,
+                             mime: UTType(filenameExtension: file.url.pathExtension)?.preferredMIMEType,
+                             path: file.path)
+            }
+            for device in devices { startTransfer(files: files, to: device) }
+            selectedFiles.removeAll()
+        }
+        multiSelecting = false
+        multiSelection.removeAll()
+    }
+
+    /// Sends the clipboard to one device straight away (menu bar shortcut).
+    func sendClipboard(to device: DiscoveredDevice) {
+        guard takeClipboard() else { return }
+        sendSelection(to: [device])
+    }
+
+    private func startTransfer(files: [OutgoingFile], to device: DiscoveredDevice, kind: OfferKind = .files,
+                               text: String? = nil) {
         let transfer = OutgoingTransfer(endpoint: device.endpoint, peerName: device.name, peerId: device.deviceId,
                                         peerPlatform: device.platform, files: files, identity: identity,
-                                        local: localInfo, trust: trustStore, delegate: self)
+                                        local: localInfo, trust: trustStore, delegate: self, kind: kind)
         outgoing[transfer.id] = transfer
-        retryInfo[transfer.id] = (files, device.deviceId)
+        retryInfo[transfer.id] = (files, device.deviceId, kind)
+        if let text = text { sentText[transfer.id] = text }
         upsert(transfer.snapshot)
+        let trust = trustStore
         Task.detached { [weak self] in
-            _ = await transfer.run()
+            let result = await transfer.run()
+            // Remember where a paired device answered, for networks that block discovery.
+            if result.phase == .completed, let peerId = result.peerId, let address = transfer.connectedAddress {
+                trust.rememberAddress(address.host, port: address.port, for: peerId)
+            }
             DispatchQueue.main.async { self?.outgoing[transfer.id] = nil }
         }
     }
@@ -516,7 +739,26 @@ final class AppModel: ObservableObject, CrossDropDelegate {
             return
         }
         transfers.removeAll { $0.id == item.id }
-        startTransfer(files: info.files, to: device)
+        startTransfer(files: info.files, to: device, kind: info.kind, text: sentText[item.id])
+    }
+
+    /// History "Send again": puts the files (if they still exist) or the link back in
+    /// the tray on the Send page, so the user picks where they go.
+    func sendAgain(_ entry: HistoryEntry) {
+        if entry.kind == "link", let link = entry.link, let text = PendingText.from(link) {
+            selectedFiles.removeAll()
+            pendingText = text
+        } else {
+            let urls = entry.files.compactMap { $0.path }.map { URL(fileURLWithPath: $0) }
+                .filter { FileManager.default.isReadableFile(atPath: $0.path) }
+            guard !urls.isEmpty else {
+                show("Those files are no longer where they were.")
+                return
+            }
+            pendingText = nil
+            addFiles(urls)
+        }
+        selectedTab = .send
     }
 
     func cancel(_ item: TransferItem) {
@@ -553,10 +795,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     /// Set by the prompt sheet when it appears.
     var presentedPromptId: String?
 
-    func respond(to prompt: PromptItem, accept: Bool) {
+    func respond(to prompt: PromptItem, accept: Bool, mine: Bool = false) {
         switch prompt {
         case .pairing(let pairing, let decision):
-            decision.resolve(accept)
+            decision.resolve(accept, mine: mine)
             if accept {
                 waitingPairingIds.insert(pairing.id)
             } else {
@@ -636,6 +878,64 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         if enabled { NotificationManager.shared.requestAuthorization { _ in } }
     }
 
+    func setHeicToJpeg(_ enabled: Bool) {
+        heicToJpeg = enabled
+        AppSettings.heicToJpeg = enabled
+    }
+
+    // MARK: - Pairing QR code (§9.4)
+
+    /// The URI a phone scans to pair without comparing numbers. Holds a one-time token
+    /// (valid 5 minutes), this Mac's key fingerprint and its addresses; no secrets beyond
+    /// the single-use token, which only lets the scanner skip the code comparison.
+    func pairingURI(mine: Bool) -> String? {
+        guard let server = server, let port = listeningPort else { return nil }
+        let hosts = Self.localIPv4Addresses()
+        guard !hosts.isEmpty else { return nil }
+        let token = server.pairingTokens.issue(mine: mine)
+        var components = URLComponents()
+        components.scheme = "crossdrop"
+        components.host = "pair"
+        components.queryItems = [
+            URLQueryItem(name: "v", value: "\(ProtocolConstants.version)"),
+            URLQueryItem(name: "id", value: identity.deviceId),
+            URLQueryItem(name: "fp", value: identity.fingerprint),
+            URLQueryItem(name: "t", value: token),
+            URLQueryItem(name: "n", value: String(deviceName.prefix(40))),
+            URLQueryItem(name: "p", value: "\(port)"),
+            URLQueryItem(name: "h", value: hosts.prefix(4).joined(separator: ",")),
+        ]
+        return components.string
+    }
+
+    /// Unused codes stop working when the sheet closes.
+    func endPairingCodes() {
+        server?.pairingTokens.revokeAll()
+    }
+
+    /// This Mac's IPv4 addresses on Wi-Fi / Ethernet interfaces (en*), private ranges first.
+    static func localIPv4Addresses() -> [String] {
+        var result: [String] = []
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return [] }
+        defer { freeifaddrs(head) }
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        while let item = cursor {
+            defer { cursor = item.pointee.ifa_next }
+            let flags = item.pointee.ifa_flags
+            guard (flags & UInt32(IFF_UP)) != 0, (flags & UInt32(IFF_LOOPBACK)) == 0,
+                  let addr = item.pointee.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let name = String(cString: item.pointee.ifa_name)
+            guard name.hasPrefix("en") || name.hasPrefix("bridge") else { continue }
+            var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if getnameinfo(addr, socklen_t(addr.pointee.sa_len), &buffer, socklen_t(buffer.count), nil, 0, NI_NUMERICHOST) == 0 {
+                let text = String(cString: buffer)
+                if !text.hasPrefix("169.254.") { result.append(text) }
+            }
+        }
+        return result
+    }
+
     func setSoundOnDone(_ enabled: Bool) {
         soundOnDone = enabled
         AppSettings.soundOnDone = enabled
@@ -683,12 +983,22 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         DispatchQueue.main.async {
             self.prompts.append(.offer(offer, decision))
             self.requestMainWindow()
-            self.notify(title: "Incoming files", body: "\(offer.peer.name) wants to send you files.")
+            let what: String
+            switch offer.kind {
+            case .link: what = "a link"
+            case .text: what = "some text"
+            case .files: what = offer.files.count == 1 ? "a file" : "\(offer.files.count) files"
+            }
+            if self.notificationsEnabled, !NSApp.isActive {
+                NotificationManager.shared.postOffer(transferId: offer.transferId, title: "Incoming from \(offer.peer.name)",
+                                                     body: "\(offer.peer.name) wants to send you \(what).")
+            }
         }
     }
 
     func crossDropOfferFinished(transferId: String) {
         DispatchQueue.main.async {
+            NotificationManager.shared.removeOffer(transferId: transferId)
             self.prompts.removeAll { $0.id == "offer-" + transferId }
         }
     }
@@ -714,13 +1024,24 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     }
 
     private func record(_ snapshot: TransferSnapshot) {
+        let link: String? = snapshot.kind == .link ? (snapshot.text ?? sentText[snapshot.id]).map { String($0.prefix(2048)) } : nil
         let entry = HistoryEntry(
             id: snapshot.id, direction: snapshot.direction.rawValue, peerName: snapshot.peerName,
             platform: snapshot.peerPlatform ?? "android", status: snapshot.phase.rawValue,
-            files: snapshot.files.map { HistoryFile(name: $0.name, size: $0.size, path: $0.savedURL?.path) },
-            totalBytes: snapshot.totalBytes, finishedAt: Date(), errorCode: snapshot.error?.code)
+            files: snapshot.files.map { HistoryFile(name: $0.name, size: $0.size, path: ($0.savedURL ?? $0.sourceURL)?.path) },
+            totalBytes: snapshot.totalBytes, finishedAt: Date(), errorCode: snapshot.error?.code,
+            kind: snapshot.kind.rawValue, link: link)
         historyStore.add(entry)
         history = historyStore.entries
+
+        if snapshot.kind != .files {
+            handleHandoff(snapshot)
+            return
+        }
+        if snapshot.direction == .incoming, snapshot.phase == .completed, heicToJpeg {
+            let urls = snapshot.files.compactMap { $0.savedURL }
+            DispatchQueue.global(qos: .utility).async { HeicConverter.saveJpegCopies(of: urls) }
+        }
 
         let count = snapshot.files.count
         let noun = count == 1 ? "file" : "\(count) files"
@@ -737,6 +1058,32 @@ final class AppModel: ObservableObject, CrossDropDelegate {
             notify(title: "Transfer failed", body: TransferText.errorMessage(snapshot))
         default:
             break
+        }
+    }
+
+    /// A link or text arrived (§9.2): links open in the browser (http/https only), text
+    /// goes to the clipboard. The sender was approved (or is auto-accepted) like any offer.
+    private func handleHandoff(_ snapshot: TransferSnapshot) {
+        guard snapshot.phase == .completed else {
+            if snapshot.phase == .failed { notify(title: "Transfer failed", body: TransferText.errorMessage(snapshot)) }
+            return
+        }
+        if soundOnDone { DoneSound.play() }
+        if snapshot.direction == .outgoing {
+            show(snapshot.kind == .link ? "Link sent to \(snapshot.peerName)." : "Text sent to \(snapshot.peerName).")
+            return
+        }
+        guard let text = snapshot.text else { return }
+        if snapshot.kind == .link, let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
+           let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host != nil {
+            NSWorkspace.shared.open(url)
+            show("Opened a link from \(snapshot.peerName).")
+            notify(title: "Link from \(snapshot.peerName)", body: "Opened in your browser.")
+        } else {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            show("Copied text from \(snapshot.peerName) to the clipboard.")
+            notify(title: "Text from \(snapshot.peerName)", body: "Copied to the clipboard.")
         }
     }
 

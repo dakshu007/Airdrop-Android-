@@ -33,6 +33,22 @@ struct ReceiveView: View {
 struct ReceiveToggleCard: View {
     @EnvironmentObject private var model: AppModel
 
+    private var headline: String {
+        switch model.receiveMode {
+        case .off: return "Drip is napping"
+        case .mine: return "Ready for your devices"
+        case .everyone: return "Visible to everyone nearby"
+        }
+    }
+
+    private var explanation: String {
+        switch model.receiveMode {
+        case .off: return "Nobody can send to this Mac. You can still send."
+        case .mine: return "Devices you paired can send any time. Everyone else can't see this Mac."
+        case .everyone: return "Anyone nearby can ask to send. New devices confirm a code first, and you approve each transfer."
+        }
+    }
+
     var body: some View {
         HStack(spacing: CDSpacing.l) {
             // Drip naps while this Mac is hidden and waves while it's visible.
@@ -40,28 +56,27 @@ struct ReceiveToggleCard: View {
                 .id(model.receivingEnabled)
                 .frame(width: 104, height: 90)
 
-            Toggle(isOn: Binding(get: { model.receivingEnabled }, set: { model.setReceiving($0) })) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(model.receivingEnabled ? "Receiving" : "Drip is napping")
-                            .font(CDFont.title)
-                            .foregroundColor(CDPalette.textPrimary)
-                        StatusDot(color: ReceiverText.color(model.receiverStatus))
-                    }
-                    Text(ReceiverText.detail(model))
-                        .font(CDFont.body)
-                        .foregroundColor(CDPalette.textSecondary)
-                    if let date = model.autoOffDate {
-                        Text("Turns off at \(date.formatted(date: .omitted, time: .shortened)) to save energy")
-                            .font(CDFont.caption)
-                            .foregroundColor(CDPalette.textTertiary)
-                    }
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text(headline)
+                        .font(CDFont.title)
+                        .foregroundColor(CDPalette.textPrimary)
+                    StatusDot(color: ReceiverText.color(model.receiverStatus))
                 }
-                .legibleText()
+                Text(explanation)
+                    .font(CDFont.body)
+                    .foregroundColor(CDPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ReceiveModePicker()
+                    .frame(maxWidth: 360)
+                if let date = model.autoOffDate {
+                    Text("Back to My Devices at \(date.formatted(date: .omitted, time: .shortened))")
+                        .font(CDFont.caption)
+                        .foregroundColor(CDPalette.textTertiary)
+                }
             }
-            .toggleStyle(GlassToggleStyle())
-            .accessibilityLabel("Receive files from nearby devices")
-        }
+            .legibleText()
+            Spacer(minLength: 0)
         .padding(CDSpacing.xl)
         .glassPanel(cornerRadius: CDRadius.panel)
         .overlay(alignment: .bottomLeading) {

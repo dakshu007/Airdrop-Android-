@@ -21,6 +21,10 @@ struct HistoryEntry: Codable, Identifiable, Equatable {
     var totalBytes: Int64
     var finishedAt: Date
     var errorCode: String?
+    /// "files", "link" or "text" (absent in older entries = files).
+    var kind: String?
+    /// The link itself for link entries; text content is never stored.
+    var link: String?
 
     var isIncoming: Bool { direction == TransferDirection.incoming.rawValue }
 }

@@ -19,6 +19,10 @@ struct SendView: View {
                 SelectedFilesCard()
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
             }
+            if let text = model.pendingText {
+                PendingTextCard(text: text)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            }
             NearbyCard()
             let outgoing = model.outgoingTransfers
             if !outgoing.isEmpty {
@@ -30,6 +34,7 @@ struct SendView: View {
             }
         }
         .animation(CDMotion.layout(reduceMotion), value: model.selectedFiles)
+        .animation(CDMotion.layout(reduceMotion), value: model.pendingText)
     }
 
     private var nearbyText: String {
@@ -70,7 +75,7 @@ struct DropZone: View {
                 .foregroundColor(CDPalette.textPrimary)
 
             if !compact {
-                Text("Drag from Finder, or choose them. Folders aren't supported yet.")
+                Text("Drag from Finder or onto the menu bar icon. Folders keep their structure.")
                     .font(CDFont.callout)
                     .foregroundColor(CDPalette.textSecondary)
                     .multilineTextAlignment(.center)
@@ -88,7 +93,16 @@ struct DropZone: View {
                     }
                 }
                 .buttonStyle(PrimaryButtonStyle(large: !compact))
-                .help("Choose files to send (⌘O)")
+                .help("Choose files or folders to send (⌘O)")
+                if !compact {
+                    Button {
+                        model.takeClipboard()
+                    } label: {
+                        Label("Clipboard", systemImage: "doc.on.clipboard")
+                    }
+                    .buttonStyle(GlassButtonStyle())
+                    .help("Send the link or text you copied (⇧⌘V). A link opens on the phone.")
+                }
                 if !model.selectedFiles.isEmpty && !compact {
                     Chip(text: Format.files(model.selectedFiles.count), symbol: "doc.on.doc")
                     Chip(text: Format.bytes(model.selectedTotalBytes))
@@ -139,7 +153,7 @@ struct SelectedFilesCard: View {
                     HStack(spacing: CDSpacing.m) {
                         FileIcon(url: file.url, name: file.name, size: 30)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(file.name)
+                            Text(file.displayName)
                                 .font(CDFont.body)
                                 .foregroundColor(CDPalette.textPrimary)
                                 .lineLimit(1)
@@ -155,7 +169,7 @@ struct SelectedFilesCard: View {
                             Image(systemName: "xmark")
                         }
                         .buttonStyle(IconButtonStyle(size: 24))
-                        .accessibilityLabel("Remove \(file.name)")
+                        .accessibilityLabel("Remove \(file.displayName)")
                     }
                     .padding(.vertical, 8)
                     if file.id != model.selectedFiles.last?.id {
@@ -163,6 +177,40 @@ struct SelectedFilesCard: View {
                     }
                 }
             }
+        }
+        .padding(CDSpacing.l)
+        .glassPanel(cornerRadius: CDRadius.card)
+    }
+}
+
+/// A link or text from the clipboard, waiting to be sent (§9.2).
+struct PendingTextCard: View {
+    @EnvironmentObject private var model: AppModel
+    let text: PendingText
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: CDSpacing.m) {
+            HStack {
+                SectionHeader(title: text.kind == .link ? "Link ready to send" : "Text ready to send",
+                              detail: text.kind == .link ? "Opens on the phone when it arrives" : "Lands on the phone's clipboard, not as a file")
+                Button("Clear") { model.pendingText = nil }
+                    .buttonStyle(GlassButtonStyle())
+            }
+            HStack(alignment: .top, spacing: CDSpacing.m) {
+                Image(systemName: text.kind == .link ? "link" : "doc.plaintext")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(CDPalette.mint)
+                    .frame(width: 30)
+                Text(text.text)
+                    .font(CDFont.body)
+                    .foregroundColor(CDPalette.textPrimary)
+                    .lineLimit(text.kind == .link ? 2 : 5)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            .padding(CDSpacing.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassPanel(cornerRadius: 16, style: .inset)
         }
         .padding(CDSpacing.l)
         .glassPanel(cornerRadius: CDRadius.card)
@@ -184,8 +232,30 @@ struct NearbyCard: View {
                     ProgressView().controlSize(.small).scaleEffect(0.8)
                         .accessibilityLabel("Still looking")
                 }
+                if model.nearby.count > 1 && model.hasSomethingToSend {
+                    Button(model.multiSelecting ? "Cancel" : "Send to Several…") {
+                        model.multiSelecting.toggle()
+                        model.multiSelection.removeAll()
+                    }
+                    .buttonStyle(GlassButtonStyle())
+                }
             }
             stateContent
+            if model.multiSelecting {
+                let chosen = model.nearby.filter { model.multiSelection.contains($0.deviceId) }
+                HStack {
+                    Text(chosen.isEmpty ? "Tick the devices to send to." : "Each device gets its own verified copy.")
+                        .font(CDFont.caption)
+                        .foregroundColor(CDPalette.textSecondary)
+                    Spacer()
+                    Button(chosen.count > 1 ? "Send to \(chosen.count) Devices" : "Send") {
+                        model.sendSelection(to: chosen)
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(chosen.isEmpty)
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
         }
         .padding(CDSpacing.l)
         .glassPanel(cornerRadius: CDRadius.card)
@@ -193,7 +263,7 @@ struct NearbyCard: View {
 
     private var headerDetail: String? {
         if model.nearby.isEmpty { return model.discoveryStatus == .browsing ? "Looking…" : nil }
-        return model.selectedFiles.isEmpty ? "Add files, then click a device" : "Click a device to send"
+        return model.hasSomethingToSend ? "Click a device to send" : "Add files, then click a device"
     }
 
     @ViewBuilder
@@ -240,8 +310,15 @@ struct NearbyCard: View {
                 ForEach(model.nearby) { device in
                     DeviceTile(device: device,
                                trusted: model.isTrusted(device.deviceId),
-                               canSend: !model.selectedFiles.isEmpty) {
-                        if model.selectedFiles.isEmpty {
+                               canSend: model.hasSomethingToSend,
+                               ticked: model.multiSelecting ? model.multiSelection.contains(device.deviceId) : nil) {
+                        if model.multiSelecting {
+                            if model.multiSelection.contains(device.deviceId) {
+                                model.multiSelection.remove(device.deviceId)
+                            } else {
+                                model.multiSelection.insert(device.deviceId)
+                            }
+                        } else if !model.hasSomethingToSend {
                             model.selectedDeviceId = device.deviceId
                             model.chooseFiles()
                         } else {
@@ -264,6 +341,8 @@ struct DeviceTile: View {
     let device: DiscoveredDevice
     let trusted: Bool
     let canSend: Bool
+    /// Non-nil while choosing several devices: whether this one is ticked.
+    var ticked: Bool? = nil
     let action: () -> Void
 
     var body: some View {
@@ -276,24 +355,31 @@ struct DeviceTile: View {
                         .foregroundColor(CDPalette.textPrimary)
                         .lineLimit(1)
                     HStack(spacing: 5) {
-                        if trusted { Circle().fill(CDPalette.mint).frame(width: 6, height: 6) }
-                        Text(trusted ? "Paired" : "New · confirm a code")
+                        if trusted && !device.isRemembered { Circle().fill(CDPalette.mint).frame(width: 6, height: 6) }
+                        Text(device.isRemembered ? "Paired · not seen nearby" : (trusted ? "Paired" : "New · confirm a code"))
                     }
                     .font(CDFont.caption)
                     .foregroundColor(CDPalette.textSecondary)
                 }
                 Spacer(minLength: 0)
-                Text(canSend ? (trusted ? "Send" : "Pair & Send") : "Choose…")
-                    .font(CDFont.poppins(12.5, .semibold))
-                    .foregroundColor(canSend ? .white : CDPalette.ink)
-                    .padding(.horizontal, 14)
-                    .frame(height: 30)
-                    .background(Capsule().fill(canSend ? CDPalette.ink : Color(hex: 0xE9F4EC)))
+                if let ticked = ticked {
+                    Image(systemName: ticked ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 22))
+                        .foregroundColor(ticked ? CDPalette.mint : CDPalette.textTertiary)
+                } else {
+                    Text(canSend ? (trusted ? "Send" : "Pair & Send") : "Choose…")
+                        .font(CDFont.poppins(12.5, .semibold))
+                        .foregroundColor(canSend ? .white : CDPalette.ink)
+                        .padding(.horizontal, 14)
+                        .frame(height: 30)
+                        .background(Capsule().fill(canSend ? CDPalette.ink : Color(hex: 0xE9F4EC)))
+                }
             }
             .padding(12)
         }
         .buttonStyle(TileButtonStyle())
-        .accessibilityLabel("\(device.name), \(device.platform == "android" ? "Android" : "Mac"), \(trusted ? "paired" : "not paired")")
+        .help(device.isRemembered ? "Not found nearby. CrossDrop will try the address that worked last time." : "")
+        .accessibilityLabel("\(device.name), \(device.platform == "android" ? "Android" : "Mac"), \(trusted ? "paired" : "not paired")\(ticked == true ? ", selected" : "")")
         .accessibilityHint(canSend ? "Sends the selected files" : "Choose files to send to this device")
     }
 }

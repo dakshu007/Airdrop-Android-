@@ -54,6 +54,8 @@ public final class OutgoingTransfer {
     private let qr: QrPairing?
     /// Bytes the receiver already holds per file, from `transfer.accept` (§9.3).
     private var resumeAt: [Int64: Int64] = [:]
+    /// The numeric address that answered, once connected (for "last address that worked", §9.5).
+    public private(set) var connectedAddress: (host: String, port: UInt16)?
     /// Test hook: called after each data record with the bytes sent so far for the file.
     public var onChunkSent: ((Int64) -> Void)?
 
@@ -132,6 +134,10 @@ public final class OutgoingTransfer {
             lock.unlock()
             try checkCancelled()
             try await transport.start(timeout: ProtocolConstants.connectTimeout)
+            // IPv4 only: a link-local IPv6 address is useless without this Mac's interface scope.
+            if case let .hostPort(.ipv4(address), port)? = transport.connection.currentPath?.remoteEndpoint {
+                connectedAddress = ("\(address)", port.rawValue)
+            }
 
             let handshake = try await Handshake.runClient(channel: secure, identity: identity, local: local, trust: trust)
             let peer = handshake.peer

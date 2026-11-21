@@ -184,26 +184,35 @@ struct ReceivingPill: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        Toggle(isOn: Binding(get: { model.receivingEnabled }, set: { model.setReceiving($0) })) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 StatusDot(color: ReceiverText.color(model.receiverStatus))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(model.receivingEnabled ? "Receiving" : "Not receiving")
+                    Text(title)
                         .font(CDFont.poppins(12.5, .semibold))
                         .foregroundColor(CDPalette.textPrimary)
                     Text(ReceiverText.detail(model))
                         .font(CDFont.poppins(11))
                         .foregroundColor(CDPalette.textSecondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .truncationMode(.tail)
                 }
             }
+            .accessibilityElement(children: .combine)
+            ReceiveModePicker()
+                .controlSize(.small)
         }
-        .toggleStyle(GlassToggleStyle())
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .glassPanel(cornerRadius: 16, style: .inset)
-        .accessibilityLabel("Receiving. \(ReceiverText.detail(model))")
+    }
+
+    private var title: String {
+        switch model.receiveMode {
+        case .off: return "Not receiving"
+        case .mine: return "My devices"
+        case .everyone: return "Everyone"
+        }
     }
 }
 
@@ -219,7 +228,8 @@ enum ReceiverText {
 
     static func detail(_ model: AppModel) -> String {
         switch model.receiverStatus {
-        case .ready: return "Visible as \(model.deviceName)"
+        case .ready:
+            return model.receiveMode == .mine ? "Ready for your devices · invisible to others" : "Visible as \(model.deviceName)"
         case .starting: return "Starting…"
         case .off: return "Nearby devices can't send to you"
         case .noNetwork: return "Waiting for Wi-Fi"

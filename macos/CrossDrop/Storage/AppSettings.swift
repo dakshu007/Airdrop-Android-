@@ -11,6 +11,27 @@ enum AppSettings {
         static let autoOffMinutes = "autoOffMinutes"
         static let notificationsEnabled = "notificationsEnabled"
         static let soundOnDone = "soundOnDone"
+        static let receiveMode = "receiveMode"
+        static let heicToJpeg = "heicToJpeg"
+    }
+
+    /// "off", "mine" (paired devices only, invisible to others) or "everyone".
+    /// Older versions stored only on/off; on meant visible to everyone.
+    static var receiveMode: String {
+        get {
+            if let mode = defaults.string(forKey: Key.receiveMode), ["off", "mine", "everyone"].contains(mode) { return mode }
+            return receivingEnabled ? "everyone" : "off"
+        }
+        set {
+            defaults.set(newValue, forKey: Key.receiveMode)
+            defaults.set(newValue != "off", forKey: Key.receivingEnabled)
+        }
+    }
+
+    /// Also save a JPEG copy of received HEIC photos (the original is kept).
+    static var heicToJpeg: Bool {
+        get { defaults.object(forKey: Key.heicToJpeg) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.heicToJpeg) }
     }
 
     static var deviceName: String {

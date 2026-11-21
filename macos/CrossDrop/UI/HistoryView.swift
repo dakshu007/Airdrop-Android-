@@ -6,6 +6,17 @@ import CrossDropCore
 struct HistoryView: View {
     @EnvironmentObject private var model: AppModel
     @State private var confirmClear = false
+    @State private var query = ""
+
+    private var filtered: [HistoryEntry] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return model.history }
+        return model.history.filter { entry in
+            entry.peerName.lowercased().contains(q)
+                || (entry.link ?? "").lowercased().contains(q)
+                || entry.files.contains { $0.name.lowercased().contains(q) }
+        }
+    }
 
     var body: some View {
         PageScroll {
@@ -21,10 +32,41 @@ struct HistoryView: View {
                              message: "Finished transfers are listed here. The list never leaves this Mac.")
                     .glassPanel(cornerRadius: CDRadius.card)
             } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(CDPalette.textTertiary)
+                    TextField("Search files, links or devices", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(CDFont.body)
+                        .accessibilityLabel("Search history")
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(CDPalette.textTertiary)
+                        .accessibilityLabel("Clear search")
+                    }
+                }
+                .padding(.horizontal, CDSpacing.m)
+                .frame(height: 38)
+                .glassPanel(cornerRadius: 14, style: .inset)
+                .frame(maxWidth: 420)
+
+                let rows = filtered
                 VStack(spacing: 0) {
-                    ForEach(model.history) { entry in
+                    if rows.isEmpty {
+                        Text("Nothing matches \u{201C}\(query)\u{201D}.")
+                            .font(CDFont.callout)
+                            .foregroundColor(CDPalette.textSecondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, CDSpacing.l)
+                    }
+                    ForEach(rows) { entry in
                         HistoryRow(entry: entry)
-                        if entry.id != model.history.last?.id {
+                        if entry.id != rows.last?.id {
                             GlassDivider().padding(.leading, 64)
                         }
                     }
@@ -82,6 +124,16 @@ struct HistoryRow: View {
                 .help("Show in Finder")
                 .accessibilityLabel("Show in Finder")
             }
+            if canSendAgain {
+                Button {
+                    model.sendAgain(entry)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(IconButtonStyle(size: 26))
+                .help("Send again")
+                .accessibilityLabel("Send \(title) again")
+            }
         }
         .padding(.horizontal, CDSpacing.l)
         .padding(.vertical, 10)
@@ -98,7 +150,17 @@ struct HistoryRow: View {
         entry.files.compactMap { $0.path.map { URL(fileURLWithPath: $0) } }
     }
 
+    /// Outgoing links, and outgoing files that are still where they were.
+    private var canSendAgain: Bool {
+        guard !entry.isIncoming else { return false }
+        if entry.kind == "link" { return entry.link != nil }
+        if entry.kind == "text" { return false }
+        return !entry.files.isEmpty && entry.files.allSatisfy { $0.path != nil }
+    }
+
     private var title: String {
+        if entry.kind == "link" { return entry.link ?? "Link" }
+        if entry.kind == "text" { return "Text" }
         let first = entry.files.first?.name ?? "Files"
         return entry.files.count > 1 ? "\(first) + \(entry.files.count - 1) more" : first
     }

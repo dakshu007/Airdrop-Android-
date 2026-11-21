@@ -13,7 +13,7 @@ struct PromptCard: View {
             switch prompt {
             case .pairing(let pairing, _):
                 PairingContent(prompt: pairing, waiting: model.waitingPairingIds.contains(pairing.id),
-                               respond: { model.respond(to: prompt, accept: $0) })
+                               respond: { accept, mine in model.respond(to: prompt, accept: accept, mine: mine) })
             case .offer(let offer, _):
                 OfferContent(offer: offer, trusted: model.isTrusted(offer.peer.deviceId),
                              destination: model.destination,
@@ -32,7 +32,9 @@ struct PromptCard: View {
 private struct PairingContent: View {
     let prompt: PairingPrompt
     let waiting: Bool
-    let respond: (Bool) -> Void
+    let respond: (_ accept: Bool, _ mine: Bool) -> Void
+    /// "This is my device": its files then arrive without asking.
+    @State private var mine = false
 
     var body: some View {
         VStack(spacing: CDSpacing.l) {
@@ -73,11 +75,26 @@ private struct PairingContent: View {
             .font(CDFont.caption)
             .foregroundColor(CDPalette.textSecondary)
 
+            if !waiting {
+                Toggle(isOn: $mine) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("This is my device")
+                            .font(CDFont.headline)
+                            .foregroundColor(CDPalette.textPrimary)
+                        Text("Files from it arrive without asking.")
+                            .font(CDFont.caption)
+                            .foregroundColor(CDPalette.textSecondary)
+                    }
+                }
+                .toggleStyle(GlassToggleStyle())
+                .frame(maxWidth: 340)
+            }
+
             HStack(spacing: CDSpacing.m) {
-                Button(waiting ? "Cancel" : "They Don't Match") { respond(false) }
+                Button(waiting ? "Cancel" : "They Don't Match") { respond(false, false) }
                     .buttonStyle(GlassButtonStyle())
                     .keyboardShortcut(.cancelAction)
-                Button("Codes Match") { respond(true) }
+                Button("Codes Match") { respond(true, mine) }
                     .buttonStyle(PrimaryButtonStyle(large: true))
                     .keyboardShortcut(.defaultAction)
                     .disabled(waiting)
@@ -93,15 +110,23 @@ private struct OfferContent: View {
     let destination: URL
     let respond: (Bool) -> Void
 
+    private var offerLine: String {
+        switch offer.kind {
+        case .link: return "\(offer.peer.name) wants to send you a link"
+        case .text: return "\(offer.peer.name) wants to send you some text"
+        case .files: return "\(offer.peer.name) wants to send you \(Format.files(offer.files.count))"
+        }
+    }
+
     var body: some View {
         VStack(spacing: CDSpacing.l) {
             DripView(pose: .incoming, size: 150, motion: .pop)
                 .padding(.vertical, -12)
             VStack(spacing: 8) {
-                Text("Files are on their way")
+                Text(offer.kind == .files ? "Files are on their way" : (offer.kind == .link ? "A link is on its way" : "Some text is on its way"))
                     .font(CDFont.poppins(24, .bold))
                     .foregroundColor(CDPalette.textPrimary)
-                Text("\(offer.peer.name) wants to send you \(Format.files(offer.files.count))")
+                Text(offerLine)
                     .font(CDFont.body)
                     .foregroundColor(CDPalette.textSecondary)
                     .multilineTextAlignment(.center)
@@ -113,12 +138,13 @@ private struct OfferContent: View {
                 }
             }
 
+            if offer.kind == .files {
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(offer.files.enumerated()), id: \.offset) { index, file in
                         HStack(spacing: CDSpacing.m) {
                             FileIcon(url: nil, name: file.name, size: 26)
-                            Text(FileNaming.sanitize(file.name))
+                            Text(file.displayPath)
                                 .font(CDFont.callout)
                                 .foregroundColor(CDPalette.textPrimary)
                                 .lineLimit(1)
@@ -138,8 +164,13 @@ private struct OfferContent: View {
             }
             .frame(height: min(190, CGFloat(offer.files.count) * 41))
             .glassPanel(cornerRadius: 16, style: .inset)
+            }
 
-            Text("Saved to \(destination.lastPathComponent) after each file's checksum is verified. Nothing is overwritten.")
+            Text(offer.kind == .link
+                 ? "If you accept, it opens in your browser (web links only)."
+                 : offer.kind == .text
+                 ? "If you accept, it's copied to your clipboard. It isn't saved as a file."
+                 : "Saved to \(destination.lastPathComponent) after each file's checksum is verified. Nothing is overwritten.")
                 .font(CDFont.caption)
                 .foregroundColor(CDPalette.textSecondary)
                 .multilineTextAlignment(.center)

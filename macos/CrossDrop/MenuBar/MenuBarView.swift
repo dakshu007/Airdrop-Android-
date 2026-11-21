@@ -7,7 +7,6 @@ import CrossDropCore
 /// Compact panel shown from the menu bar icon, on the same mint backdrop as the main window.
 struct MenuBarView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -34,25 +33,24 @@ struct MenuBarView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .frame(width: 26, height: 26)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("CrossDrop")
-                    .font(CDFont.poppins(15, .bold))
-                    .foregroundColor(CDPalette.textPrimary)
-                Text(ReceiverText.detail(model))
-                    .font(CDFont.poppins(10.5))
-                    .foregroundColor(CDPalette.textSecondary)
-                    .lineLimit(1)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 26, height: 26)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("CrossDrop")
+                        .font(CDFont.poppins(15, .bold))
+                        .foregroundColor(CDPalette.textPrimary)
+                    Text(ReceiverText.detail(model))
+                        .font(CDFont.poppins(10.5))
+                        .foregroundColor(CDPalette.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
             }
-            Toggle(isOn: Binding(get: { model.receivingEnabled }, set: { model.setReceiving($0) })) {
-                EmptyView()
-            }
-            .toggleStyle(GlassToggleStyle())
-            .accessibilityLabel("Receiving")
+            ReceiveModePicker()
         }
         .padding(.horizontal, CDSpacing.m)
         .padding(.vertical, 10)
@@ -63,14 +61,21 @@ struct MenuBarView: View {
     private var devices: some View {
         VStack(alignment: .leading, spacing: CDSpacing.s) {
             HStack {
-                Text(model.selectedFiles.isEmpty ? "Nearby" : "Send \(Format.files(model.selectedFiles.count)) to")
+                Text(sendTitle)
                     .font(CDFont.poppins(12.5, .semibold))
                     .foregroundColor(CDPalette.textPrimary)
                 Spacer()
-                if !model.selectedFiles.isEmpty {
+                if model.hasSomethingToSend {
                     Button("Clear") { model.clearSelection() }
                         .buttonStyle(GlassButtonStyle())
                 }
+            }
+            if let text = model.pendingText {
+                Label(text.text, systemImage: text.kind == .link ? "link" : "doc.plaintext")
+                    .font(CDFont.caption)
+                    .foregroundColor(CDPalette.textSecondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
             }
             if !model.networkAvailable {
                 HStack(spacing: CDSpacing.m) {
@@ -90,7 +95,7 @@ struct MenuBarView: View {
             } else {
                 ForEach(model.nearby) { device in
                     Button {
-                        if model.selectedFiles.isEmpty {
+                        if !model.hasSomethingToSend {
                             model.selectedDeviceId = device.deviceId
                             model.chooseFiles()
                         } else {
@@ -109,18 +114,27 @@ struct MenuBarView: View {
                                     .foregroundColor(CDPalette.mint)
                                     .accessibilityLabel("Paired")
                             }
+                            if device.isRemembered {
+                                Text("not seen")
+                                    .font(CDFont.poppins(10))
+                                    .foregroundColor(CDPalette.textTertiary)
+                                    .help("Not found nearby. CrossDrop will try the address that worked last time.")
+                            }
                             Spacer()
-                            Image(systemName: model.selectedFiles.isEmpty ? "plus" : "paperplane.fill")
+                            Image(systemName: model.hasSomethingToSend ? "paperplane.fill" : "plus")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(model.selectedFiles.isEmpty ? CDPalette.ink : .white)
+                                .foregroundColor(model.hasSomethingToSend ? .white : CDPalette.ink)
                                 .frame(width: 24, height: 24)
-                                .background(Circle().fill(model.selectedFiles.isEmpty ? Color(hex: 0xE9F4EC) : CDPalette.ink))
+                                .background(Circle().fill(model.hasSomethingToSend ? CDPalette.ink : Color(hex: 0xE9F4EC)))
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
                     }
                     .buttonStyle(TileButtonStyle())
-                    .accessibilityLabel(model.selectedFiles.isEmpty ? "Choose files for \(device.name)" : "Send to \(device.name)")
+                    .accessibilityLabel(model.hasSomethingToSend ? "Send to \(device.name)" : "Choose files for \(device.name)")
+                    .contextMenu {
+                        Button("Send Clipboard to \(device.name)") { model.sendClipboard(to: device) }
+                    }
                 }
             }
         }
@@ -128,15 +142,37 @@ struct MenuBarView: View {
         .glassPanel(cornerRadius: CDRadius.card)
     }
 
+    private var sendTitle: String {
+        if let text = model.pendingText { return text.kind == .link ? "Send link to" : "Send text to" }
+        return model.selectedFiles.isEmpty ? "Nearby" : "Send \(Format.files(model.selectedFiles.count)) to"
+    }
+
     private var footer: some View {
-        HStack {
+        HStack(spacing: CDSpacing.s) {
             Button {
-                openWindow(id: "main")
-                NSApp.activate(ignoringOtherApps: true)
+                model.requestMainWindow()
             } label: {
                 Label("Open CrossDrop", systemImage: "macwindow")
             }
             .buttonStyle(PrimaryButtonStyle())
+            Button {
+                model.takeClipboard()
+            } label: {
+                Image(systemName: "doc.on.clipboard")
+            }
+            .buttonStyle(GlassButtonStyle())
+            .help("Send what's on the clipboard (a link opens on the phone)")
+            .accessibilityLabel("Send clipboard")
+            Button {
+                model.selectedTab = .devices
+                model.showingPairSheet = true
+                model.requestMainWindow()
+            } label: {
+                Image(systemName: "qrcode")
+            }
+            .buttonStyle(GlassButtonStyle())
+            .help("Pair a phone with a QR code")
+            .accessibilityLabel("Pair a phone")
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }
                 .buttonStyle(GlassButtonStyle())
@@ -154,5 +190,22 @@ struct MenuBarView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Off / My Devices / Everyone, as a compact glass segmented control.
+struct ReceiveModePicker: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Picker("Who can send to this Mac", selection: Binding(get: { model.receiveMode }, set: { model.setReceiveMode($0) })) {
+            ForEach(ReceiveMode.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .help("My Devices: only devices you paired, invisible to others. Everyone: anyone nearby can ask to send.")
+        .accessibilityLabel("Who can send to this Mac")
     }
 }

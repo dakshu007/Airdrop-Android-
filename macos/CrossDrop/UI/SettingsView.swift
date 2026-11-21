@@ -47,15 +47,22 @@ struct SettingsView: View {
             }
 
             SettingsSection(title: "Receiving", symbol: "antenna.radiowaves.left.and.right") {
-                Toggle(isOn: Binding(get: { model.receivingEnabled }, set: { model.setReceiving($0) })) {
-                    Text("Let nearby devices send files to this Mac")
-                        .font(CDFont.body)
-                        .foregroundColor(CDPalette.textPrimary)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Who can send to this Mac")
+                            .font(CDFont.body)
+                            .foregroundColor(CDPalette.textPrimary)
+                        Text("My Devices: only devices you paired, and this Mac stays invisible to others.")
+                            .font(CDFont.caption)
+                            .foregroundColor(CDPalette.textTertiary)
+                    }
+                    Spacer()
+                    ReceiveModePicker()
+                        .frame(width: 280)
                 }
-                .toggleStyle(GlassToggleStyle())
                 GlassDivider()
                 HStack {
-                    Text("Turn off automatically")
+                    Text("Everyone: back to My Devices after")
                         .font(CDFont.body)
                         .foregroundColor(CDPalette.textPrimary)
                     Spacer()
@@ -63,10 +70,33 @@ struct SettingsView: View {
                                    selection: Binding(get: { model.autoOffMinutes },
                                                       set: { model.setAutoOff(minutes: $0) }))
                 }
-                Text("While receiving is on, this Mac announces its name and a random device ID on the local network. Every connection still proves its identity, and new devices must pair first.")
+                Text("With Everyone, this Mac announces its name and device ID on the local network; with My Devices, a random name instead. Every connection still proves its identity, and new devices must pair first.")
                     .font(CDFont.caption)
                     .foregroundColor(CDPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            SettingsSection(title: "Photos", symbol: "photo") {
+                Toggle(isOn: Binding(get: { model.heicToJpeg }, set: { model.setHeicToJpeg($0) })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Also save HEIC photos as JPEG")
+                            .font(CDFont.body)
+                            .foregroundColor(CDPalette.textPrimary)
+                        Text("Phones send photos in original quality. This adds a JPEG copy for apps that can't open HEIC; the original is kept.")
+                            .font(CDFont.caption)
+                            .foregroundColor(CDPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(GlassToggleStyle())
+            }
+
+            SettingsSection(title: "Shortcuts", symbol: "command") {
+                VStack(alignment: .leading, spacing: 8) {
+                    bullet("Drag files onto the CrossDrop icon in the menu bar to get them ready to send.")
+                    bullet("In Finder, right-click files › Services › Send with CrossDrop. If it's missing, turn it on in System Settings › Keyboard › Keyboard Shortcuts › Services.")
+                    bullet("⇧⌘V sends what you copied: a link opens on the phone, text lands on its clipboard.")
+                }
             }
 
             SettingsSection(title: "Feedback", symbol: "speaker.wave.2") {
