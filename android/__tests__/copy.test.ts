@@ -63,3 +63,36 @@ test('status labels depend on direction', () => {
   expect(statusLabel('transferring', 'incoming')).toBe('Receiving');
   expect(statusLabel('completed', 'incoming')).toBe('Received');
 });
+
+describe('queue, room and code helpers', () => {
+  const {
+    errorCode,
+    isRoomCode,
+    pairError,
+    queueError,
+    roomError,
+  } = require('../src/copy');
+
+  test('recognises room invites', () => {
+    expect(isRoomCode('crossdrop://room?v=1&id=abc')).toBe(true);
+    expect(isRoomCode('  CROSSDROP://ROOM?v=1')).toBe(true);
+    expect(isRoomCode('crossdrop://pair?v=1')).toBe(false);
+  });
+
+  test('reads a bridge error code', () => {
+    expect(
+      errorCode(Object.assign(new Error('x'), { code: 'queue_full' })),
+    ).toBe('queue_full');
+    expect(errorCode(new Error('x'))).toBe('');
+    expect(errorCode(null)).toBe('');
+  });
+
+  test('explains failures without leaving the user guessing', () => {
+    expect(queueError('queue_full')).toContain('full');
+    expect(queueError('unreachable')).toBe('Device not reachable');
+    expect(queueError(null)).toBe('Something went wrong. Try again.');
+    expect(roomError('expired')).toBe('That room has already ended.');
+    expect(roomError('weird')).toBe('Something went wrong. Try again.');
+    expect(pairError('own_code')).toBe('That’s this phone’s own code.');
+  });
+});

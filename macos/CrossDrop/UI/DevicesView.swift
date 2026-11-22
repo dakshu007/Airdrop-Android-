@@ -21,6 +21,7 @@ struct DevicesView: View {
                 ThisDeviceCard()
                 PairPhoneCard()
             }
+            RoomCard()
             SectionHeader(title: "Paired",
                           detail: model.trustedDevices.isEmpty ? nil : "\(model.trustedDevices.count)")
                 .padding(.top, ui.s)
@@ -162,18 +163,33 @@ struct TrustedDeviceRow: View {
             GlassDivider()
             SettingsRow {
                 VStack(alignment: .leading, spacing: ui.s) {
-                    Toggle(isOn: Binding(get: { device.autoAccept }, set: { model.setAutoAccept($0, for: device) })) {
-                        VStack(alignment: .leading, spacing: ui(2)) {
-                            Text("Accept files automatically")
-                                .font(ui.font(12, .medium))
-                                .foregroundColor(CDPalette.textPrimary)
-                            Text("Files from this device are saved without asking. They're still verified.")
+                    if device.isTemporary {
+                        // Room trust (§9.9) ends with the room and never accepts files automatically.
+                        HStack(alignment: .top, spacing: ui(10)) {
+                            Image(systemName: "person.3.fill")
+                                .font(ui.system(12, .semibold))
+                                .foregroundColor(CDPalette.mint)
+                                .padding(.top, ui(2))
+                                .accessibilityHidden(true)
+                            Text("Joined through a Drip Room. You approve each file it sends, and it stops being trusted when the room ends.")
                                 .font(ui.caption)
                                 .foregroundColor(CDPalette.textTertiary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                    } else {
+                        Toggle(isOn: Binding(get: { device.autoAccept }, set: { model.setAutoAccept($0, for: device) })) {
+                            VStack(alignment: .leading, spacing: ui(2)) {
+                                Text("Accept files automatically")
+                                    .font(ui.font(12, .medium))
+                                    .foregroundColor(CDPalette.textPrimary)
+                                Text("Files from this device are saved without asking. They're still verified.")
+                                    .font(ui.caption)
+                                    .foregroundColor(CDPalette.textTertiary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .toggleStyle(GlassToggleStyle())
                     }
-                    .toggleStyle(GlassToggleStyle())
                     Text(Format.fingerprint(device.fingerprint))
                         .font(ui.system(10, design: .monospaced))
                         .foregroundColor(CDPalette.textTertiary)
@@ -193,6 +209,9 @@ struct TrustedDeviceRow: View {
 
     private var subtitle: String {
         let platform = device.platform == "android" ? "Android" : "Mac"
+        if let end = device.expiresAt {
+            return "\(platform) · Room member · trusted until \(end.formatted(date: .omitted, time: .shortened))"
+        }
         let paired = "Paired \(device.pairedAt.formatted(date: .abbreviated, time: .omitted))"
         if let used = device.lastUsedAt {
             return "\(platform) · \(paired) · Last used \(used.formatted(.relative(presentation: .named)))"

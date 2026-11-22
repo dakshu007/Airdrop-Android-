@@ -253,31 +253,36 @@ struct DripIslandView: View {
         .animation(reduceMotion ? .easeInOut(duration: 0.18) : .spring(response: 0.36, dampingFraction: 0.78),
                    value: state.visible)
         .animation(reduceMotion ? .easeInOut(duration: 0.18) : CDMotion.quick, value: state.feedback)
+        // Devices arriving or leaving while the island is open slide in and out of the row.
+        .animation(reduceMotion ? .easeInOut(duration: 0.18) : CDMotion.quick, value: devices.map { $0.deviceId })
     }
 
     private var island: some View {
         VStack(spacing: ui(10)) {
             if let feedback = state.feedback {
                 feedbackRow(feedback)
-                    .transition(.opacity)
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.85).combined(with: .opacity))
             } else {
                 header
                 HStack(alignment: .top, spacing: ui(14)) {
                     if devices.isEmpty {
                         searching
                     } else {
-                        ForEach(devices) { device in
+                        ForEach(Array(devices.enumerated()), id: \.element.id) { index, device in
                             IslandDeviceBubble(device: device,
                                                favorite: isFavorite(device),
                                                paired: model.isTrusted(device.deviceId),
                                                inRoom: model.room(for: device) != nil) { providers in
                                 drop(providers, on: device)
                             }
+                            .modifier(IslandStagger(index: index, visible: state.visible))
+                            .transition(reduceMotion ? .opacity : .scale(scale: 0.6).combined(with: .opacity))
                         }
                     }
                     IslandShelfBubble(items: model.shelf) { providers in
                         stash(providers)
                     }
+                    .modifier(IslandStagger(index: devices.count, visible: state.visible))
                 }
             }
         }
@@ -381,6 +386,24 @@ struct DripIslandView: View {
     private func stash(_ providers: [NSItemProvider]) {
         model.stash(providers: providers)
         state.onDropped?(IslandFeedback(symbol: "tray.and.arrow.down.fill", text: "Kept on the Shelf"))
+    }
+}
+
+/// Bubbles pop in one after another each time the island drops down; a plain fade with
+/// Reduce Motion. Only runs as the island appears, so nothing animates while it rests.
+private struct IslandStagger: ViewModifier {
+    let index: Int
+    let visible: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(visible || reduceMotion ? 1 : 0.55)
+            .opacity(visible ? 1 : 0)
+            .animation(reduceMotion
+                       ? .easeInOut(duration: 0.15)
+                       : .spring(response: 0.42, dampingFraction: 0.68).delay(visible ? 0.06 + Double(index) * 0.035 : 0),
+                       value: visible)
     }
 }
 

@@ -181,7 +181,7 @@ struct ShelfTile: View {
                 if !compact {
                     Text(detail(present: present))
                         .font(ui.font(10).monospacedDigit())
-                        .foregroundColor(present ? CDPalette.textTertiary : CDPalette.amber)
+                        .foregroundColor(present ? CDPalette.textTertiary : CDPalette.amberText)
                         .lineLimit(1)
                 }
             }

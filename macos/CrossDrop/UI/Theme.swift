@@ -224,6 +224,8 @@ enum CDPalette {
     /// Links and secondary accents (darker green for contrast).
     static let sky = Color(hex: 0x0B6B3F)
     static let amber = Color(hex: 0xB07A00)
+    /// Amber for small text on light fills (meets 4.5:1 where `amber` doesn't).
+    static let amberText = Color(hex: 0x8A5F00)
     static let coral = Color(hex: 0xC9573B)
     static let focus = Color(hex: 0x149A5B)
     /// Row separators inside a card.
@@ -637,16 +639,22 @@ struct GlassToggleStyle: ToggleStyle {
             HStack(spacing: ui.l) {
                 configuration.label
                     .frame(maxWidth: .infinity, alignment: .leading)
-                ZStack(alignment: configuration.isOn ? .trailing : .leading) {
-                    Capsule().fill(configuration.isOn ? CDPalette.mint : Color(hex: 0xD5E2D9))
-                    Circle()
-                        .fill(Color.white)
-                        .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
-                        .padding(ui(2))
+                // A real button, so the switch is reachable with Tab and Space and shows the
+                // focus ring (a tap gesture alone can't take keyboard focus).
+                Button {
+                    configuration.isOn.toggle()
+                } label: {
+                    ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                        Capsule().fill(configuration.isOn ? CDPalette.mint : Color(hex: 0xD5E2D9))
+                        Circle()
+                            .fill(Color.white)
+                            .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
+                            .padding(ui(2))
+                    }
+                    .frame(width: ui(40), height: ui(24))
+                    .animation(reduceMotion ? nil : CDMotion.quick, value: configuration.isOn)
                 }
-                .frame(width: ui(40), height: ui(24))
-                .animation(reduceMotion ? nil : CDMotion.quick, value: configuration.isOn)
-                .onTapGesture { configuration.isOn.toggle() }
+                .buttonStyle(SwitchTrackButtonStyle())
             }
             .contentShape(Rectangle())
             .accessibilityElement(children: .combine)
@@ -654,6 +662,16 @@ struct GlassToggleStyle: ToggleStyle {
             .accessibilityValue(configuration.isOn ? "On" : "Off")
             .accessibilityAction { configuration.isOn.toggle() }
         }
+    }
+}
+
+/// The switch track as a button: no chrome of its own, a press dim and the focus ring.
+private struct SwitchTrackButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .contentShape(Capsule())
+            .modifier(FocusRing(shape: Capsule().inset(by: -3)))
     }
 }
 

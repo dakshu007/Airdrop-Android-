@@ -29,8 +29,10 @@ export function DeviceRow({
       duration: v ? 90 : 220,
       useNativeDriver: true,
     }).start();
-  const status = device.remembered
-    ? 'Not seen nearby · tries its last address'
+  const status = device.inRoom
+    ? 'In your Drip Room · tap to send'
+    : device.remembered
+    ? 'Not seen nearby · send now or when nearby'
     : device.trusted
     ? 'Paired · tap to send'
     : 'New · you’ll confirm a code';
@@ -43,7 +45,7 @@ export function DeviceRow({
       accessibilityRole="button"
       accessibilityLabel={`${device.name}, ${platformLabel(device.platform)}, ${
         device.trusted ? 'paired' : 'not paired'
-      }`}
+      }${device.inRoom ? ', in your Drip Room' : ''}`}
       accessibilityHint={actionHint}
       accessibilityState={{ disabled: !!disabled }}
       style={styles.row}
@@ -61,7 +63,11 @@ export function DeviceRow({
           {device.name}
         </Text>
         <View style={styles.meta}>
-          {device.trusted ? <View style={styles.dot} /> : null}
+          {device.inRoom ? (
+            <Icon name="users" size={14} color="#0B6B3F" strokeWidth={2} />
+          ) : device.trusted ? (
+            <View style={styles.dot} />
+          ) : null}
           <Text variant="footnote" tone="secondary" numberOfLines={1}>
             {status}
           </Text>

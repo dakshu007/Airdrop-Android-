@@ -20,6 +20,9 @@ interface CrossDropContextValue {
   addToSelection: (files: SharedFile[]) => void;
   removeFromSelection: (uri: string) => void;
   clearSelection: () => void;
+  /** "Auto-delete after 24 h" for the next send (asks the receiver to delete, §9.8). */
+  autoDelete: boolean;
+  setAutoDelete: (on: boolean) => void;
 }
 
 const CrossDropContext = createContext<CrossDropContextValue | null>(null);
@@ -29,6 +32,7 @@ export function CrossDropProvider({ children }: { children: React.ReactNode }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selection, setSelection] = useState<SharedFile[]>([]);
   const [attempt, setAttempt] = useState(0);
+  const [autoDelete, setAutoDelete] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -84,6 +88,8 @@ export function CrossDropProvider({ children }: { children: React.ReactNode }) {
       addToSelection,
       removeFromSelection,
       clearSelection,
+      autoDelete,
+      setAutoDelete,
     }),
     [
       snapshot,
@@ -93,6 +99,7 @@ export function CrossDropProvider({ children }: { children: React.ReactNode }) {
       addToSelection,
       removeFromSelection,
       clearSelection,
+      autoDelete,
     ],
   );
 

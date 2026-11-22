@@ -109,3 +109,44 @@ test('files helpers', () => {
     unknown: true,
   });
 });
+
+describe('expiring drops and rooms', () => {
+  const {
+    deleteLabel,
+    formatDuration,
+    formatMinutes,
+  } = require('../src/format');
+
+  test('formatDuration stays coarse', () => {
+    expect(formatDuration(20_000)).toBe('under a minute');
+    expect(formatDuration(42 * 60_000 + 59_000)).toBe('42 min');
+    expect(formatDuration(4 * 3600_000 + 20 * 60_000)).toBe('4 h 20 min');
+    expect(formatDuration(3 * 3600_000)).toBe('3 h');
+    expect(formatDuration(23 * 3600_000 + 40 * 60_000)).toBe('23 h');
+    expect(formatDuration(3 * 86400_000)).toBe('3 days');
+    expect(formatDuration(-5)).toBe('under a minute');
+  });
+
+  test('formatMinutes names room lengths', () => {
+    expect(formatMinutes(30)).toBe('30 min');
+    expect(formatMinutes(60)).toBe('1 h');
+    expect(formatMinutes(90)).toBe('1 h 30 min');
+    expect(formatMinutes(240)).toBe('4 h');
+  });
+
+  test('deleteLabel says where and when', () => {
+    const now = 1_000_000;
+    expect(deleteLabel(now + 2 * 3600_000, now, 'incoming')).toBe(
+      'Deletes in 2 h',
+    );
+    expect(deleteLabel(now - 1, now, 'incoming')).toBe(
+      'Deleted, as the sender asked',
+    );
+    expect(
+      deleteLabel(now + 24 * 3600_000, now, 'outgoing', 'Studio Mac'),
+    ).toBe('Deletes on Studio Mac in 24 h');
+    expect(deleteLabel(now - 1, now, 'outgoing', 'Studio Mac')).toBe(
+      'Deletion asked on Studio Mac',
+    );
+  });
+});

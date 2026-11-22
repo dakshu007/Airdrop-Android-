@@ -44,6 +44,11 @@ struct TransferCard: View {
                     }
                 }
 
+                if let expiry = expiryText {
+                    ExpiryLabel(text: expiry, done: false)
+                        .accessibilityLabel(expiry)
+                }
+
                 if hasProblem {
                     Text(TransferText.errorMessage(snapshot))
                         .font(ui.caption)
@@ -139,9 +144,23 @@ struct TransferCard: View {
             || snapshot.phase.isFinished
     }
 
+    /// Expiring drops (§9.8). Outgoing: what was asked of the receiver. Incoming: when this
+    /// Mac moves the saved files to the Trash (until the user keeps them in History).
+    private var expiryText: String? {
+        guard snapshot.kind == .files, let seconds = snapshot.expiresAfter else { return nil }
+        if outgoing { return ExpiryText.request(seconds) }
+        if snapshot.phase == .completed,
+           let date = model.expiringFiles.first(where: { $0.transferId == snapshot.id })?.deleteAt {
+            return "Deletes " + date.formatted(date: .abbreviated, time: .shortened)
+        }
+        guard !snapshot.phase.isFinished else { return nil }
+        return "Deletes \(ExpiryText.duration(seconds)) after arrival"
+    }
+
     @ViewBuilder
     private var actions: some View {
-        HStack(spacing: ui.s) {
+        // Wraps onto a second line in a narrow column instead of clipping a button.
+        FlowRow(spacing: ui.s) {
             if !snapshot.phase.isFinished && snapshot.phase != .awaitingApproval {
                 Button("Cancel") { model.cancel(item) }
                     .buttonStyle(GlassButtonStyle(destructive: true))
@@ -162,6 +181,16 @@ struct TransferCard: View {
                     Label("Try Again", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(PrimaryButtonStyle())
+            }
+            if model.canSendWhenNearby(item) {
+                Button {
+                    model.sendWhenNearby(item)
+                } label: {
+                    Label("Send When Nearby", systemImage: "clock.arrow.circlepath")
+                }
+                .buttonStyle(GlassButtonStyle())
+                .help("Keep this send and deliver it automatically when \(snapshot.peerName) is back on the same network")
+                .accessibilityLabel("Send to \(snapshot.peerName) when it's nearby")
             }
             if snapshot.phase.isFinished {
                 Button("Dismiss") { model.dismiss(item) }

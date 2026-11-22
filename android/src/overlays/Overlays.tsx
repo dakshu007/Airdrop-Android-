@@ -5,6 +5,7 @@ import { useNow } from '../hooks/useNow';
 import * as CrossDrop from '../native/crossdrop';
 import { useNavigation } from '../navigation/NavigationContext';
 import { useSnapshot } from '../state/CrossDropProvider';
+import { CaptureStage } from './CaptureStage';
 import { IncomingStage } from './IncomingStage';
 import { PairingStage } from './PairingStage';
 import { TransferStage } from './TransferStage';
@@ -21,6 +22,8 @@ export function Overlays() {
   // id → the answer this user gave
   const [answers, setAnswers] = useState<Map<string, boolean>>(new Map());
   const [followed, setFollowed] = useState<string | null>(null);
+  // Photo requests this user turned down (or that ended) while on screen.
+  const [closedCaptures, setClosedCaptures] = useState<Set<string>>(new Set());
   const seen = useRef<Set<string> | null>(null);
 
   // Follow transfers that appear while the app is open (sent, accepted or auto-accepted).
@@ -46,11 +49,39 @@ export function Overlays() {
   const offer = pairing
     ? undefined
     : snapshot.offers.find(o => answers.get(o.transferId) !== false);
+  // A photo request from a paired Mac: the one opened from its notification
+  // first, else any still open (they are time-limited, so they go before a
+  // followed transfer). While its answer is sending, the transfer shows.
+  const openCaptures = snapshot.captureRequests.filter(
+    r => r.state === 'open' && !closedCaptures.has(r.requestId),
+  );
+  const capture =
+    pairing || offer
+      ? undefined
+      : openCaptures.find(r => r.requestId === snapshot.captureFocus) ??
+        openCaptures[0];
   const transfer = followed
     ? snapshot.transfers.find(tr => tr.id === followed)
     : undefined;
   // Countdowns are coarse (see countdownCoarse), so a 5-second clock is plenty.
-  const now = useNow(5000, !!pairing || !!offer);
+  const now = useNow(5000, !!pairing || !!offer || !!capture);
+
+  // The capture screen is showing: the notification's focus has done its job.
+  const focused = snapshot.captureFocus;
+  useEffect(() => {
+    if (focused && capture && capture.requestId === focused) {
+      CrossDrop.clearCaptureFocus();
+    }
+  }, [focused, capture]);
+
+  // Forget closed requests that no longer exist.
+  useEffect(() => {
+    const live = new Set(snapshot.captureRequests.map(r => r.requestId));
+    setClosedCaptures(prev => {
+      const next = new Set([...prev].filter(id => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [snapshot.captureRequests]);
 
   // Stop following a transfer that was dismissed or simply cancelled.
   useEffect(() => {
@@ -104,6 +135,23 @@ export function Overlays() {
         now={now}
         responded={answers.get(offer.transferId) === true}
         onRespond={respond}
+      />
+    );
+  }
+
+  if (capture) {
+    const close = () =>
+      setClosedCaptures(prev => new Set(prev).add(capture.requestId));
+    return (
+      <CaptureStage
+        key={capture.requestId}
+        request={capture}
+        now={now}
+        onDecline={() => {
+          close();
+          CrossDrop.declineCapture(capture.requestId);
+        }}
+        onGone={close}
       />
     );
   }

@@ -41,7 +41,7 @@ struct ExpiryLabel: View {
                 .font(ui.font(10.5, .medium))
                 .lineLimit(1)
         }
-        .foregroundColor(done ? CDPalette.textTertiary : CDPalette.amber)
+        .foregroundColor(done ? CDPalette.textTertiary : CDPalette.amberText)
         .padding(.horizontal, ui(8))
         .padding(.vertical, ui(3))
         .background(Capsule().fill(done ? Color.white.opacity(0.7) : Color(hex: 0xFFF6E0)))

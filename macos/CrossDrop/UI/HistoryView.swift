@@ -121,8 +121,18 @@ struct HistoryRow: View {
                     .font(ui.caption)
                     .foregroundColor(CDPalette.textTertiary)
                     .lineLimit(1)
+                if let expiry = entry.expiryText {
+                    ExpiryLabel(text: expiry, done: entry.deletedAt != nil)
+                        .padding(.top, ui(2))
+                }
             }
             Spacer(minLength: ui.s)
+            if canKeep {
+                Button("Keep") { model.keepFiles(of: entry) }
+                    .buttonStyle(GlassButtonStyle())
+                    .help("Don't delete these files. The sender asked for them to be removed after a while; you decide.")
+                    .accessibilityLabel("Keep \(title)")
+            }
             statusChip
             if entry.isIncoming, entry.status == "completed", !savedURLs.isEmpty {
                 Button {
@@ -154,6 +164,12 @@ struct HistoryRow: View {
         )
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
+        .accessibilityActionIf(canKeep, named: "Keep files") { model.keepFiles(of: entry) }
+    }
+
+    /// An incoming expiring drop whose files haven't been moved to the Trash yet.
+    private var canKeep: Bool {
+        entry.isIncoming && entry.deletesAt != nil && entry.deletedAt == nil
     }
 
     private var savedURLs: [URL] {
@@ -186,6 +202,18 @@ struct HistoryRow: View {
         case "rejected": return Chip(text: "Declined")
         case "cancelled": return Chip(text: "Cancelled")
         default: return Chip(text: "Failed", tint: CDPalette.coral)
+        }
+    }
+}
+
+extension View {
+    /// A named VoiceOver action that only exists while `condition` holds.
+    @ViewBuilder
+    func accessibilityActionIf(_ condition: Bool, named name: String, _ handler: @escaping () -> Void) -> some View {
+        if condition {
+            self.accessibilityAction(named: Text(name), handler)
+        } else {
+            self
         }
     }
 }

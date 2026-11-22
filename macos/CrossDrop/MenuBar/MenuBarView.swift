@@ -17,6 +17,16 @@ struct MenuBarView: View {
                 header
                 DropZone(compact: true)
                 devices
+                if model.capture != nil || model.capturePhone != nil {
+                    PhoneCaptureCard(compact: true)
+                }
+                MenuBarShelf()
+                if !model.sendQueue.isEmpty {
+                    SendQueueCard(compact: true)
+                }
+                if let room = model.currentRoom {
+                    MenuBarRoomRow(room: room)
+                }
                 if !model.activeTransfers.isEmpty {
                     VStack(spacing: ui.s) {
                         ForEach(model.activeTransfers.prefix(3)) { item in
@@ -119,6 +129,19 @@ struct MenuBarView: View {
                                     .foregroundColor(CDPalette.mint)
                                     .accessibilityLabel("Paired")
                             }
+                            if model.room(for: device) != nil && !model.isTrusted(device.deviceId) {
+                                Image(systemName: "person.3.fill")
+                                    .font(ui.system(9))
+                                    .foregroundColor(CDPalette.sky)
+                                    .accessibilityLabel("In your room")
+                            }
+                            let waiting = model.queuedSends(for: device.deviceId).count
+                            if waiting > 0 {
+                                Image(systemName: "clock.fill")
+                                    .font(ui.system(9, .bold))
+                                    .foregroundColor(CDPalette.amber)
+                                    .accessibilityLabel(waiting == 1 ? "1 send waiting" : "\(waiting) sends waiting")
+                            }
                             if device.isRemembered {
                                 Text("not seen")
                                     .font(ui.font(10))
@@ -137,9 +160,8 @@ struct MenuBarView: View {
                     }
                     .buttonStyle(TileButtonStyle())
                     .accessibilityLabel(model.hasSomethingToSend ? "Send to \(device.name)" : "Choose files for \(device.name)")
-                    .contextMenu {
-                        Button("Send Clipboard to \(device.name)") { model.sendClipboard(to: device) }
-                    }
+                    .help("Right-click for photos from the phone, the clipboard and Deliver When Nearby")
+                    .contextMenu { DeviceActionsMenu(device: device).environmentObject(model) }
                 }
             }
         }
@@ -195,6 +217,51 @@ struct MenuBarView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// The Drip Room in progress: name, a coarse countdown, Show Code (opens Devices) and End.
+struct MenuBarRoomRow: View {
+    let room: Room
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.cdScale) private var ui
+    @State private var confirmEnd = false
+
+    var body: some View {
+        HStack(spacing: ui.s) {
+            RoomEmblem(active: true, size: 28)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(room.name)
+                    .font(ui.font(12, .semibold))
+                    .foregroundColor(CDPalette.textPrimary)
+                    .lineLimit(1)
+                TimelineView(.periodic(from: Date(), by: 15)) { context in
+                    Text(RoomClock.short(room, now: context.date))
+                        .font(ui.font(10.5).monospacedDigit())
+                        .foregroundColor(CDPalette.textSecondary)
+                        .lineLimit(1)
+                        .accessibilityLabel(RoomClock.spoken(room, now: context.date))
+                }
+            }
+            Spacer(minLength: 0)
+            Button("Code") {
+                model.selectedTab = .devices
+                model.showingRoomSheet = true
+                model.requestMainWindow()
+            }
+            .buttonStyle(GlassButtonStyle())
+            .help("Show the room's QR code")
+            .accessibilityLabel("Show room code")
+            Button("End") { confirmEnd = true }
+                .buttonStyle(GlassButtonStyle(destructive: true))
+                .help("Ends the room now. Its members stop being trusted on this Mac.")
+                .accessibilityLabel("End room \(room.name)")
+        }
+        .endRoomConfirmation(isPresented: $confirmEnd, room: room) { model.endRoom() }
+        .padding(ui.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassPanel(cornerRadius: CDRadius.card)
+        .accessibilityElement(children: .contain)
     }
 }
 

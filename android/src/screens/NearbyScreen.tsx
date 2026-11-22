@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
 import { RoundButton } from '../components/Chips';
+import { ClipPill } from '../components/ClipPill';
 import { DeviceRow } from '../components/DeviceRow';
 import { DripStage } from '../components/DripStage';
 import { FileRow } from '../components/FileRow';
@@ -10,9 +11,12 @@ import { Frost } from '../components/Frost';
 import { Icon } from '../components/Icon';
 import { Logo } from '../components/Logo';
 import { ReceiveModeSheet } from '../components/ReceiveModeSheet';
+import { RoomBanner } from '../components/RoomBanner';
+import { RoomSheet } from '../components/RoomSheets';
 import { TAB_BAR_SPACE } from '../components/Screen';
 import { Sheet } from '../components/Sheet';
 import { Text } from '../components/Text';
+import { Toggle } from '../components/Toggle';
 import { friendlyError } from '../copy';
 import { formatBytes, formatClock, pluralFiles, sumSizes } from '../format';
 import * as CrossDrop from '../native/crossdrop';
@@ -25,7 +29,8 @@ import type {
 import { useNavigation } from '../navigation/NavigationContext';
 import { useCrossDrop, useSnapshot } from '../state/CrossDropProvider';
 import { useReceivingToggle } from '../state/useReceiving';
-import { pickFilesSafely, useSendFiles } from '../state/useSendFiles';
+import { useSendFlow } from '../state/useSendFlow';
+import { pickFilesSafely } from '../state/useSendFiles';
 import { useTheme } from '../theme/ThemeProvider';
 import { green, spacing } from '../theme/tokens';
 
@@ -272,16 +277,59 @@ function Tips() {
   );
 }
 
+/** The "Auto-delete after 24 h" sending option (asks the receiver to delete, §9.8). */
+function AutoDeleteRow({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  const t = useTheme();
+  return (
+    <View style={styles.autoDelete}>
+      <View
+        style={[
+          styles.hairline,
+          styles.autoLine,
+          { backgroundColor: t.hairline },
+        ]}
+      />
+      <View style={styles.autoRow}>
+        <Icon name="clock" size={18} color={value ? green : t.textTertiary} />
+        <View style={styles.flex}>
+          <Text variant="subhead">Auto-delete after 24 h</Text>
+          <Text variant="footnote" tone="secondary">
+            CrossDrop on the other device deletes them a day after they arrive.
+            Copies made before then aren’t affected.
+          </Text>
+        </View>
+        <Toggle
+          value={value}
+          onValueChange={onChange}
+          accessibilityLabel="Auto-delete after 24 hours"
+          accessibilityHint="Asks the receiving device to delete these files a day after they arrive"
+        />
+      </View>
+    </View>
+  );
+}
+
 function Tray({
   files,
   onAdd,
   onClear,
   onRemove,
+  autoDelete,
+  onAutoDelete,
 }: {
   files: SharedFile[];
   onAdd?: () => void;
   onClear?: () => void;
   onRemove?: (uri: string) => void;
+  /** Shows the auto-delete option when set. */
+  autoDelete?: boolean;
+  onAutoDelete?: (on: boolean) => void;
 }) {
   const { total, unknown } = sumSizes(files);
   return (
@@ -327,6 +375,9 @@ function Tray({
           and {files.length - TRAY_PREVIEW} more
         </Text>
       ) : null}
+      {autoDelete !== undefined && onAutoDelete ? (
+        <AutoDeleteRow value={autoDelete} onChange={onAutoDelete} />
+      ) : null}
     </View>
   );
 }
@@ -365,6 +416,7 @@ export function NearbyView({
   const toggleReceiving = useReceivingToggle(snapshot);
   const [showAll, setShowAll] = useState(false);
   const [showMulti, setShowMulti] = useState(false);
+  const [showRoom, setShowRoom] = useState(false);
   const waving = useWave(snapshot.newestDeviceAt);
   const mode = nearbyMode(snapshot);
   const count = snapshot.nearby.length;
@@ -500,6 +552,9 @@ export function NearbyView({
             {friendlyError(snapshot.receiving.error).title}
           </Text>
         ) : null}
+        {snapshot.room ? (
+          <RoomBanner room={snapshot.room} onPress={() => setShowRoom(true)} />
+        ) : null}
         <View style={styles.titles}>
           <Text variant="largeTitle" center accessibilityRole="header">
             {title}
@@ -516,6 +571,9 @@ export function NearbyView({
         {stage}
         <View style={styles.footer}>{action}</View>
       </ScrollView>
+      {showRoom && snapshot.room ? (
+        <RoomSheet room={snapshot.room} onClose={() => setShowRoom(false)} />
+      ) : null}
       {showMulti && onSelectMany ? (
         <MultiSendSheet
           devices={snapshot.nearby}
@@ -555,10 +613,24 @@ export function NearbyView({
 
 export function NearbyScreen() {
   const snapshot = useSnapshot();
+  const insets = useSafeAreaInsets();
   const { navigate } = useNavigation();
-  const { selection, addToSelection, removeFromSelection, clearSelection } =
-    useCrossDrop();
-  const { send, busy } = useSendFiles();
+  const {
+    selection,
+    addToSelection,
+    removeFromSelection,
+    clearSelection,
+    autoDelete,
+    setAutoDelete,
+  } = useCrossDrop();
+  const flow = useSendFlow({
+    resolveFiles: async () =>
+      selection.length > 0 ? selection : pickFilesSafely(),
+    count: selection.length,
+    text: null,
+    onDone: clearSelection,
+  });
+  const busy = flow.busy;
 
   const choose = async () => addToSelection(await pickFilesSafely());
   const chooseFolder = async () => {
@@ -582,27 +654,12 @@ export function NearbyScreen() {
     }
   };
 
-  const onSelect = async (device: NearbyDevice) => {
-    let files = selection;
-    if (files.length === 0) {
-      files = await pickFilesSafely();
-      if (files.length === 0) return;
-    }
-    if (await send(device, files)) clearSelection();
-  };
-
-  const onSelectMany = async (devices: NearbyDevice[]) => {
-    let files = selection;
-    if (files.length === 0) {
-      files = await pickFilesSafely();
-      if (files.length === 0) return;
-    }
-    let sent = 0;
-    for (const device of devices) {
-      if (await send(device, files)) sent += 1;
-    }
-    if (sent > 0) clearSelection();
-  };
+  const onSelect = flow.select;
+  const onSelectMany = flow.selectMany;
+  const clip =
+    snapshot.clip && snapshot.clip.expiresAt > Date.now()
+      ? snapshot.clip
+      : null;
 
   const header = (
     <View style={styles.header}>
@@ -657,6 +714,8 @@ export function NearbyScreen() {
           onAdd={choose}
           onClear={clearSelection}
           onRemove={removeFromSelection}
+          autoDelete={autoDelete}
+          onAutoDelete={setAutoDelete}
         />
         <Text variant="footnote" tone="secondary" center>
           Tap a device to send
@@ -665,26 +724,44 @@ export function NearbyScreen() {
     );
 
   return (
-    <NearbyView
-      snapshot={snapshot}
-      files={selection}
-      header={header}
-      readyTitle={
-        selection.length > 0
-          ? `Send ${pluralFiles(selection.length)}`
-          : 'Ready to send'
-      }
-      onSelect={onSelect}
-      onSelectMany={onSelectMany}
-      busy={busy}
-      actionHint={device =>
-        selection.length > 0
-          ? `Sends ${pluralFiles(selection.length)} to ${device.name}`
-          : `Choose files to send to ${device.name}`
-      }
-      footer={footer}
-      bottomSpace={TAB_BAR_SPACE}
-    />
+    <View style={styles.flex}>
+      <NearbyView
+        snapshot={snapshot}
+        files={selection}
+        header={header}
+        readyTitle={
+          selection.length > 0
+            ? `Send ${pluralFiles(selection.length)}`
+            : 'Ready to send'
+        }
+        onSelect={onSelect}
+        onSelectMany={onSelectMany}
+        busy={busy}
+        actionHint={device =>
+          selection.length > 0
+            ? `Sends ${pluralFiles(selection.length)} to ${device.name}`
+            : `Choose files to send to ${device.name}`
+        }
+        footer={footer}
+        bottomSpace={TAB_BAR_SPACE}
+      />
+      {clip ? (
+        <View
+          pointerEvents="box-none"
+          style={[
+            styles.clip,
+            {
+              top: insets.top + spacing.xs,
+              left: insets.left + spacing.md,
+              right: insets.right + spacing.md,
+            },
+          ]}
+        >
+          <ClipPill key={clip.transferId} clip={clip} />
+        </View>
+      ) : null}
+      {flow.element}
+    </View>
   );
 }
 
@@ -778,4 +855,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   trayHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
+  autoDelete: { marginTop: spacing.xs },
+  autoLine: { marginBottom: spacing.xxs },
+  autoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  clip: { position: 'absolute', zIndex: 10 },
 });

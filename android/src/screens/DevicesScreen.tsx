@@ -9,11 +9,23 @@ import { Screen } from '../components/Screen';
 import { SectionHeader } from '../components/SectionHeader';
 import { Text } from '../components/Text';
 import { Toggle } from '../components/Toggle';
-import { platformLabel } from '../copy';
-import { formatDate, groupFingerprint, relativeTime } from '../format';
+import { RoomBanner } from '../components/RoomBanner';
+import {
+  joinWithCode,
+  RoomSheet,
+  scanAndJoin,
+  StartRoomSheet,
+} from '../components/RoomSheets';
+import { errorCode, isRoomCode, pairError, platformLabel } from '../copy';
+import {
+  formatClock,
+  formatDate,
+  groupFingerprint,
+  relativeTime,
+} from '../format';
 import { useNow } from '../hooks/useNow';
 import * as CrossDrop from '../native/crossdrop';
-import type { TrustedDevice } from '../native/types';
+import type { Snapshot, TrustedDevice } from '../native/types';
 import { useSnapshot } from '../state/CrossDropProvider';
 import { useTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/tokens';
@@ -41,6 +53,8 @@ function TrustedDeviceCard({
   const lastUsed = device.lastUsedAt
     ? `Last used ${relativeTime(device.lastUsedAt, now).toLowerCase()}`
     : 'Not used yet';
+  // Met in a Drip Room: trusted only until the room ends, never auto-accepted.
+  const temporary = device.expiresAt !== null;
 
   return (
     <GlassCard style={styles.card}>
@@ -51,8 +65,17 @@ function TrustedDeviceCard({
         />
         <View style={styles.flex}>
           <Text variant="headline">{device.name}</Text>
+          {temporary ? (
+            <Badge
+              label={`From a Drip Room · until ${formatClock(
+                device.expiresAt!,
+              )}`}
+              tone="accent"
+              icon="clock"
+            />
+          ) : null}
           <Text variant="footnote" tone="secondary">
-            {platformLabel(device.platform)} · Paired{' '}
+            {platformLabel(device.platform)} · {temporary ? 'Joined' : 'Paired'}{' '}
             {formatDate(device.pairedAt)} · {lastUsed}
           </Text>
         </View>
@@ -71,20 +94,27 @@ function TrustedDeviceCard({
           {groupFingerprint(device.fingerprint)}
         </Text>
       </View>
-      <View style={styles.switchRow}>
-        <View style={styles.flex}>
-          <Text variant="callout">Accept files automatically</Text>
-          <Text variant="footnote" tone="secondary">
-            Files from {device.name} are saved without asking. You still get a
-            notification.
-          </Text>
+      {temporary ? (
+        <Text variant="footnote" tone="secondary" style={styles.tempNote}>
+          Trusted only for the room. You confirm each transfer, and it’s
+          forgotten when the room ends.
+        </Text>
+      ) : (
+        <View style={styles.switchRow}>
+          <View style={styles.flex}>
+            <Text variant="callout">Accept files automatically</Text>
+            <Text variant="footnote" tone="secondary">
+              Files from {device.name} are saved without asking. You still get a
+              notification.
+            </Text>
+          </View>
+          <Toggle
+            value={device.autoAccept}
+            onValueChange={v => CrossDrop.setAutoAccept(device.deviceId, v)}
+            accessibilityLabel={`Accept files automatically from ${device.name}`}
+          />
         </View>
-        <Toggle
-          value={device.autoAccept}
-          onValueChange={v => CrossDrop.setAutoAccept(device.deviceId, v)}
-          accessibilityLabel={`Accept files automatically from ${device.name}`}
-        />
-      </View>
+      )}
       <View style={styles.actions}>
         <Button
           title="Forget device"
@@ -99,16 +129,6 @@ function TrustedDeviceCard({
   );
 }
 
-const PAIR_ERRORS: Record<string, string> = {
-  bad_code: 'That isn’t a CrossDrop pairing code.',
-  auth_failed:
-    'The device that answered isn’t the one in the code. Nothing was paired.',
-  unreachable:
-    'Couldn’t reach the Mac. Check that both are on the same Wi‑Fi and the code is still on screen.',
-  not_receiving: 'The code has expired. Show a new one on the Mac.',
-  pairing_rejected: 'The code was already used or expired. Show a new one.',
-};
-
 /** Pair by scanning the QR code a Mac shows: no numbers to compare. */
 function QrPairCard() {
   const t = useTheme();
@@ -118,6 +138,12 @@ function QrPairCard() {
     const code = await CrossDrop.scanPairingCode().catch(() => '');
     if (!code) return;
     setBusy(true);
+    if (isRoomCode(code)) {
+      // A Drip Room code works here too.
+      await joinWithCode(code, false);
+      setBusy(false);
+      return;
+    }
     try {
       const name = await CrossDrop.pairWithCode(code, mine);
       CrossDrop.feedback('done');
@@ -129,12 +155,7 @@ function QrPairCard() {
       );
     } catch (e) {
       CrossDrop.feedback('error');
-      const code =
-        e && typeof e === 'object' && 'code' in e ? String(e.code) : '';
-      Alert.alert(
-        'Couldn’t pair',
-        PAIR_ERRORS[code] ?? 'Something went wrong. Try again.',
-      );
+      Alert.alert('Couldn’t pair', pairError(errorCode(e)));
     } finally {
       setBusy(false);
     }
@@ -180,6 +201,77 @@ function QrPairCard() {
   );
 }
 
+/** Drip Rooms: a short-lived group where everyone who scans one code can swap files. */
+function RoomsCard({ snapshot }: { snapshot: Snapshot }) {
+  const t = useTheme();
+  const [sheet, setSheet] = useState<'start' | 'room' | null>(null);
+  const [joining, setJoining] = useState(false);
+  const room = snapshot.room;
+  const join = async () => {
+    setJoining(true);
+    try {
+      await scanAndJoin(false);
+    } finally {
+      setJoining(false);
+    }
+  };
+  return (
+    <>
+      <SectionHeader title="Drip Rooms" />
+      {room ? (
+        <RoomBanner room={room} onPress={() => setSheet('room')} />
+      ) : (
+        <GlassCard>
+          <View style={styles.header}>
+            <IconBubble name="users" size={48} />
+            <View style={styles.flex}>
+              <Text variant="headline">Swap files with a group</Text>
+              <Text variant="footnote" tone="secondary">
+                Start a room and others scan its code: everyone in it can send
+                to each other without comparing codes, until it ends.
+              </Text>
+            </View>
+          </View>
+          <View style={styles.roomActions}>
+            <Button
+              title="Start a room"
+              icon="plus"
+              compact
+              onPress={() => setSheet('start')}
+            />
+            {joining ? (
+              <View style={styles.busy} accessibilityLiveRegion="polite">
+                <ActivityIndicator color={t.link} />
+                <Text variant="callout" tone="secondary">
+                  Joining…
+                </Text>
+              </View>
+            ) : (
+              <Button
+                title="Join by scanning"
+                icon="qr"
+                kind="secondary"
+                compact
+                onPress={join}
+              />
+            )}
+          </View>
+        </GlassCard>
+      )}
+      {sheet === 'start' ? (
+        <StartRoomSheet
+          snapshot={snapshot}
+          onStarted={() => setSheet('room')}
+          onClose={() => setSheet(null)}
+        />
+      ) : null}
+      {sheet === 'room' && room ? (
+        <RoomSheet room={room} onClose={() => setSheet(null)} />
+      ) : null}
+    </>
+  );
+}
+
 export function DevicesScreen() {
   const snapshot = useSnapshot();
   const t = useTheme();
@@ -210,6 +302,8 @@ export function DevicesScreen() {
       </GlassCard>
 
       <QrPairCard />
+
+      <RoomsCard snapshot={snapshot} />
 
       <SectionHeader title="Paired" />
       {snapshot.trusted.length === 0 ? (
@@ -250,6 +344,13 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   actions: { flexDirection: 'row', marginTop: spacing.md },
+  roomActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+  },
+  tempNote: { marginTop: spacing.md },
   busy: {
     flexDirection: 'row',
     alignItems: 'center',

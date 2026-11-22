@@ -171,6 +171,24 @@ export function SettingsScreen() {
         />
         <Divider />
         <Row
+          icon="layers"
+          title="Sort by type"
+          detail={
+            prefs.sortByType
+              ? 'Smart arrival is on: photos, videos and music land in Pictures, Movies and Music › CrossDrop, so they show up in your gallery and music apps. Other files and whole folders stay in Download/CrossDrop.'
+              : 'Smart arrival: put photos, videos and music in Pictures, Movies and Music › CrossDrop instead of Downloads. Other files and whole folders stay in Download/CrossDrop.'
+          }
+          trailing={
+            <Toggle
+              value={prefs.sortByType}
+              onValueChange={v => CrossDrop.setPreference('sortByType', v)}
+              accessibilityLabel="Sort by type"
+              accessibilityHint="Saves photos, videos and music to their own folders"
+            />
+          }
+        />
+        <Divider />
+        <Row
           icon="bell"
           title="Notifications"
           detail={NOTIFICATION_TEXT[permission]}
@@ -274,6 +292,20 @@ export function SettingsScreen() {
             </Text>
           ) : null}
         </Row>
+        <Divider />
+        <Row
+          icon="bolt"
+          title="Turbo"
+          detail="When you send several files, asks for up to 4 parallel connections so they can move side by side. Only helps when the other device supports it too; with one file nothing changes. Speed gains haven’t been measured on real devices yet."
+          trailing={
+            <Toggle
+              value={prefs.turbo}
+              onValueChange={v => CrossDrop.setPreference('turbo', v)}
+              accessibilityLabel="Turbo, experimental"
+              accessibilityHint="Sends several files over parallel connections"
+            />
+          }
+        />
       </GlassCard>
 
       <SectionHeader title="Feedback" />
@@ -294,7 +326,7 @@ export function SettingsScreen() {
         <Row
           icon="vibrate"
           title="Haptics"
-          detail="A light tap for codes and finished transfers"
+          detail="A light tap for codes and finished transfers, and a soft heartbeat at every 10% while files move, so you can feel progress with the phone in your pocket. Follows Android’s touch-feedback setting."
           trailing={
             <Toggle
               value={prefs.haptics}

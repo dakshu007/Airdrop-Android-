@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Button } from '../components/Button';
 import { RoundButton, StatusPill } from '../components/Chips';
@@ -8,8 +8,15 @@ import { Frost } from '../components/Frost';
 import { ProgressRing } from '../components/ProgressRing';
 import { Stage, useArtSize } from '../components/Stage';
 import { Text } from '../components/Text';
-import { friendlyError, isFinal, rejectReason } from '../copy';
 import {
+  errorCode,
+  friendlyError,
+  isFinal,
+  queueError,
+  rejectReason,
+} from '../copy';
+import {
+  deleteLabel,
   etaSeconds,
   filesTitle,
   formatBytes,
@@ -17,8 +24,12 @@ import {
   formatRate,
   pluralFiles,
 } from '../format';
+import { Icon } from '../components/Icon';
+import { useNow } from '../hooks/useNow';
 import * as CrossDrop from '../native/crossdrop';
 import type { Transfer } from '../native/types';
+import { useSnapshot } from '../state/CrossDropProvider';
+import { recallSend } from '../state/sendMemory';
 import type { Mood } from '../theme/Backdrop';
 import { useTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/tokens';
@@ -93,6 +104,96 @@ function FilesCard({
   );
 }
 
+/** Errors after which the device simply wasn't there: worth offering "Send when nearby". */
+const QUEUED_LINGER_MS = 1800;
+const NOT_THERE = new Set([
+  'unreachable',
+  'connection_lost',
+  'timeout',
+  'not_receiving',
+]);
+
+/**
+ * "Send when nearby" for a failed send to a paired device: the files this app
+ * session handed over are queued, so they go by themselves when it's back.
+ */
+function SendLater({ transfer }: { transfer: Transfer }) {
+  const t = useTheme();
+  const snapshot = useSnapshot();
+  const [state, setState] = useState<'idle' | 'busy' | 'queued'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const remembered = recallSend(transfer.id);
+  const paired = snapshot.trusted.some(d => d.deviceId === transfer.peerId);
+  // Once queued, the failed attempt is cleared after a moment to read the confirmation.
+  useEffect(() => {
+    if (state !== 'queued') return;
+    const timer = setTimeout(
+      () => CrossDrop.dismissTransfer(transfer.id),
+      QUEUED_LINGER_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [state, transfer.id]);
+  if (
+    transfer.direction !== 'outgoing' ||
+    transfer.kind !== 'files' ||
+    transfer.status !== 'failed' ||
+    !NOT_THERE.has(transfer.error?.code ?? '') ||
+    !paired ||
+    !remembered
+  ) {
+    return null;
+  }
+  if (state === 'queued') {
+    return (
+      <View
+        style={styles.queued}
+        accessible
+        accessibilityLiveRegion="polite"
+        accessibilityLabel={`Waiting for ${transfer.peerName}. It goes by itself when it’s nearby.`}
+      >
+        <Icon name="clock" size={18} color={t.link} />
+        <Text variant="callout" tone="accent" style={styles.flex}>
+          Waiting for {transfer.peerName} · goes by itself when it’s nearby
+        </Text>
+      </View>
+    );
+  }
+  const queue = async () => {
+    setState('busy');
+    setError(null);
+    try {
+      await CrossDrop.queueFiles(
+        remembered.deviceId,
+        remembered.files,
+        remembered.options,
+      );
+      CrossDrop.feedback('confirm');
+      setState('queued');
+    } catch (e) {
+      setError(queueError(errorCode(e)));
+      setState('idle');
+    }
+  };
+  return (
+    <>
+      <Button
+        title="Send when nearby"
+        icon="clock"
+        kind={transfer.canRetry ? 'secondary' : 'primary'}
+        large={!transfer.canRetry}
+        loading={state === 'busy'}
+        onPress={queue}
+        accessibilityHint={`Sends these files to ${transfer.peerName} by itself when it is found`}
+      />
+      {error ? (
+        <Text variant="footnote" tone="danger" center>
+          {error}
+        </Text>
+      ) : null}
+    </>
+  );
+}
+
 /** Sending or receiving, then the result: progress ring, all-done confetti, or what went wrong. */
 export function TransferStage({
   transfer,
@@ -106,6 +207,17 @@ export function TransferStage({
   const outgoing = transfer.direction === 'outgoing';
   const final = isFinal(transfer.status);
   const peer = transfer.peerName;
+  const now = useNow(60000, transfer.deleteAt !== null);
+  const expiry =
+    transfer.deleteAt !== null
+      ? deleteLabel(
+          transfer.deleteAt,
+          now,
+          transfer.direction,
+          outgoing ? peer : undefined,
+        )
+      : null;
+  const photo = transfer.answersCapture && outgoing;
 
   // Haptics (and the optional sound) when the transfer ends while it's on screen.
   const previous = useRef(transfer.status);
@@ -219,13 +331,17 @@ export function TransferStage({
             accessibilityRole="header"
             accessibilityLiveRegion="polite"
           >
-            All done!
+            {photo ? 'Photo delivered' : 'All done!'}
           </Text>
           <Text variant="body" tone="secondary" center>
             {outgoing
-              ? `${pluralFiles(
-                  transfer.files.length,
-                )} arrived on ${peer} and passed the integrity check.`
+              ? `${
+                  photo
+                    ? transfer.files.length === 1
+                      ? 'Your photo'
+                      : `${transfer.files.length} photos`
+                    : pluralFiles(transfer.files.length)
+                } arrived on ${peer} and passed the integrity check.`
               : `${pluralFiles(
                   transfer.files.length,
                 )} from ${peer} saved and passed the integrity check.`}
@@ -236,6 +352,14 @@ export function TransferStage({
           <Drip pose="done" size={art} motion="pop" />
         </View>
         <FilesCard transfer={transfer} />
+        {expiry ? (
+          <View style={styles.expiry} accessible accessibilityLabel={expiry}>
+            <Icon name="clock" size={15} color="#8A5A00" />
+            <Text variant="footnote" tone="warning">
+              {expiry}
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.actions}>
           {outgoing ? (
             <>
@@ -327,6 +451,7 @@ export function TransferStage({
           {transfer.canRetry ? (
             <Button title="Try again" icon="refresh" large onPress={retry} />
           ) : null}
+          <SendLater transfer={transfer} />
           <Button title="Not now" kind="secondary" onPress={onClose} />
         </View>
       </>
@@ -365,12 +490,21 @@ export function TransferStage({
           />
         </View>
         <View style={styles.head}>
-          <StatusPill label={status} dot={moving ? '#149A5B' : '#E0A100'} />
+          <StatusPill
+            label={
+              transfer.streams > 1
+                ? `${status} · Turbo ×${transfer.streams}`
+                : status
+            }
+            dot={moving ? '#149A5B' : '#E0A100'}
+          />
           <Text variant="largeTitle" center accessibilityRole="header">
             {outgoing ? `Sending to ${peer}` : `Receiving from ${peer}`}
           </Text>
           <Text variant="body" tone="secondary" center numberOfLines={2}>
-            {filesTitle(transfer.files)}
+            {photo
+              ? `Your answer to ${peer}’s photo request`
+              : filesTitle(transfer.files)}
           </Text>
         </View>
         <View style={styles.center}>
@@ -504,4 +638,17 @@ const styles = StyleSheet.create({
   more: { paddingVertical: spacing.xs },
   summary: { borderRadius: 20, overflow: 'hidden', padding: 14, gap: 2 },
   actions: { gap: spacing.sm, marginTop: spacing.xs },
+  expiry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  queued: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    justifyContent: 'center',
+    minHeight: 48,
+  },
 });

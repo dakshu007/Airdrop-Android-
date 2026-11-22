@@ -200,3 +200,61 @@ export function filesTitle(files: { name: string }[]): string {
   }
   return `${files[0].name} and ${files.length - 1} more`;
 }
+
+/**
+ * A span of time in words, coarse enough to stay still on screen:
+ * "under a minute", "42 min", "4 h 20 min", "23 h", "3 days".
+ */
+export function formatDuration(ms: number): string {
+  const minutes = Math.floor(Math.max(0, ms) / 60000);
+  if (minutes < 1) {
+    return 'under a minute';
+  }
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours < 10) {
+    return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+  }
+  if (hours < 48) {
+    return `${hours} h`;
+  }
+  return `${Math.floor(hours / 24)} days`;
+}
+
+/** Room lengths: 30 → "30 min", 60 → "1 h", 90 → "1 h 30 min". */
+export function formatMinutes(minutes: number): string {
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
+/**
+ * Expiring drops (§9.8): when the files go. Incoming files are deleted by
+ * CrossDrop on this phone; for outgoing ones the receiver was asked to.
+ */
+export function deleteLabel(
+  deleteAt: number,
+  now: number,
+  direction: 'incoming' | 'outgoing',
+  peerName?: string,
+): string {
+  const left = deleteAt - now;
+  if (direction === 'outgoing') {
+    const where = peerName ? ` on ${peerName}` : '';
+    return left <= 0
+      ? `Deletion asked${where}`
+      : `Deletes${where} in ${formatDuration(left)}`;
+  }
+  return left <= 0
+    ? 'Deleted, as the sender asked'
+    : `Deletes in ${formatDuration(left)}`;
+}
+
+/** Seconds in a day: the "Auto-delete after 24 h" sending option. */
+export const AUTO_DELETE_SECONDS = 86400;

@@ -115,6 +115,21 @@ private struct OfferContent: View {
     let respond: (Bool) -> Void
     @Environment(\.cdScale) private var ui
 
+    private var footnote: String {
+        switch offer.kind {
+        case .link:
+            return "If you accept, it opens in your browser (web links only)."
+        case .text:
+            return "If you accept, it's copied to your clipboard. It isn't saved as a file."
+        case .files:
+            let saved = "Saved to \(destination.lastPathComponent) after each file's checksum is verified."
+            if offer.expiresAfter != nil {
+                return saved + " CrossDrop moves them to the Trash when the time is up, unless you press Keep in History."
+            }
+            return saved + " Nothing is overwritten."
+        }
+    }
+
     private var offerLine: String {
         switch offer.kind {
         case .link: return "\(offer.peer.name) wants to send you a link"
@@ -142,6 +157,11 @@ private struct OfferContent: View {
                     Chip(text: trusted ? "Paired" : "Not paired", symbol: trusted ? "checkmark.seal.fill" : "seal",
                          tint: trusted ? CDPalette.mint : CDPalette.amber)
                     Chip(text: Format.bytes(offer.totalBytes))
+                }
+                if offer.kind == .files, let seconds = offer.expiresAfter {
+                    ExpiryLabel(text: ExpiryText.request(seconds))
+                        .help("\(offer.peer.name) asked for these files to be moved to the Trash \(ExpiryText.duration(seconds)) after they arrive. You can keep them from History.")
+                        .accessibilityLabel("\(ExpiryText.request(seconds)). You can keep them from History.")
                 }
             }
 
@@ -176,11 +196,7 @@ private struct OfferContent: View {
             .clipShape(RoundedRectangle(cornerRadius: ui(CDRadius.tile), style: .continuous))
             }
 
-            Text(offer.kind == .link
-                 ? "If you accept, it opens in your browser (web links only)."
-                 : offer.kind == .text
-                 ? "If you accept, it's copied to your clipboard. It isn't saved as a file."
-                 : "Saved to \(destination.lastPathComponent) after each file's checksum is verified. Nothing is overwritten.")
+            Text(footnote)
                 .font(ui.caption)
                 .foregroundColor(CDPalette.textSecondary)
                 .multilineTextAlignment(.center)

@@ -31,9 +31,12 @@ struct SettingsView: View {
                 TwoColumns {
                     thisMac
                     receiving
-                    photos
+                    arrivals
+                    sending
                     feedback
                 } trailing: {
+                    dripIsland
+                    clipboard
                     notifications
                     shortcuts
                     privacy
@@ -41,7 +44,10 @@ struct SettingsView: View {
             } else {
                 thisMac
                 receiving
-                photos
+                arrivals
+                sending
+                dripIsland
+                clipboard
                 shortcuts
                 feedback
                 notifications
@@ -115,8 +121,16 @@ struct SettingsView: View {
         }
     }
 
-    private var photos: some View {
-        SettingsSection(title: "Photos", symbol: "photo") {
+    private var arrivals: some View {
+        SettingsSection(title: "Arrivals", symbol: "tray.and.arrow.down") {
+            SettingsRow {
+                Toggle(isOn: Binding(get: { model.sortByType }, set: { model.setSortByType($0) })) {
+                    labelStack("Smart arrival: sort by type",
+                               detail: "After a file is verified, photos and screenshots move to Pictures › CrossDrop › From <device> – <date>, and documents to Documents › CrossDrop. Everything else, and files inside a sent folder, stay in \(model.destination.lastPathComponent). Nothing is overwritten.")
+                }
+                .toggleStyle(GlassToggleStyle())
+            }
+            GlassDivider()
             SettingsRow {
                 Toggle(isOn: Binding(get: { model.heicToJpeg }, set: { model.setHeicToJpeg($0) })) {
                     labelStack("Also save HEIC photos as JPEG",
@@ -127,6 +141,100 @@ struct SettingsView: View {
         }
     }
 
+    private var sending: some View {
+        SettingsSection(title: "Sending", symbol: "paperplane") {
+            SettingsRow {
+                Toggle(isOn: Binding(get: { model.turboEnabled }, set: { model.setTurbo($0) })) {
+                    VStack(alignment: .leading, spacing: ui(4)) {
+                        HStack(spacing: ui.s) {
+                            Text("Turbo for many files")
+                                .font(ui.body)
+                                .foregroundColor(CDPalette.textPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Chip(text: "Experimental", symbol: "testtube.2", tint: CDPalette.amberText)
+                        }
+                        Text("When you send several files, asks the other device to take them over up to 4 connections at once, so one large file doesn't hold up the rest. Used only if the other device agrees. Speed gains haven't been measured yet and may be small on busy Wi-Fi.")
+                            .font(ui.caption)
+                            .foregroundColor(CDPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .toggleStyle(GlassToggleStyle())
+                .accessibilityLabel("Turbo for many files, experimental")
+            }
+            GlassDivider()
+            SettingsRow {
+                Text("When receiving, this Mac always lets a Turbo sender use extra connections, within its usual connection limit.")
+                    .font(ui.caption)
+                    .foregroundColor(CDPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var dripIsland: some View {
+        SettingsSection(title: "Drip Island", symbol: "drop") {
+            SettingsRow {
+                Toggle(isOn: Binding(get: { model.dripIslandEnabled }, set: { model.setDripIsland($0) })) {
+                    labelStack("Show Drip Island while dragging files",
+                               detail: "Drag files anywhere on your Mac and a glass island drops down from the top of the screen with nearby devices and your Shelf. Drop on a device to send, or on the Shelf to keep for later. It looks for devices only while it's showing.")
+                }
+                .toggleStyle(GlassToggleStyle())
+            }
+        }
+    }
+
+    private var clipboard: some View {
+        SettingsSection(title: "Clipboard", symbol: "doc.on.clipboard") {
+            SettingsRow {
+                VStack(alignment: .leading, spacing: ui.s) {
+                    Toggle(isOn: Binding(get: { model.offerClipboardToPhone }, set: { model.setOfferClipboardToPhone($0) })) {
+                        labelStack("Send what I copy to my phone",
+                                   detail: "Text you copy on this Mac lands on your phone's clipboard while it's nearby. Text only, up to 64 KB. Copies that password managers mark as concealed or temporary are skipped.")
+                    }
+                    .toggleStyle(GlassToggleStyle())
+                    if model.offerClipboardToPhone {
+                        clipboardStatus
+                            .transition(.opacity)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Where the clipboard offer stands: no phone marked "mine", waiting, or the last result.
+    @ViewBuilder
+    private var clipboardStatus: some View {
+        let hasMyPhone = model.trustedDevices.contains { $0.platform == "android" && $0.autoAccept && !$0.isTemporary }
+        let text: String = {
+            if !hasMyPhone {
+                return "Needs a phone paired with \u{201C}This is my phone\u{201D} on. Pair one in Devices."
+            }
+            if let status = model.clipboardOfferStatus { return status }
+            if model.clipboardWatching {
+                return "Your phone is nearby. The next text you copy goes to it."
+            }
+            return "Waiting for your phone to be nearby. Nothing is checked until it is."
+        }()
+        HStack(alignment: .firstTextBaseline, spacing: ui(6)) {
+            StatusDot(color: model.clipboardWatching ? CDPalette.mint : (hasMyPhone ? Color(hex: 0x9AA8A0) : CDPalette.amber))
+            Text(text)
+                .font(ui.caption)
+                .foregroundColor(CDPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, ui(10))
+        .padding(.vertical, ui(8))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassPanel(cornerRadius: CDRadius.row, style: .inset)
+        .accessibilityElement(children: .combine)
+        Text("macOS may ask once whether CrossDrop can read the clipboard. CrossDrop reads it only after it changes, and the text goes straight to your phone over your Wi-Fi.")
+            .font(ui.caption)
+            .foregroundColor(CDPalette.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     private var shortcuts: some View {
         SettingsSection(title: "Shortcuts", symbol: "command") {
             SettingsRow {
@@ -134,6 +242,8 @@ struct SettingsView: View {
                     bullet("Drag files onto the CrossDrop icon in the menu bar to get them ready to send.")
                     bullet("In Finder, right-click files › Services › Send with CrossDrop. If it's missing, turn it on in System Settings › Keyboard › Keyboard Shortcuts › Services.")
                     bullet("⇧⌘V sends what you copied: a link opens on the phone, text lands on its clipboard.")
+                    bullet("⇧⌘P asks your paired phone to take a photo; it arrives on this Mac's clipboard, ready to paste.")
+                    bullet("Right-click the menu bar icon for quick actions: photos from your phone, the Shelf, waiting sends and Drip Rooms.")
                     bullet("⌘+ and ⌘− make CrossDrop larger or smaller; ⌘0 returns to actual size. It also grows by itself in a large or full-screen window.")
                 }
             }

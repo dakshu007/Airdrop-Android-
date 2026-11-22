@@ -4,18 +4,21 @@ import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { GlassCard } from '../components/GlassCard';
 import { Icon, IconName } from '../components/Icon';
+import { PocketRow, QueueRow } from '../components/PocketRows';
 import { Screen } from '../components/Screen';
 import { SectionHeader } from '../components/SectionHeader';
 import { Text } from '../components/Text';
 import { TransferCard } from '../components/TransferCard';
-import { friendlyError, isFinal } from '../copy';
-import { filesTitle, formatBytes, relativeTime } from '../format';
+import { errorCode, friendlyError, isFinal } from '../copy';
+import { deleteLabel, filesTitle, formatBytes, relativeTime } from '../format';
 import { useNow } from '../hooks/useNow';
 import * as CrossDrop from '../native/crossdrop';
 import type { HistoryEntry } from '../native/types';
 import { useSnapshot } from '../state/CrossDropProvider';
 import { useTheme } from '../theme/ThemeProvider';
 import { minTouch, spacing } from '../theme/tokens';
+
+const POCKET_PREVIEW = 4;
 
 const STATUS_TEXT: Record<HistoryEntry['status'], string> = {
   completed: 'Completed',
@@ -34,8 +37,7 @@ async function sendAgain(entry: HistoryEntry) {
   try {
     await CrossDrop.resendHistory(entry.id);
   } catch (e) {
-    const code =
-      e && typeof e === 'object' && 'code' in e ? String(e.code) : '';
+    const code = errorCode(e);
     Alert.alert(
       'Couldn’t send again',
       code === 'file_unreadable'
@@ -68,9 +70,18 @@ function HistoryRow({ entry, now }: { entry: HistoryEntry; now: number }) {
     entry.status === 'failed' && entry.errorCode
       ? friendlyError(entry.errorCode).title
       : STATUS_TEXT[entry.status];
+  const expiry =
+    entry.deleteAt !== null && entry.status === 'completed'
+      ? deleteLabel(
+          entry.deleteAt,
+          now,
+          entry.direction,
+          outgoing ? entry.peerName : undefined,
+        )
+      : null;
   const meta = `${outgoing ? 'To' : 'From'} ${entry.peerName} · ${formatBytes(
     entry.totalBytes,
-  )} · ${relativeTime(entry.finishedAt, now)}`;
+  )} · ${relativeTime(entry.finishedAt, now)}${expiry ? ` · ${expiry}` : ''}`;
 
   const content = (
     <View style={styles.historyRow}>
@@ -156,7 +167,13 @@ export function ActivityScreen() {
       ],
     );
 
-  const nothing = transfers.length === 0 && snapshot.history.length === 0;
+  const { queue, pocket } = snapshot;
+  const [allPocket, setAllPocket] = useState(false);
+  const nothing =
+    transfers.length === 0 &&
+    snapshot.history.length === 0 &&
+    queue.length === 0 &&
+    pocket.length === 0;
   const [query, setQuery] = useState('');
   const t = useTheme();
   const history = useMemo(() => {
@@ -176,6 +193,8 @@ export function ActivityScreen() {
       subtitle={
         active.length > 0
           ? `${active.length} in progress`
+          : queue.length > 0
+          ? `${queue.length} waiting to send`
           : 'Transfers stay on this phone'
       }
     >
@@ -196,6 +215,68 @@ export function ActivityScreen() {
           {transfers.map(tr => (
             <TransferCard key={tr.id} transfer={tr} onError={showError} />
           ))}
+        </>
+      ) : null}
+
+      {queue.length > 0 ? (
+        <>
+          <SectionHeader title="Waiting to send" />
+          <GlassCard padding={spacing.xs}>
+            {queue.map((item, i) => (
+              <View key={item.id}>
+                {i > 0 ? (
+                  <View
+                    style={[styles.divider, { backgroundColor: t.hairline }]}
+                  />
+                ) : null}
+                <QueueRow
+                  item={item}
+                  searching={snapshot.queueStorage.searching}
+                />
+              </View>
+            ))}
+          </GlassCard>
+          <Text variant="footnote" tone="tertiary" style={styles.note}>
+            Sent by themselves when the device is found: when CrossDrop opens,
+            when Wi‑Fi reconnects, or when it shows up nearby. No scanning in
+            the background.
+          </Text>
+        </>
+      ) : null}
+
+      {pocket.length > 0 ? (
+        <>
+          <SectionHeader
+            title="Pocket"
+            trailing={
+              pocket.length > POCKET_PREVIEW ? (
+                <Button
+                  title={allPocket ? 'Show less' : `Show all ${pocket.length}`}
+                  kind="plain"
+                  compact
+                  onPress={() => setAllPocket(v => !v)}
+                />
+              ) : undefined
+            }
+          />
+          <GlassCard padding={spacing.xs}>
+            {(allPocket ? pocket : pocket.slice(0, POCKET_PREVIEW)).map(
+              (item, i) => (
+                <View key={item.id}>
+                  {i > 0 ? (
+                    <View
+                      style={[styles.divider, { backgroundColor: t.hairline }]}
+                    />
+                  ) : null}
+                  <PocketRow item={item} now={now} />
+                </View>
+              ),
+            )}
+          </GlassCard>
+          <Text variant="footnote" tone="tertiary" style={styles.note}>
+            Files you received lately, ready to open or pass on. Removing one
+            here keeps the file unless you choose to delete it.
+          </Text>
         </>
       ) : null}
 
@@ -288,6 +369,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   noMatch: { paddingVertical: spacing.lg },
+  divider: { height: 1, marginHorizontal: spacing.xs },
+  note: { marginTop: spacing.xs, paddingHorizontal: spacing.xxs },
   statusDot: {
     width: 34,
     height: 34,

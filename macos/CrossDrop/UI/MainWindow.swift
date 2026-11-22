@@ -473,13 +473,22 @@ struct NoticeToast: View {
         ZStack {
             if let notice = model.notice {
                 HStack(spacing: ui.m) {
-                    Image(systemName: "info.circle.fill")
+                    Image(systemName: Self.symbol(for: notice.action))
                         .font(ui.system(14))
                         .foregroundColor(CDPalette.mint)
+                        .accessibilityHidden(true)
                     Text(notice.text)
                         .font(ui.callout)
                         .foregroundColor(CDPalette.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let action = notice.action {
+                        // The toast's one follow-up (Show in Finder, Use My Devices, Send
+                        // When Nearby); pressing it also dismisses the toast.
+                        Button(action.title) { model.performNoticeAction(notice) }
+                            .buttonStyle(PrimaryButtonStyle())
+                            .fixedSize()
+                    }
                     Button {
                         model.notice = nil
                     } label: {
@@ -503,6 +512,15 @@ struct NoticeToast: View {
         }
         .animation(CDMotion.layout(reduceMotion), value: model.notice)
         .animation(CDMotion.layout(reduceMotion), value: model.celebration == nil)
+    }
+
+    private static func symbol(for action: NoticeAction?) -> String {
+        guard let action = action else { return "info.circle.fill" }
+        switch action {
+        case .reveal: return "checkmark.circle.fill"
+        case .useMyDevices: return "antenna.radiowaves.left.and.right"
+        case .sendWhenNearby: return "clock.arrow.circlepath"
+        }
     }
 }
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { friendlyError, isFinal, rejectReason, statusLabel } from '../copy';
 import {
+  deleteLabel,
   etaSeconds,
   filesTitle,
   formatBytes,
@@ -9,10 +10,12 @@ import {
   formatRate,
   pluralFiles,
 } from '../format';
+import { useNow } from '../hooks/useNow';
 import * as CrossDrop from '../native/crossdrop';
 import type { Transfer } from '../native/types';
 import { useTheme } from '../theme/ThemeProvider';
 import { radii, spacing } from '../theme/tokens';
+import { Badge } from './Badge';
 import { Button } from './Button';
 import { GlassCard } from './GlassCard';
 import { IconBubble } from './IconBubble';
@@ -35,8 +38,22 @@ export function TransferCard({
   onError: (message: string) => void;
 }) {
   const t = useTheme();
+  const now = useNow(60000, transfer.deleteAt !== null);
   const outgoing = transfer.direction === 'outgoing';
   const final = isFinal(transfer.status);
+  const expiry =
+    transfer.deleteAt !== null
+      ? deleteLabel(
+          transfer.deleteAt,
+          now,
+          transfer.direction,
+          outgoing ? transfer.peerName : undefined,
+        )
+      : transfer.expiresAfter !== null && !final
+      ? 'Auto-delete after arriving'
+      : null;
+  const turbo = transfer.streams > 1;
+  const tags = expiry || turbo || transfer.queueId || transfer.answersCapture;
   const fraction =
     transfer.totalBytes > 0
       ? transfer.bytesTransferred / transfer.totalBytes
@@ -112,6 +129,25 @@ export function TransferCard({
           </Text>
         </View>
       </View>
+
+      {tags ? (
+        <View style={styles.tags}>
+          {transfer.answersCapture ? (
+            <Badge label="Photo request" tone="accent" icon="camera" />
+          ) : null}
+          {transfer.queueId ? (
+            <Badge label="Sent when nearby" tone="accent" icon="clock" />
+          ) : null}
+          {turbo ? (
+            <Badge
+              label={`Turbo · ${transfer.streams} streams`}
+              tone="neutral"
+              icon="bolt"
+            />
+          ) : null}
+          {expiry ? <Badge label={expiry} tone="warning" icon="clock" /> : null}
+        </View>
+      ) : null}
 
       <View style={styles.status}>
         {WAITING.has(transfer.status) ? (
@@ -214,6 +250,12 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   progress: { gap: spacing.xs, marginTop: spacing.sm },
+  tags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xxs,
+    marginTop: spacing.sm,
+  },
   detail: { marginTop: spacing.xs, gap: 2 },
   actions: {
     flexDirection: 'row',

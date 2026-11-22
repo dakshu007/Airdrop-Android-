@@ -29,6 +29,14 @@ struct SendView: View {
         }
         .animation(CDMotion.layout(reduceMotion), value: model.selectedFiles)
         .animation(CDMotion.layout(reduceMotion), value: model.pendingText)
+        .animation(CDMotion.layout(reduceMotion), value: model.shelf.isEmpty)
+        .animation(CDMotion.layout(reduceMotion), value: model.sendQueue.isEmpty)
+        .animation(CDMotion.layout(reduceMotion), value: showsCapture)
+    }
+
+    /// Photo from the phone: a paired phone is around, or a request is in progress.
+    private var showsCapture: Bool {
+        model.capture != nil || model.capturePhone != nil
     }
 
     @ViewBuilder
@@ -42,11 +50,23 @@ struct SendView: View {
             PendingTextCard(text: text)
                 .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
         }
+        if !model.shelf.isEmpty {
+            ShelfCard()
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+        }
     }
 
     @ViewBuilder
     private var destinations: some View {
         NearbyCard()
+        if showsCapture {
+            PhoneCaptureCard()
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+        }
+        if !model.sendQueue.isEmpty {
+            SendQueueCard()
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+        }
         let outgoing = model.outgoingTransfers
         if !outgoing.isEmpty {
             SectionHeader(title: "Transfers", detail: "This session")
@@ -169,7 +189,8 @@ struct SelectedFilesCard: View {
         VStack(alignment: .leading, spacing: ui(6)) {
             HStack(spacing: ui.s) {
                 SectionHeader(title: "Ready to send",
-                              detail: "\(Format.files(model.selectedFiles.count)) · \(Format.bytes(model.selectedTotalBytes))")
+                              detail: "\(Format.files(model.selectedFiles.count)) · \(Format.bytes(model.selectedTotalBytes))"
+                                  + (model.autoDeleteNextSend ? " · deletes after 24 h" : ""))
                 Button("Clear All") { model.clearSelection() }
                     .buttonStyle(GlassButtonStyle())
             }
@@ -203,6 +224,10 @@ struct SelectedFilesCard: View {
                     }
                 }
             }
+            // Next to what's being sent: applies to this send only.
+            GlassDivider()
+            AutoDeleteToggle()
+                .padding(.vertical, ui(10))
         }
         .padding(.horizontal, ui(CDLayout.cardPadding))
         .padding(.top, ui(CDLayout.cardPadding - 2))
@@ -277,6 +302,9 @@ struct NearbyCard: View {
                 }
             }
             stateContent
+            if model.hasSomethingToSend && !model.multiSelecting && !DeliverLaterRow.awayDevices(model).isEmpty {
+                DeliverLaterRow()
+            }
             if model.multiSelecting {
                 let chosen = model.nearby.filter { model.multiSelection.contains($0.deviceId) }
                 HStack(spacing: ui.m) {
@@ -351,7 +379,10 @@ struct NearbyCard: View {
                     DeviceTile(device: device,
                                trusted: model.isTrusted(device.deviceId),
                                canSend: model.hasSomethingToSend,
-                               ticked: model.multiSelecting ? model.multiSelection.contains(device.deviceId) : nil) {
+                               ticked: model.multiSelecting ? model.multiSelection.contains(device.deviceId) : nil,
+                               inRoom: model.room(for: device) != nil,
+                               temporary: model.trustedRecord(for: device.deviceId)?.isTemporary == true,
+                               queued: model.queuedSends(for: device.deviceId).count) {
                         if model.multiSelecting {
                             if model.multiSelection.contains(device.deviceId) {
                                 model.multiSelection.remove(device.deviceId)
@@ -365,6 +396,7 @@ struct NearbyCard: View {
                             model.sendSelection(to: device)
                         }
                     }
+                    .contextMenu { DeviceActionsMenu(device: device).environmentObject(model) }
                 }
             }
         }
@@ -383,6 +415,12 @@ struct DeviceTile: View {
     let canSend: Bool
     /// Non-nil while choosing several devices: whether this one is ticked.
     var ticked: Bool? = nil
+    /// Advertises the Drip Room this Mac is in (a hint; the room proof decides).
+    var inRoom = false
+    /// Trusted through a room, until it ends.
+    var temporary = false
+    /// Sends waiting for this device.
+    var queued = 0
     let action: () -> Void
     @Environment(\.cdScale) private var ui
 
@@ -396,10 +434,10 @@ struct DeviceTile: View {
                         .foregroundColor(CDPalette.textPrimary)
                         .lineLimit(1)
                     HStack(spacing: ui(5)) {
-                        if trusted && !device.isRemembered {
+                        if (trusted || inRoom) && !device.isRemembered {
                             Circle().fill(CDPalette.mint).frame(width: ui(6), height: ui(6))
                         }
-                        Text(device.isRemembered ? "Paired · not seen nearby" : (trusted ? "Paired" : "New · confirm a code"))
+                        Text(statusText)
                             .lineLimit(1)
                     }
                     .font(ui.caption)
@@ -424,8 +462,70 @@ struct DeviceTile: View {
             .padding(ui(12))
         }
         .buttonStyle(TileButtonStyle())
-        .help(device.isRemembered ? "Not found nearby. CrossDrop will try the address that worked last time." : "")
-        .accessibilityLabel("\(device.name), \(device.platform == "android" ? "Android" : "Mac"), \(trusted ? "paired" : "not paired")\(ticked == true ? ", selected" : "")")
-        .accessibilityHint(canSend ? "Sends the selected files" : "Choose files to send to this device")
+        .help(device.isRemembered ? "Not found nearby. CrossDrop will try the address that worked last time. Right-click for more." : "Right-click for more actions")
+        .accessibilityLabel(accessibilityText)
+        .accessibilityHint(canSend ? "Sends the selected files. More actions are in the context menu." : "Choose files to send to this device")
+    }
+
+    private var statusText: String {
+        let waiting = queued > 0 ? " · \(queued) waiting" : ""
+        if device.isRemembered { return "Paired · not seen nearby" + waiting }
+        if temporary { return "In your room · trusted until it ends" }
+        if trusted { return "Paired" + waiting }
+        // The room proof decides; if the other side isn't really in the room, codes are compared.
+        if inRoom { return "In your room" }
+        return "New · confirm a code"
+    }
+
+    private var accessibilityText: String {
+        var parts = [device.name, device.platform == "android" ? "Android" : "Mac"]
+        if temporary || (inRoom && !trusted) {
+            parts.append("in your room")
+        } else {
+            parts.append(trusted ? "paired" : "not paired")
+        }
+        if device.isRemembered { parts.append("not seen nearby") }
+        if queued > 0 { parts.append(queued == 1 ? "1 send waiting" : "\(queued) sends waiting") }
+        if ticked == true { parts.append("selected") }
+        return parts.joined(separator: ", ")
+    }
+}
+
+// MARK: - Device actions
+
+/// Right-click menu for a nearby device (Send page tiles and the menu bar rows): photo from
+/// a paired phone, send the clipboard, and deliver later to a paired device that isn't here.
+struct DeviceActionsMenu: View {
+    @EnvironmentObject private var model: AppModel
+    let device: DiscoveredDevice
+
+    var body: some View {
+        let paired = model.trustedRecord(for: device.deviceId)
+        let permanent = paired.map { !$0.isTemporary } ?? false
+        if device.platform == "android" && paired != nil {
+            let busy = model.capture?.isActive == true
+            Button("Take Photo with \(device.name)") { model.requestCapture(.photo, from: device) }
+                .disabled(busy)
+            Button("Pick Photo from \(device.name)") { model.requestCapture(.pick, from: device) }
+                .disabled(busy)
+            Divider()
+        }
+        if model.hasSomethingToSend {
+            Button(model.trustedRecord(for: device.deviceId) == nil ? "Pair & Send to \(device.name)" : "Send to \(device.name)") {
+                model.sendSelection(to: device)
+            }
+        }
+        Button("Send Clipboard to \(device.name)") { model.sendClipboard(to: device) }
+        if permanent, model.hasSomethingToSend, let record = paired {
+            Button("Deliver When Nearby") { model.queueSelection(for: record) }
+                .help("Keep this send and deliver it as soon as \(device.name) is back on the network")
+        }
+        let waiting = model.queuedSends(for: device.deviceId)
+        if !waiting.isEmpty {
+            Divider()
+            Button(waiting.count == 1 ? "Cancel 1 Waiting Send" : "Cancel \(waiting.count) Waiting Sends") {
+                waiting.forEach { model.cancelQueued($0) }
+            }
+        }
     }
 }

@@ -27,6 +27,7 @@ import { SettingsScreen } from '../screens/SettingsScreen';
 import { ShareScreen } from '../screens/ShareScreen';
 import { FreezeWhileHidden, useSnapshot } from '../state/CrossDropProvider';
 import { useDiscovery } from '../state/useDiscovery';
+import { WidgetTarget } from '../state/WidgetTarget';
 import { Backdrop, Mood } from '../theme/Backdrop';
 import { NavigationContext, TabKey } from './NavigationContext';
 import { TabBar } from './TabBar';
@@ -232,6 +233,7 @@ export function Navigator() {
       ) : null}
       <Overlays />
       <NotificationPrompt />
+      <WidgetTarget />
     </NavigationContext.Provider>
   );
 }

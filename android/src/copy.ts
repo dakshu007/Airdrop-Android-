@@ -186,3 +186,66 @@ export const FINAL_STATUSES: TransferStatus[] = [
 export function isFinal(status: TransferStatus): boolean {
   return FINAL_STATUSES.includes(status);
 }
+
+/** "Send when nearby" failures (queueFiles / queueSharedText rejections and failed items). */
+export const QUEUE_ERRORS: Record<string, string> = {
+  queue_full:
+    'The waiting list is full (50 items or 512 MB of shared files). Send or cancel something in Activity first.',
+  not_paired: 'Only paired devices can be sent to later.',
+  file_unreadable:
+    'One of the files can no longer be read. Choose it again and try once more.',
+  rejected: 'The other device didn’t accept it.',
+};
+
+export function queueError(code: string | null | undefined): string {
+  if (code && QUEUE_ERRORS[code]) return QUEUE_ERRORS[code];
+  if (code && ERROR_COPY[code]) return ERROR_COPY[code].title;
+  return 'Something went wrong. Try again.';
+}
+
+/** Drip Room failures (startRoom / joinRoom / pairWithCode with a room code). */
+export const ROOM_ERRORS: Record<string, string> = {
+  bad_code: 'That isn’t a CrossDrop code.',
+  own_code: 'That’s this phone’s own room code.',
+  expired: 'That room has already ended.',
+  not_receiving:
+    'CrossDrop couldn’t start receiving, which a room needs. Try again.',
+  no_network:
+    'Connect to Wi‑Fi first. Everyone in a room needs to be on the same network.',
+  bad_request: 'Choose one of the room lengths.',
+  auth_failed:
+    'The device that answered isn’t the one that showed the code. Nothing was shared.',
+};
+
+export function roomError(code: string | null | undefined): string {
+  return (code && ROOM_ERRORS[code]) || 'Something went wrong. Try again.';
+}
+
+/** The error code a rejected bridge promise carries ('' when there is none). */
+export function errorCode(e: unknown): string {
+  return e && typeof e === 'object' && 'code' in e
+    ? String((e as { code: unknown }).code)
+    : '';
+}
+
+/** True for a scanned Drip Room invite rather than a device pairing code. */
+export function isRoomCode(code: string): boolean {
+  return code.trim().toLowerCase().startsWith('crossdrop://room');
+}
+
+/** Pairing by QR code (pairWithCode rejections). */
+export const PAIR_ERRORS: Record<string, string> = {
+  bad_code: 'That isn’t a CrossDrop pairing code.',
+  own_code: 'That’s this phone’s own code.',
+  expired: 'The code has expired. Show a new one on the Mac.',
+  auth_failed:
+    'The device that answered isn’t the one in the code. Nothing was paired.',
+  unreachable:
+    'Couldn’t reach the Mac. Check that both are on the same Wi‑Fi and the code is still on screen.',
+  not_receiving: 'The code has expired. Show a new one on the Mac.',
+  pairing_rejected: 'The code was already used or expired. Show a new one.',
+};
+
+export function pairError(code: string | null | undefined): string {
+  return (code && PAIR_ERRORS[code]) || 'Something went wrong. Try again.';
+}

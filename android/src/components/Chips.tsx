@@ -196,7 +196,7 @@ export function DeviceChip({
             : device.trusted
             ? 'paired'
             : 'new device'
-        }`}
+        }${device.inRoom ? ', in your Drip Room' : ''}`}
         accessibilityHint={actionHint}
         accessibilityState={{ disabled: !!disabled }}
         android_ripple={{ color: 'rgba(20,154,91,0.12)', foreground: true }}
@@ -212,11 +212,15 @@ export function DeviceChip({
             {device.name}
           </Text>
           <View style={styles.deviceMeta}>
-            {device.trusted && !device.remembered ? (
+            {device.inRoom ? (
+              <Icon name="users" size={13} color={t.link} strokeWidth={2} />
+            ) : device.trusted && !device.remembered ? (
               <View style={[styles.dot, styles.smallDot]} />
             ) : null}
             <Text variant="footnote" tone="secondary" numberOfLines={1}>
-              {device.remembered
+              {device.inRoom
+                ? 'In your room'
+                : device.remembered
                 ? 'Paired · not seen'
                 : device.trusted
                 ? 'Paired'

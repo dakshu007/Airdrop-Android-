@@ -8,7 +8,12 @@ import { Frost } from '../components/Frost';
 import { Icon } from '../components/Icon';
 import { Stage, useArtSize } from '../components/Stage';
 import { Text } from '../components/Text';
-import { countdownCoarse, formatBytes, pluralFiles } from '../format';
+import {
+  countdownCoarse,
+  formatBytes,
+  formatDuration,
+  pluralFiles,
+} from '../format';
 import type { IncomingOffer } from '../native/types';
 import { useTheme } from '../theme/ThemeProvider';
 import { spacing } from '../theme/tokens';
@@ -117,6 +122,21 @@ export function IncomingStage({
               Checked on arrival, saved to {destination}
             </Text>
           </View>
+          {offer.expiresAfter !== null && offer.kind === 'files' ? (
+            <View style={styles.note}>
+              <Icon name="clock" size={15} color={t.warning} />
+              <Text
+                variant="footnote"
+                tone="warning"
+                center
+                style={styles.noteText}
+              >
+                Deleted from this phone{' '}
+                {formatDuration(offer.expiresAfter * 1000)} after arriving, as{' '}
+                {offer.peerName} asked
+              </Text>
+            </View>
+          ) : null}
         </ScrollView>
 
         <View style={styles.buttons}>

@@ -45,7 +45,12 @@ export type IconName =
   | 'qr'
   | 'search'
   | 'layers'
-  | 'heart';
+  | 'heart'
+  | 'camera'
+  | 'clock'
+  | 'share'
+  | 'users'
+  | 'bolt';
 
 interface IconProps {
   name: IconName;
@@ -357,7 +362,9 @@ export function Icon({ name, size = 24, color, strokeWidth = 1.8 }: IconProps) {
       );
       break;
     case 'layers':
-      body = <Path d="M12 4l8 4-8 4-8-4 8-4zM4 12l8 4 8-4M4 16l8 4 8-4" {...s} />;
+      body = (
+        <Path d="M12 4l8 4-8 4-8-4 8-4zM4 12l8 4 8-4M4 16l8 4 8-4" {...s} />
+      );
       break;
     case 'heart':
       body = (
@@ -378,6 +385,52 @@ export function Icon({ name, size = 24, color, strokeWidth = 1.8 }: IconProps) {
           <Rect x={3.5} y={13} width={7.5} height={7.5} rx={2} {...s} />
           <Rect x={13} y={13} width={7.5} height={7.5} rx={2} {...s} />
         </>
+      );
+      break;
+    case 'camera':
+      body = (
+        <>
+          <Path
+            d="M3.5 8.5a2 2 0 012-2h2.2l1.6-2.2h5.4l1.6 2.2h2.2a2 2 0 012 2v9a2 2 0 01-2 2h-13a2 2 0 01-2-2v-9z"
+            {...s}
+          />
+          <Circle cx={12} cy={13} r={3.6} {...s} />
+        </>
+      );
+      break;
+    case 'clock':
+      body = (
+        <>
+          <Circle cx={12} cy={12} r={8.6} {...s} />
+          <Path d="M12 7.4V12l3.2 2" {...s} />
+        </>
+      );
+      break;
+    case 'share':
+      body = (
+        <>
+          <Circle cx={6.5} cy={12} r={2.4} {...s} />
+          <Circle cx={17.5} cy={6} r={2.4} {...s} />
+          <Circle cx={17.5} cy={18} r={2.4} {...s} />
+          <Path d="M8.6 10.8l6.8-3.6M8.6 13.2l6.8 3.6" {...s} />
+        </>
+      );
+      break;
+    case 'users':
+      body = (
+        <>
+          <Circle cx={9} cy={8.5} r={3.2} {...s} />
+          <Path d="M3 19.5c.6-3.2 3-5 6-5s5.4 1.8 6 5" {...s} />
+          <Path
+            d="M15.5 5.6a3 3 0 010 5.8M17.4 14.8c1.8.7 3 2.3 3.4 4.7"
+            {...s}
+          />
+        </>
+      );
+      break;
+    case 'bolt':
+      body = (
+        <Path d="M13.2 2.8L5 13.4h6.2l-1 7.8 8.2-10.6h-6.2l1-7.8z" {...s} />
       );
       break;
     case 'drop':
