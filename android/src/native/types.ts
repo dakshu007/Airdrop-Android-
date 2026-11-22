@@ -126,6 +126,8 @@ export interface Transfer {
   expiresAfter: number | null;
   /** Incoming expiring drop: when CrossDrop deletes the saved files (outgoing: when the receiver was asked to). */
   deleteAt: number | null;
+  /** Incoming expiring drop: CrossDrop confirmed deleting all of its files. */
+  deleted: boolean;
   /** Connections used; more than 1 with Turbo. */
   streams: number;
   /** Set when this transfer delivers a "send when nearby" item. */
@@ -180,6 +182,8 @@ export interface HistoryEntry {
   canSendAgain: boolean;
   /** Expiring drop: incoming — when CrossDrop deletes (or deleted) the files; outgoing — when the receiver was asked to. */
   deleteAt: number | null;
+  /** Incoming expiring drop: CrossDrop confirmed deleting all of its files. */
+  deleted: boolean;
 }
 
 export interface SharedFile {

@@ -237,12 +237,15 @@ export function formatMinutes(minutes: number): string {
 /**
  * Expiring drops (§9.8): when the files go. Incoming files are deleted by
  * CrossDrop on this phone; for outgoing ones the receiver was asked to.
+ * "Deleted" only once CrossDrop confirmed it ([deleted]); deletion runs a
+ * little after the time, so until then a passed time reads as due.
  */
 export function deleteLabel(
   deleteAt: number,
   now: number,
   direction: 'incoming' | 'outgoing',
   peerName?: string,
+  deleted = false,
 ): string {
   const left = deleteAt - now;
   if (direction === 'outgoing') {
@@ -251,8 +254,9 @@ export function deleteLabel(
       ? `Deletion asked${where}`
       : `Deletes${where} in ${formatDuration(left)}`;
   }
+  if (deleted) return 'Deleted, as the sender asked';
   return left <= 0
-    ? 'Deleted, as the sender asked'
+    ? 'Due for deletion, as the sender asked'
     : `Deletes in ${formatDuration(left)}`;
 }
 

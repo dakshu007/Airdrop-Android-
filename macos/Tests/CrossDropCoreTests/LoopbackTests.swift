@@ -316,6 +316,24 @@ final class LoopbackTests: XCTestCase {
         XCTAssertEqual(result.error?.code, ErrorCode.peerChangedIdentity)
     }
 
+    func testADifferentDeviceAtTheAddressIsRefused() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        let file = try makeFile("a.txt", bytes: 10)
+        // The sender expects some other device at this address (e.g. a stale remembered one).
+        let expected = DeviceIdentity.generate().deviceId
+        let outgoing = OutgoingTransfer(endpoint: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: rig.port)!),
+                                        peerName: "old", peerId: expected, peerPlatform: "android",
+                                        files: [OutgoingFile(url: file)], identity: rig.clientIdentity,
+                                        local: LocalInfo(name: "Test Client", appVersion: "test"),
+                                        trust: rig.clientTrust, delegate: rig.clientDelegate)
+        let result = await outgoing.run()
+        XCTAssertEqual(result.phase, .failed)
+        XCTAssertEqual(result.error?.code, ErrorCode.peerChangedIdentity)
+        XCTAssertEqual(rig.clientDelegate.seenCodes, [], "no pairing with the wrong device")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: inbox.path), [])
+    }
+
     // MARK: v1 extensions (docs/protocol-v1.md §9)
 
     func testFoldersKeepTheirStructureButNeverEscape() async throws {

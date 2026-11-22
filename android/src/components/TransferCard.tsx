@@ -48,6 +48,7 @@ export function TransferCard({
           now,
           transfer.direction,
           outgoing ? transfer.peerName : undefined,
+          transfer.deleted,
         )
       : transfer.expiresAfter !== null && !final
       ? 'Auto-delete after arriving'

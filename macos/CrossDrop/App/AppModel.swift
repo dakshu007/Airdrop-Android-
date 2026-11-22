@@ -332,6 +332,9 @@ final class AppModel: ObservableObject, CrossDropDelegate {
 
     // Shelf ("Pocket"): files stashed for later, kept across launches (paths only).
     @Published private(set) var shelf: [ShelfItem] = []
+    /// Shelf items whose file is no longer there. Checked when the Shelf changes and when
+    /// CrossDrop comes to the front, never while views redraw.
+    @Published private(set) var missingShelfIds: Set<UUID> = []
 
     // Send when nearby: sends waiting for a paired device to come back.
     @Published private(set) var sendQueue: [QueuedSend] = []
@@ -408,6 +411,13 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     private var expiryTimer: Timer?
     /// Where files moved after arrival (old path → new location), for "Show in Finder" on cards.
     private var relocated: [String: URL] = [:]
+    private var activeObserver: NSObjectProtocol?
+    /// Silent sends (clipboard, queue) → the device they were started for. Another device
+    /// answering at that address stops the send (best effort; see `wrongPeer(_:)`).
+    private var expectedPeers: [String: String] = [:]
+    /// Shown queue attempts that failed but stay queued (transfer id → queued send), so
+    /// their card offers neither Retry nor Send When Nearby (that would send twice).
+    private var keptQueueAttempts: [String: UUID] = [:]
 
     private init() {
         let loaded = IdentityStore.loadOrCreate()
@@ -427,9 +437,13 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         notificationsEnabled = AppSettings.notificationsEnabled
         soundOnDone = AppSettings.soundOnDone
         trustStore.purgeExpired()
+        // Rooms don't survive a relaunch (they live in memory), so neither does the
+        // temporary trust their members got: nothing here could end it early otherwise.
+        trustStore.forgetTemporary()
         trustedDevices = trustStore.all
         history = historyStore.entries
         shelf = shelfFile.load()
+        missingShelfIds = Self.missingIds(in: shelf)
         sendQueue = queueFile.load()
         expiringFiles = expiringFile.load()
         trustStore.onChange = { [weak self] list in
@@ -460,6 +474,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
             self.respond(to: prompt, accept: accept)
         }
         NotificationManager.shared.onReveal = { [weak self] urls in self?.reveal(urls) }
+        activeObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
+                                               queue: .main) { [weak self] _ in
+            self?.refreshShelfPresence()
+        }
         startPathMonitor()
         if receivingEnabled { startServer() }
         refreshNearby()
@@ -559,11 +577,7 @@ final class AppModel: ObservableObject, CrossDropDelegate {
             listeningPort = port
             if let pending = captureAfterReady {
                 captureAfterReady = nil
-                if let device = nearby.first(where: { $0.deviceId == pending.deviceId }) {
-                    launchCapture(pending.kind, device: device)
-                } else {
-                    capture = nil
-                }
+                launchPendingCapture(pending.kind, deviceId: pending.deviceId)
             }
         case .localNetworkDenied:
             receiverStatus = .localNetworkDenied
@@ -980,10 +994,15 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         }
     }
 
-    /// Sends the clipboard to one device straight away (menu bar shortcut).
+    /// Sends the clipboard to one device straight away (device context menus). Leaves the
+    /// Send tray (files or a link waiting there) untouched.
     func sendClipboard(to device: DiscoveredDevice) {
-        guard takeClipboard() else { return }
-        sendSelection(to: [device])
+        guard let raw = NSPasteboard.general.string(forType: .string), let text = PendingText.from(raw) else {
+            show("The clipboard has no link or text to send.")
+            return
+        }
+        startTransfer(files: [OutgoingFile.text(text.text, name: text.kind == .link ? "Link" : "Text")], to: device,
+                      kind: text.kind, text: text.kind == .link ? text.text : nil)
     }
 
     private func startTransfer(files: [OutgoingFile], to device: DiscoveredDevice, kind: OfferKind = .files,
@@ -1009,6 +1028,7 @@ final class AppModel: ObservableObject, CrossDropDelegate {
             queueAttempts[transfer.id] = queueId
             deliveringQueueIds.insert(queueId)
         }
+        if options.quiet || options.queueId != nil { expectedPeers[transfer.id] = device.deviceId }
         if let text = text { sentText[transfer.id] = text }
         upsert(transfer.snapshot)
         let trust = trustStore
@@ -1026,6 +1046,13 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         item.snapshot.direction == .outgoing
             && (item.snapshot.phase == .failed || item.snapshot.phase == .cancelled)
             && retryInfo[item.id] != nil
+            && !isStillQueued(item.id)
+    }
+
+    /// A shown queue attempt that failed but whose send is still waiting in the queue.
+    private func isStillQueued(_ transferId: String) -> Bool {
+        guard let queueId = keptQueueAttempts[transferId] else { return false }
+        return sendQueue.contains { $0.id == queueId }
     }
 
     func retry(_ item: TransferItem) {
@@ -1070,6 +1097,7 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         guard item.snapshot.phase.isFinished else { return }
         transfers.removeAll { $0.id == item.id }
         retryInfo[item.id] = nil
+        keptQueueAttempts[item.id] = nil
     }
 
     var activeTransfers: [TransferItem] {
@@ -1122,9 +1150,16 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         trustStore.setAutoAccept(value, for: device.deviceId)
     }
 
+    /// Clears the list, except received files still waiting to go to the Trash: their row
+    /// holds the only Keep button, so it stays until they are deleted or kept.
     func clearHistory() {
         historyStore.clear()
-        history = []
+        history = historyStore.entries
+    }
+
+    /// History rows that stay when the list is cleared (expiring drops still pending).
+    var pendingExpiringCount: Int {
+        history.filter { $0.isPendingExpiry }.count
     }
 
     func reveal(_ urls: [URL]) {
@@ -1270,6 +1305,7 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         guard added > 0 else { return }
         if shelf.count > Self.shelfLimit { shelf = Array(shelf.prefix(Self.shelfLimit)) }
         shelfFile.save(shelf)
+        refreshShelfPresence()
     }
 
     func stash(providers: [NSItemProvider]) {
@@ -1279,22 +1315,42 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     func removeFromShelf(_ item: ShelfItem) {
         shelf.removeAll { $0.id == item.id }
         shelfFile.save(shelf)
+        missingShelfIds.remove(item.id)
     }
 
     /// Drops items whose file was moved or deleted outside CrossDrop.
     func removeMissingFromShelf() {
         shelf.removeAll { !$0.exists }
         shelfFile.save(shelf)
+        missingShelfIds = []
     }
 
     func clearShelf() {
         shelf.removeAll()
         shelfFile.save(shelf)
+        missingShelfIds = []
+    }
+
+    /// False when the item's file was moved or deleted (as of the last check).
+    func isPresent(_ item: ShelfItem) -> Bool {
+        !missingShelfIds.contains(item.id)
+    }
+
+    /// Re-checks which Shelf files still exist: when the Shelf changes, CrossDrop comes to
+    /// the front or a panel showing the Shelf opens. One stat per item, never per redraw.
+    func refreshShelfPresence() {
+        let missing = Self.missingIds(in: shelf)
+        if missing != missingShelfIds { missingShelfIds = missing }
+    }
+
+    private static func missingIds(in items: [ShelfItem]) -> Set<UUID> {
+        Set(items.filter { !$0.exists }.map { $0.id })
     }
 
     /// Sends Shelf items (all of them when `items` is nil) straight to a device. They stay on the Shelf.
     func sendShelf(_ items: [ShelfItem]? = nil, to device: DiscoveredDevice) {
         let urls = (items ?? shelf).filter { $0.exists }.map { $0.url }
+        refreshShelfPresence()
         guard !urls.isEmpty else {
             show("Those files are no longer where they were.")
             return
@@ -1305,6 +1361,7 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     /// Puts Shelf items in the Send tray, to pick devices or several at once.
     func addShelfToSelection(_ items: [ShelfItem]? = nil) {
         let urls = (items ?? shelf).filter { $0.exists }.map { $0.url }
+        refreshShelfPresence()
         guard !urls.isEmpty else {
             show("Those files are no longer where they were.")
             return
@@ -1326,14 +1383,20 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     /// True for a failed send to a paired device that can wait in the queue.
     func canSendWhenNearby(_ item: TransferItem) -> Bool {
         guard item.snapshot.direction == .outgoing, item.snapshot.phase == .failed,
-              let info = retryInfo[item.id] else { return false }
-        return isTrusted(info.deviceId)
+              !fromQueue.contains(item.id), let info = retryInfo[item.id] else { return false }
+        return isPermanentlyPaired(info.deviceId)
+    }
+
+    /// Paired for good (not a Drip Room member whose trust ends with the room).
+    func isPermanentlyPaired(_ deviceId: String) -> Bool {
+        trustedRecord(for: deviceId).map { !$0.isTemporary } ?? false
     }
 
     /// Keeps a failed send and delivers it automatically when the device is back.
     func sendWhenNearby(_ item: TransferItem) {
-        guard let info = retryInfo[item.id], isTrusted(info.deviceId) else {
-            show("Only sends to paired devices can wait until they are nearby.")
+        guard !fromQueue.contains(item.id) else { return }
+        guard let info = retryInfo[item.id], isPermanentlyPaired(info.deviceId) else {
+            show("Only sends to devices paired for good can wait until they are nearby.")
             return
         }
         var files: [QueuedSend.File] = []
@@ -1473,8 +1536,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     private func handleQueueUpdate(_ snapshot: TransferSnapshot, queueId: UUID) -> Bool {
         let id = snapshot.id
         fromQueue.insert(id)
-        // The device was paired when queued; a pairing request means someone else answered there.
-        if snapshot.phase == .pairing, !shownQueueAttempts.contains(id) {
+        // The device was paired when queued; a pairing request, or a different device answering
+        // the handshake, means someone else now has its old address.
+        if !snapshot.phase.isFinished, !shownQueueAttempts.contains(id),
+           snapshot.phase == .pairing || wrongPeer(snapshot) {
             suppressedQueueAttempts.insert(id)
             outgoing[id]?.cancel()
             return false
@@ -1505,10 +1570,14 @@ final class AppModel: ObservableObject, CrossDropDelegate {
 
     private func finishQueueAttempt(_ transferId: String, queueId: UUID, delivered: Bool, keep: Bool) {
         queueAttempts[transferId] = nil
+        expectedPeers[transferId] = nil
         if !shownQueueAttempts.contains(transferId) {
             // A silent try: nothing on screen can retry it.
             retryInfo[transferId] = nil
             sentText[transferId] = nil
+        } else if keep {
+            // Its card stays, but the send is still queued: no Retry / Send When Nearby there.
+            keptQueueAttempts[transferId] = queueId
         }
         shownQueueAttempts.remove(transferId)
         deliveringQueueIds.remove(queueId)
@@ -1523,6 +1592,14 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         }
     }
 
+    /// True when the device that answered the handshake is not the one a silent send was
+    /// started for. The core doesn't check this before pairing or offering (see the report on
+    /// `expectedPeerId`), so the app stops such a send as soon as it sees the snapshot.
+    private func wrongPeer(_ snapshot: TransferSnapshot) -> Bool {
+        guard let expected = expectedPeers[snapshot.id], let answered = snapshot.peerId else { return false }
+        return answered != expected
+    }
+
     /// A send to a paired device failed because it couldn't be reached: offer to keep it.
     private func offerQueueIfUnreachable(_ snapshot: TransferSnapshot) {
         guard snapshot.direction == .outgoing, snapshot.phase == .failed,
@@ -1535,9 +1612,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
 
     // MARK: - Take Photo / Pick Photo with the phone (§9.7)
 
-    /// Paired phones this Mac can ask for a photo: found nearby or at their last address.
+    /// Phones paired for good that this Mac can ask for a photo: found nearby or at their last
+    /// address. Drip Room members are left out: a meeting stranger's phone is never "your phone".
     var capturePhones: [DiscoveredDevice] {
-        let phones = nearby.filter { $0.platform == "android" && isTrusted($0.deviceId) }
+        let phones = nearby.filter { $0.platform == "android" && isPermanentlyPaired($0.deviceId) }
         return phones.filter { !$0.isRemembered } + phones.filter { $0.isRemembered }
     }
 
@@ -1554,8 +1632,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
             show("Pair your phone first and keep CrossDrop open on it. The photo comes straight to this Mac's clipboard.")
             return
         }
-        guard device.platform == "android", isTrusted(device.deviceId) else {
-            show("\(device.name) needs to be paired with this Mac first.")
+        guard device.platform == "android", isPermanentlyPaired(device.deviceId) else {
+            show(isTrusted(device.deviceId)
+                 ? "\(device.name) is in your Drip Room only. Pair it with this Mac to ask it for photos."
+                 : "\(device.name) needs to be paired with this Mac first.")
             return
         }
         if let current = capture, current.isActive {
@@ -1575,9 +1655,22 @@ final class AppModel: ObservableObject, CrossDropDelegate {
             capture = CaptureState(kind: kind, deviceId: device.deviceId, deviceName: device.name, requestId: nil,
                                    phase: .asking, startedAt: Date())
             captureAfterReady = (kind, device.deviceId)
+            waitForReceiverThenCapture()
             return
         }
         launchCapture(kind, device: device)
+    }
+
+    /// "Try Again" on a failed photo request: asks the same phone again, never another one.
+    func retryCapture() {
+        guard let failed = capture, !failed.isActive else { return }
+        guard let device = nearby.first(where: { $0.deviceId == failed.deviceId }) else {
+            let message = "\(failed.deviceName) isn't nearby right now. Open CrossDrop on it, then try again."
+            capture?.phase = .failed(message)
+            show(message)
+            return
+        }
+        requestCapture(failed.kind, from: device)
     }
 
     /// Lets the phone answer: switches receiving to My Devices, then asks.
@@ -1587,10 +1680,56 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         capture?.phase = .asking
         setReceiveMode(.mine)
         // Already listening (receiving was not really off): ask straight away.
-        if server != nil, listeningPort != nil, let waiting = captureAfterReady,
-           let device = nearby.first(where: { $0.deviceId == waiting.deviceId }) {
+        if server != nil, listeningPort != nil, let waiting = captureAfterReady {
             captureAfterReady = nil
-            launchCapture(waiting.kind, device: device)
+            launchPendingCapture(waiting.kind, deviceId: waiting.deviceId)
+        } else {
+            waitForReceiverThenCapture()
+        }
+    }
+
+    /// How long a photo request waits for receiving to become ready before giving up.
+    static let captureReadyTimeout: TimeInterval = 20
+
+    /// The request waits for `apply(.ready)`. Fails at once when the receiver can't become
+    /// ready by itself (no network, Local Network denied, failed), and after a short timeout
+    /// otherwise, so the card never stays at "Asking…" with its rings moving.
+    private func waitForReceiverThenCapture() {
+        switch receiverStatus {
+        case .noNetwork:
+            captureFailed("This Mac isn't on Wi-Fi or Ethernet, so the phone has nowhere to send the photo.")
+            return
+        case .localNetworkDenied:
+            captureFailed("Allow Local Network access for CrossDrop in System Settings, then ask again.")
+            return
+        case .failed:
+            captureFailed("Receiving couldn't start, so the phone has nowhere to send the photo.")
+            return
+        case .off, .starting, .ready:
+            break
+        }
+        captureTimer?.invalidate()
+        guard let state = capture else { return }
+        let timer = Timer(timeInterval: Self.captureReadyTimeout, repeats: false) { [weak self] _ in
+            guard let self = self, self.captureAfterReady != nil, self.capture?.id == state.id,
+                  self.capture?.phase == .asking else { return }
+            self.captureFailed("Receiving isn't ready, so \(state.deviceName) has nowhere to send the photo. Try again in a moment.")
+        }
+        timer.tolerance = 2
+        RunLoop.main.add(timer, forMode: .common)
+        captureTimer = timer
+    }
+
+    /// Sends a request that was waiting for the receiver, if the phone is still around.
+    private func launchPendingCapture(_ kind: CaptureKind, deviceId: String) {
+        captureTimer?.invalidate()
+        captureTimer = nil
+        if let device = nearby.first(where: { $0.deviceId == deviceId }) {
+            launchCapture(kind, device: device)
+        } else if let name = capture?.deviceName {
+            captureFailed("\(name) isn't nearby any more. Open CrossDrop on it, then try again.")
+        } else {
+            capture = nil
         }
     }
 
@@ -1846,14 +1985,15 @@ final class AppModel: ObservableObject, CrossDropDelegate {
 
     // MARK: - Offer what I copy to my phone
 
-    /// True while the clipboard is being watched (setting on and your phone around).
+    /// True while the clipboard is being watched (setting on and your phone found nearby).
     @Published private(set) var clipboardWatching = false
 
-    /// The phone copied text goes to: paired permanently, marked "This is my device", nearby
-    /// or at its last address.
+    /// The phone copied text goes to: paired permanently, marked "This is my device", and
+    /// found by discovery right now. Never a remembered address: another device may hold it
+    /// by now, and the core doesn't refuse a different (trusted) device answering there.
+    /// Discovery runs only while CrossDrop's window or menu bar panel is open.
     var clipboardTarget: DiscoveredDevice? {
-        let mine = nearby.filter { isMyPhone($0.deviceId) }
-        return mine.first { !$0.isRemembered } ?? mine.first
+        nearby.first { !$0.isRemembered && isMyPhone($0.deviceId) }
     }
 
     func setOfferClipboardToPhone(_ enabled: Bool) {
@@ -1863,7 +2003,7 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         updateClipboardWatcher()
     }
 
-    /// The 1.5 s change-count check runs only while the setting is on and a phone is around.
+    /// The 1.5 s change-count check runs only while the setting is on and discovery sees the phone.
     private func updateClipboardWatcher() {
         let shouldRun = offerClipboardToPhone && clipboardTarget != nil
         if shouldRun, !clipboardWatcher.isRunning {
@@ -1882,14 +2022,21 @@ final class AppModel: ObservableObject, CrossDropDelegate {
 
     /// Clipboard sends leave no card or history; only the setting's footnote changes.
     private func handleQuietUpdate(_ snapshot: TransferSnapshot) {
-        // The phone was paired as "mine"; a pairing request means another device answered.
-        if snapshot.phase == .pairing {
+        // The phone was paired as "mine"; a pairing request, or another device answering the
+        // handshake, means it isn't the phone: stop before the text is offered.
+        if !snapshot.phase.isFinished, snapshot.phase == .pairing || wrongPeer(snapshot) {
             outgoing[snapshot.id]?.cancel()
             return
         }
         guard snapshot.phase.isFinished else { return }
+        let mismatched = wrongPeer(snapshot)
         quietIds.remove(snapshot.id)
+        expectedPeers[snapshot.id] = nil
         let time = Date().formatted(date: .omitted, time: .shortened)
+        if mismatched {
+            clipboardOfferStatus = "The last copy wasn\u{2019}t sent: a different device answered (\(time))."
+            return
+        }
         switch snapshot.phase {
         case .completed:
             clipboardOfferStatus = "Last copy sent to \(snapshot.peerName) at \(time)."
@@ -1965,17 +2112,30 @@ final class AppModel: ObservableObject, CrossDropDelegate {
     static let expiryCheckInterval: TimeInterval = 15 * 60
 
     private func registerExpiring(_ urls: [URL], transferId: String, deleteAt: Date) {
+        var registered = 0
         for url in urls {
-            guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber else { continue }
+            guard let identity = ExpiringFile.identity(of: url) else { continue }
             expiringFiles.append(ExpiringFile(id: UUID(), transferId: transferId, path: url.path,
-                                              size: size.int64Value, deleteAt: deleteAt))
+                                              size: identity.size, deleteAt: deleteAt,
+                                              fileNumber: identity.fileNumber, modifiedAt: identity.modifiedAt))
+            registered += 1
+        }
+        if registered == 0 {
+            // Nothing could be tracked, so nothing will be deleted: say so instead of a date.
+            historyStore.update(id: transferId) { entry in
+                entry.deletesAt = nil
+                entry.notDeletedReason = "Not deleted: the files couldn\u{2019}t be tracked"
+            }
+            history = historyStore.entries
+            return
         }
         expiringFile.save(expiringFiles)
         scheduleExpiryTimer()
     }
 
     /// Moves due expiring drops to the Trash (recoverable there), skipping any file that was
-    /// moved, deleted or replaced since it arrived.
+    /// moved, deleted or replaced since it arrived (see `ExpiringFile.isUnchanged`). History
+    /// says "Moved to Trash" only for transfers whose files really went there.
     func checkExpiringFiles() {
         let now = Date()
         let due = expiringFiles.filter { $0.deleteAt <= now }
@@ -1986,24 +2146,44 @@ final class AppModel: ObservableObject, CrossDropDelegate {
         let dueIds = Set(due.map { $0.id })
         expiringFiles.removeAll { dueIds.contains($0.id) }
         expiringFile.save(expiringFiles)
-        let urls: [URL] = due.compactMap { file in
-            guard let size = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? NSNumber,
-                  size.int64Value == file.size else { return nil }
-            return URL(fileURLWithPath: file.path)
-        }
+        // Transfers with no files left waiting: their outcome is settled now.
         let finished = Set(due.map { $0.transferId }).filter { id in !expiringFiles.contains { $0.transferId == id } }
-        let markDeleted: () -> Void = { [weak self] in
+        var unchanged: [String: [URL]] = [:]
+        for file in due where file.isUnchanged {
+            unchanged[file.transferId, default: []].append(URL(fileURLWithPath: file.path))
+        }
+        let candidates = unchanged
+        let urls = candidates.values.flatMap { $0 }
+        let settle: (Set<String>, Bool) -> Void = { [weak self] trashedPaths, failed in
             guard let self = self else { return }
+            var refused = 0
             for id in finished {
-                self.historyStore.update(id: id) { $0.deletedAt = Date() }
+                let tried = candidates[id] ?? []
+                let trashed = tried.filter { trashedPaths.contains($0.standardizedFileURL.path) }
+                refused += tried.count - trashed.count
+                self.historyStore.update(id: id) { entry in
+                    if !trashed.isEmpty {
+                        entry.deletedAt = Date()
+                    } else {
+                        entry.deletesAt = nil
+                        entry.notDeletedReason = tried.isEmpty
+                            ? "Not deleted: the files were moved or changed"
+                            : "Not deleted: couldn\u{2019}t move them to the Trash"
+                    }
+                }
             }
             self.history = self.historyStore.entries
+            if failed, refused > 0 {
+                self.show(refused == 1 ? "An expired file couldn\u{2019}t be moved to the Trash. It\u{2019}s still where it was saved."
+                                       : "\(refused) expired files couldn\u{2019}t be moved to the Trash. They\u{2019}re still where they were saved.")
+            }
         }
         if urls.isEmpty {
-            markDeleted()
+            settle([], false)
         } else {
-            NSWorkspace.shared.recycle(urls) { _, _ in
-                DispatchQueue.main.async { markDeleted() }
+            NSWorkspace.shared.recycle(urls) { newURLs, error in
+                let trashed = Set(newURLs.keys.map { $0.standardizedFileURL.path })
+                DispatchQueue.main.async { settle(trashed, error != nil) }
             }
         }
         scheduleExpiryTimer()
@@ -2083,6 +2263,10 @@ final class AppModel: ObservableObject, CrossDropDelegate {
 
     func crossDropPairingRequested(_ prompt: PairingPrompt, decision: Decision) {
         DispatchQueue.main.async {
+            // Already answered: a silent send (clipboard, queue) reached an unknown device and
+            // was cancelled on its `.pairing` snapshot, which arrives here first. No window,
+            // no prompt that would vanish a moment later.
+            guard !decision.isFinished else { return }
             self.prompts.append(.pairing(prompt, decision))
             self.requestMainWindow()
             if prompt.role == .receiver {

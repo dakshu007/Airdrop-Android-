@@ -34,9 +34,14 @@ interface Offer {
   files: SharedFile[] | null;
   queued: boolean;
   error: string | null;
+  /** Auto-delete was on, and on screen, when this send started. */
+  expire: boolean;
 }
 
 type SendResult = 'sent' | 'unreachable' | 'failed';
+
+const sendOptions = (expire: boolean): SendOptions =>
+  expire ? { expiresAfter: AUTO_DELETE_SECONDS } : {};
 
 /**
  * Tapping a device: send now, or — for a paired device that isn't around —
@@ -54,10 +59,14 @@ export function useSendFlow({
   const [busy, setBusy] = useState(false);
   const [offer, setOffer] = useState<Offer | null>(null);
 
-  const options = useCallback(
-    (): SendOptions =>
-      autoDelete && !text ? { expiresAfter: AUTO_DELETE_SECONDS } : {},
-    [autoDelete, text],
+  /**
+   * Auto-delete applies only when its switch was on screen: it sits in the
+   * tray, which shows only once files are chosen. A send that starts with no
+   * files (the picker comes next) or with a link never expires.
+   */
+  const wantsExpiry = useCallback(
+    (): boolean => autoDelete && !text && count > 0,
+    [autoDelete, text, count],
   );
 
   const finish = useCallback(() => {
@@ -67,13 +76,17 @@ export function useSendFlow({
 
   /** One attempt; alerts for anything but "not reachable", which the caller handles. */
   const sendNow = useCallback(
-    async (device: NearbyDevice, files: SharedFile[]): Promise<SendResult> => {
+    async (
+      device: NearbyDevice,
+      files: SharedFile[],
+      expire: boolean,
+    ): Promise<SendResult> => {
       setBusy(true);
       try {
         if (text) {
           await CrossDrop.sendSharedText(device.deviceId);
         } else {
-          const opts = options();
+          const opts = sendOptions(expire);
           const id = await CrossDrop.sendFiles(device.deviceId, files, opts);
           rememberSend(id, { deviceId: device.deviceId, files, options: opts });
         }
@@ -92,11 +105,11 @@ export function useSendFlow({
         setBusy(false);
       }
     },
-    [text, options],
+    [text],
   );
 
   const unreachable = useCallback(
-    (device: NearbyDevice, files: SharedFile[]) => {
+    (device: NearbyDevice, files: SharedFile[], expire: boolean) => {
       if (device.trusted) {
         setOffer({
           device,
@@ -104,6 +117,7 @@ export function useSendFlow({
           files: text ? null : files,
           queued: false,
           error: null,
+          expire,
         });
       } else {
         const e = friendlyError('unreachable');
@@ -115,6 +129,7 @@ export function useSendFlow({
 
   const select = useCallback(
     async (device: NearbyDevice) => {
+      const expire = wantsExpiry();
       if (device.trusted && device.remembered) {
         setOffer({
           device,
@@ -122,25 +137,27 @@ export function useSendFlow({
           files: null,
           queued: false,
           error: null,
+          expire,
         });
         return;
       }
       const files = text ? [] : await resolveFiles();
       if (!text && files.length === 0) return;
-      const result = await sendNow(device, files);
+      const result = await sendNow(device, files, expire);
       if (result === 'sent') finish();
-      else if (result === 'unreachable') unreachable(device, files);
+      else if (result === 'unreachable') unreachable(device, files, expire);
     },
-    [text, resolveFiles, sendNow, finish, unreachable],
+    [text, resolveFiles, sendNow, finish, unreachable, wantsExpiry],
   );
 
   const selectMany = useCallback(
     async (devices: NearbyDevice[]) => {
+      const expire = wantsExpiry();
       const files = text ? [] : await resolveFiles();
       if (!text && files.length === 0) return;
       let sent = 0;
       for (const device of devices) {
-        const result = await sendNow(device, files);
+        const result = await sendNow(device, files, expire);
         if (result === 'sent') sent += 1;
         else if (result === 'unreachable') {
           Alert.alert(
@@ -151,7 +168,7 @@ export function useSendFlow({
       }
       if (sent > 0) finish();
     },
-    [text, resolveFiles, sendNow, finish],
+    [text, resolveFiles, sendNow, finish, wantsExpiry],
   );
 
   const filesFor = async (current: Offer): Promise<SharedFile[] | null> => {
@@ -168,7 +185,12 @@ export function useSendFlow({
     setBusy(true);
     try {
       if (text) await CrossDrop.queueSharedText(offer.device.deviceId);
-      else await CrossDrop.queueFiles(offer.device.deviceId, files, options());
+      else
+        await CrossDrop.queueFiles(
+          offer.device.deviceId,
+          files,
+          sendOptions(offer.expire),
+        );
       CrossDrop.feedback('confirm');
       setOffer({ ...offer, files, queued: true, error: null });
     } catch (e) {
@@ -182,7 +204,7 @@ export function useSendFlow({
     if (!offer) return;
     const files = await filesFor(offer);
     if (!files) return;
-    const result = await sendNow(offer.device, files);
+    const result = await sendNow(offer.device, files, offer.expire);
     if (result === 'sent') {
       setOffer(null);
       finish();

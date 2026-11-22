@@ -36,9 +36,52 @@ unless a release key is configured; see [docs/release-process.md](docs/release-p
    when you send it again.
 
 Beyond files: send a **link** and it opens on the Mac (on the phone, one tap
-opens it); send the **clipboard** from the Mac panel, the app, or the "Send
-clipboard" Quick Settings tile. Optional: a notification offering to send each
-new screenshot to the device you used last.
+opens it); send the **clipboard** from the Mac panel, the app, the "Send
+clipboard" Quick Settings tile or the home-screen widget. Optional: a
+notification offering to send each new screenshot to the device you used last.
+
+### Newer features (written, not yet tried on real devices)
+
+These are in the code and build in CI. Their protocol parts pass the Kotlin and
+Swift tests and the Kotlin↔Swift interop, and the Android screens pass render
+tests, but nothing here has been used on a physical phone and Mac yet.
+
+* **Send when nearby.** Sending to a paired device that isn't around offers to
+  wait: the send is kept and goes as soon as the device shows up (Activity tab on
+  Android, queue on the Mac, with Retry and Cancel). No background scanning: the
+  phone looks for one minute at app start and when Wi‑Fi changes; the Mac tries
+  at launch, wake, network changes and whenever discovery is already running.
+* **Take a photo with the phone** (Mac menu bar or Send page): asks a paired phone for a new
+  or existing photo. The phone shows a notification (or a full-screen prompt if
+  CrossDrop is open); the photo comes back without a prompt and lands on the
+  Mac's clipboard and in its receive folder.
+* **Drip Island** (Mac): while you drag files anywhere, a glass island drops
+  from the top of the screen with nearby devices and the Shelf. Can be switched off.
+* **Shelf** (Mac): park files and folders for later, then send them or drag
+  them out again. **Pocket** (Android): your last 30 received files with Open,
+  Share and Remove.
+* **Clipboard.** Mac, opt-in "Send what I copy to my phone": text you copy goes
+  to a phone marked "This is my device" while the Mac can see it. Android shows
+  text from a Mac as a "Paste from …" pill for two minutes; nothing touches the
+  phone's clipboard until you tap Copy.
+* **Drip Rooms:** start a room (30 min to 4 h) and show its QR code. Phones
+  scan it, Macs paste the code; members then pair with each other without
+  comparing codes until the room ends. Each file is still approved, and room
+  trust ends with the room.
+* **Expiring drops:** ask the receiver to delete files 24 h after they arrive.
+  Android deletes its copies (possibly a little late); the Mac moves them to the
+  Trash and offers Keep. This is a courtesy the receiver can ignore or work around.
+* **Smart arrival** (off by default): sort received files by type. Android:
+  Pictures / Movies / Music / Download › CrossDrop. Mac: photos to
+  Pictures › CrossDrop › From *device* – *date*, documents to Documents › CrossDrop.
+* **Haptic heartbeat** (Android): a light tick every 10% of a transfer, following
+  the in-app and system haptics settings. On a Force Touch trackpad the Mac
+  gives one tap when a transfer finishes.
+* **Home-screen widget** (Android): up to three paired devices and a Clipboard
+  button. There is no Mac widget: it needs a signed App Group, which the free unsigned
+  build can't have.
+* **Turbo (experimental, off by default):** a multi-file send asks for up to 4
+  parallel connections. Any speed gain is unmeasured.
 
 Both devices must be on the same Wi-Fi network and that network must allow
 devices to talk to each other (many guest networks don't). QR pairing carries
@@ -87,4 +130,7 @@ xcodebuild -project CrossDrop.xcodeproj -scheme CrossDrop -configuration Release
 
 CrossDrop has no servers. It uses mDNS/Bonjour to find devices on your network
 and a direct TCP connection to send files. Transfer history and trusted devices
-stay on your device. There is no analytics or telemetry.
+stay on your device. There is no analytics or telemetry. The Mac only looks at
+the clipboard if you turn on "Send what I copy to my phone", and the phone
+never reads its clipboard in the background. What each feature stores, and its
+limits, is in [docs/security-model.md](docs/security-model.md).

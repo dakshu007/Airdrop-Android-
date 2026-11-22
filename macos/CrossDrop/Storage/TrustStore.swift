@@ -83,6 +83,21 @@ final class TrustStore: TrustProvider {
         return true
     }
 
+    /// Removes every temporary (room) trust. Rooms live only in memory, so after a relaunch
+    /// no room is running here and nothing could end those trusts early. Returns true when
+    /// something was removed.
+    @discardableResult
+    func forgetTemporary() -> Bool {
+        lock.lock()
+        let any = records.values.contains { $0.isTemporary }
+        lock.unlock()
+        guard any else { return false }
+        mutate { records in
+            records = records.filter { !$0.value.isTemporary }
+        }
+        return true
+    }
+
     func isTrusted(_ deviceId: String) -> Bool {
         trustedIdentityKey(for: deviceId) != nil
     }

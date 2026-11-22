@@ -140,6 +140,9 @@ describe('expiring drops and rooms', () => {
       'Deletes in 2 h',
     );
     expect(deleteLabel(now - 1, now, 'incoming')).toBe(
+      'Due for deletion, as the sender asked',
+    );
+    expect(deleteLabel(now - 1, now, 'incoming', undefined, true)).toBe(
       'Deleted, as the sender asked',
     );
     expect(

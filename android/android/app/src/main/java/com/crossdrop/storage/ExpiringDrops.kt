@@ -12,8 +12,10 @@ import java.io.File
 /**
  * Expiring drops (§9.8), receiver side: files a sender asked to have deleted after a
  * while. CrossDrop records each saved item with its delete time and removes its own
- * MediaStore items when due: at app start, when the service starts, and from an
- * inexact alarm (no exact-alarm permission; it may run somewhat late, never early).
+ * MediaStore items when due: at app start, when the service starts, and from a
+ * windowed, non-wakeup alarm (no exact-alarm permission; it may run late, never early,
+ * and later still while the phone sleeps). Only deletions that were confirmed are
+ * reported, so the app never says a file is gone when it is not.
  *
  * This is a courtesy, not a guarantee: the user could copy or share the file first,
  * and an item CrossDrop no longer owns (e.g. after a reinstall) cannot be deleted.
@@ -23,9 +25,13 @@ class ExpiringDrops private constructor(private val context: Context) {
 
     private val file = File(context.filesDir, "expiring.json")
     private val entries = ArrayList<Entry>()
+    /** Transfers whose expiring files were all confirmed deleted (newest last, capped). */
+    private val deletedFile = File(context.filesDir, "expiring-deleted.json")
+    private val deleted = LinkedHashSet<String>()
 
     init {
         runCatching { load() }
+        runCatching { loadDeleted() }
     }
 
     @Synchronized
@@ -39,7 +45,15 @@ class ExpiringDrops private constructor(private val context: Context) {
     @Synchronized
     fun isEmpty(): Boolean = entries.isEmpty()
 
-    /** Deletes every item that is due. Returns the URIs that are gone (deleted, or no longer ours). */
+    /** True when every expiring file of [transferId] was confirmed deleted. */
+    @Synchronized
+    fun isDeleted(transferId: String): Boolean = transferId in deleted
+
+    /**
+     * Deletes every item that is due. Returns only the URIs CrossDrop confirmed deleting.
+     * A failed delete (not CrossDrop's any more, or already gone; scoped storage can't
+     * tell those apart) is not retried forever, and is not reported as deleted.
+     */
     fun purgeDue(): List<String> {
         val due = synchronized(this) {
             val now = System.currentTimeMillis()
@@ -49,15 +63,23 @@ class ExpiringDrops private constructor(private val context: Context) {
             schedule()
             return emptyList()
         }
-        // Deleting talks to MediaStore; done outside the lock. A failed delete (not ours
-        // any more, or already gone) is not retried forever.
-        due.forEach { MediaStoreStorage.delete(context, it.uri) }
+        // Deleting talks to MediaStore; done outside the lock.
+        val gone = due.filter { MediaStoreStorage.delete(context, it.uri) }
+        val goneUris = gone.map { it.uri }.toSet()
         synchronized(this) {
             entries.removeAll { e -> due.any { it.uri == e.uri && it.deleteAt == e.deleteAt } }
             persist()
+            // A transfer counts as deleted only when all of its files are confirmed gone.
+            val changed = due.map { it.transferId }.distinct()
+                .filter { id -> due.filter { it.transferId == id }.all { it.uri in goneUris } && entries.none { it.transferId == id } }
+            if (changed.isNotEmpty()) {
+                changed.forEach { deleted.remove(it); deleted.add(it) }
+                while (deleted.size > MAX_DELETED) deleted.remove(deleted.first())
+                persistDeleted()
+            }
         }
         schedule()
-        return due.map { it.uri }
+        return goneUris.toList()
     }
 
     /** Sets (or clears) the inexact alarm for the next due item. */
@@ -73,7 +95,9 @@ class ExpiringDrops private constructor(private val context: Context) {
             return
         }
         // Not a wakeup alarm: deleting a little late is fine, waking the phone for it is not.
-        runCatching { am.set(AlarmManager.RTC, next.coerceAtLeast(System.currentTimeMillis() + 60_000), pi) }
+        // A window (no exact-alarm permission needed) keeps the lateness bounded while awake.
+        val at = next.coerceAtLeast(System.currentTimeMillis() + 60_000)
+        runCatching { am.setWindow(AlarmManager.RTC, at, ALARM_WINDOW_MS, pi) }
     }
 
     private fun persist() {
@@ -81,6 +105,18 @@ class ExpiringDrops private constructor(private val context: Context) {
         val tmp = File(file.parentFile, "expiring.json.tmp")
         tmp.writeText(json)
         tmp.renameTo(file)
+    }
+
+    private fun persistDeleted() {
+        val tmp = File(deletedFile.parentFile, "expiring-deleted.json.tmp")
+        tmp.writeText(Json.write(deleted.toList()))
+        tmp.renameTo(deletedFile)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun loadDeleted() {
+        if (!deletedFile.exists()) return
+        (Json.parse(deletedFile.readText()) as List<Any?>).forEach { id -> (id as? String)?.let { deleted.add(it) } }
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -94,6 +130,9 @@ class ExpiringDrops private constructor(private val context: Context) {
 
     companion object {
         const val ACTION = "com.crossdrop.action.DELETE_EXPIRED"
+        private const val ALARM_WINDOW_MS = 15 * 60_000L
+        /** Matches the history cap: older entries have scrolled out of history anyway. */
+        private const val MAX_DELETED = HistoryRepository.MAX
 
         @Volatile
         private var instance: ExpiringDrops? = null

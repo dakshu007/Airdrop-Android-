@@ -110,8 +110,9 @@ final class StatusItemController: NSObject, NSWindowDelegate, NSDraggingDestinat
                 row.representedObject = entry.id
                 row.image = NSWorkspace.shared.icon(forFile: entry.path)
                 row.image?.size = NSSize(width: 16, height: 16)
-                row.isEnabled = entry.exists
-                row.toolTip = entry.exists ? "Show in Finder" : "No longer where it was"
+                let present = entry.exists
+                row.isEnabled = present
+                row.toolTip = present ? "Show in Finder" : "No longer where it was"
                 sub.addItem(row)
             }
             sub.addItem(.separator())
@@ -148,7 +149,7 @@ final class StatusItemController: NSObject, NSWindowDelegate, NSDraggingDestinat
 
         // Drip Room (§9.9)
         if let room = model.currentRoom {
-            menu.addItem(item("End Room \u{201C}\(room.name)\u{201D}", symbol: "person.2.slash", action: #selector(endRoom)))
+            menu.addItem(item("End Room \u{201C}\(room.name)\u{201D}\u{2026}", symbol: "person.2.slash", action: #selector(endRoom)))
         } else {
             menu.addItem(item("Start a Drip Room…", symbol: "person.2", action: #selector(startRoom)))
         }
@@ -157,7 +158,7 @@ final class StatusItemController: NSObject, NSWindowDelegate, NSDraggingDestinat
         menu.addItem(island)
         let clipboard = item("Offer What I Copy to My Phone", symbol: nil, action: #selector(toggleClipboard))
         clipboard.state = model.offerClipboardToPhone ? .on : .off
-        clipboard.toolTip = "Sends text you copy to your phone (paired as yours). Off by default."
+        clipboard.toolTip = "Sends text you copy to your phone (paired as yours) while CrossDrop's window or panel is open and can see it nearby. Off by default."
         menu.addItem(clipboard)
         menu.addItem(.separator())
 
@@ -218,7 +219,21 @@ final class StatusItemController: NSObject, NSWindowDelegate, NSDraggingDestinat
         model.requestMainWindow()
     }
 
-    @objc private func endRoom() { model.endRoom() }
+    /// Ending a room is destructive (its members lose their trust here): ask first, as the
+    /// room card and the menu bar panel do.
+    @objc private func endRoom() {
+        guard let room = model.currentRoom else { return }
+        let alert = NSAlert()
+        alert.messageText = "End \u{201C}\(room.name)\u{201D} now?"
+        alert.informativeText = "Its members stop being trusted on this Mac, and the code stops working here."
+        alert.alertStyle = .warning
+        let end = alert.addButton(withTitle: "End Room")
+        end.hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn, model.currentRoom?.id == room.id else { return }
+        model.endRoom()
+    }
     @objc private func toggleIsland() { model.setDripIsland(!model.dripIslandEnabled) }
     @objc private func toggleClipboard() { model.setOfferClipboardToPhone(!model.offerClipboardToPhone) }
     @objc private func openMain() { model.requestMainWindow() }

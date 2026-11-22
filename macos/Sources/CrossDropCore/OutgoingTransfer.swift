@@ -59,6 +59,9 @@ public final class OutgoingTransfer {
     private var pendingDecision: Decision?
     private var offerSent = false
     private let qr: QrPairing?
+    /// When known (from discovery or a remembered address), the handshake must reach exactly
+    /// this device; anyone else answering at that address is refused before anything is sent.
+    private let expectedPeerId: String?
     /// A Drip Room shared with the receiver (§9.9): pairing proves membership instead of comparing codes.
     private let room: Room?
     /// Bytes the receiver already holds per file, from `transfer.accept` (§9.3).
@@ -80,6 +83,7 @@ public final class OutgoingTransfer {
                 requestId: String? = nil, expiresAfter: Int64? = nil, room: Room? = nil, turbo: Int = 1) {
         self.id = id
         self.turbo = turbo
+        self.expectedPeerId = peerId
         self.endpoint = endpoint
         self.files = files
         self.kind = kind
@@ -174,6 +178,11 @@ public final class OutgoingTransfer {
 
             let handshake = try await Handshake.runClient(channel: secure, identity: identity, local: local, trust: trust)
             let peer = handshake.peer
+            if let expected = expectedPeerId, expected != peer.deviceId {
+                // A different device answered (a stale remembered address, or a spoofed
+                // announcement): refuse before pairing or offering anything.
+                throw CrossDropError.local(ErrorCode.peerChangedIdentity, "a different device answered")
+            }
             publisher.update { s in
                 s.peerId = peer.deviceId
                 s.peerName = peer.name

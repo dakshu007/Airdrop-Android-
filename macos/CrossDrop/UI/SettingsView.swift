@@ -191,7 +191,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: ui.s) {
                     Toggle(isOn: Binding(get: { model.offerClipboardToPhone }, set: { model.setOfferClipboardToPhone($0) })) {
                         labelStack("Send what I copy to my phone",
-                                   detail: "Text you copy on this Mac lands on your phone's clipboard while it's nearby. Text only, up to 64 KB. Copies that password managers mark as concealed or temporary are skipped.")
+                                   detail: "Text you copy on this Mac lands on your phone's clipboard while CrossDrop can see the phone nearby, which is while CrossDrop's window or menu bar panel is open. Text only, up to 64 KB. Copies that password managers mark as concealed or temporary are skipped.")
                     }
                     .toggleStyle(GlassToggleStyle())
                     if model.offerClipboardToPhone {
@@ -211,11 +211,12 @@ struct SettingsView: View {
             if !hasMyPhone {
                 return "Needs a phone paired with \u{201C}This is my phone\u{201D} on. Pair one in Devices."
             }
-            if let status = model.clipboardOfferStatus { return status }
             if model.clipboardWatching {
-                return "Your phone is nearby. The next text you copy goes to it."
+                return model.clipboardOfferStatus ?? "Your phone is nearby. The next text you copy goes to it."
             }
-            return "Waiting for your phone to be nearby. Nothing is checked until it is."
+            let away = "Your phone isn't in sight right now. CrossDrop looks for it while its window or menu bar panel is open, and doesn't read the clipboard until it finds it."
+            if let status = model.clipboardOfferStatus { return status + " " + away }
+            return away
         }()
         HStack(alignment: .firstTextBaseline, spacing: ui(6)) {
             StatusDot(color: model.clipboardWatching ? CDPalette.mint : (hasMyPhone ? Color(hex: 0x9AA8A0) : CDPalette.amber))

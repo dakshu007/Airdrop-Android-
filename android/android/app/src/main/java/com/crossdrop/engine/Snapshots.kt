@@ -81,6 +81,7 @@ object Snapshots {
                     "text" to t.text?.take(4096),
                     "expiresAfter" to t.expiresAfter,
                     "deleteAt" to t.deleteAt,
+                    "deleted" to (t.deleteAt != null && engine.isDropDeleted(t.id)),
                     "streams" to t.streams,
                     "queueId" to t.queueId,
                     "answersCapture" to (t.captureRequestId != null),
@@ -129,6 +130,7 @@ object Snapshots {
                     "canSendAgain" to (h.direction == "outgoing" && h.peerId != null &&
                         (h.kind == "link" || (h.kind == "files" && h.files.isNotEmpty() && h.files.all { it.uri?.startsWith("content://") == true }))),
                     "deleteAt" to h.deleteAt,
+                    "deleted" to (h.deleteAt != null && engine.isDropDeleted(h.id)),
                 )
             },
             "shared" to s.shared.map { it.toJson() },

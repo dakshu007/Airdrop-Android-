@@ -31,14 +31,21 @@ struct HistoryEntry: Codable, Identifiable, Equatable {
     var deletesAt: Date? = nil
     /// Set once those files were moved to the Trash.
     var deletedAt: Date? = nil
+    /// Set when an expiring drop's files were not moved to the Trash after all (moved or
+    /// changed since they arrived, or the Trash refused them), saying why.
+    var notDeletedReason: String? = nil
     /// Answer to a "Take Photo / Pick Photo" request from this Mac (§9.7).
     var isCaptureReply: Bool? = nil
 
     var isIncoming: Bool { direction == TransferDirection.incoming.rawValue }
 
-    /// "Deletes Nov 23, 10:42" / "Deleted" for expiring drops, nil otherwise.
+    /// Received files still waiting to be moved to the Trash: this row holds their Keep button.
+    var isPendingExpiry: Bool { isIncoming && deletesAt != nil && deletedAt == nil }
+
+    /// "Deletes Nov 23, 10:42" / "Moved to Trash" for expiring drops, nil otherwise.
     var expiryText: String? {
         if deletedAt != nil { return "Moved to Trash" }
+        if let reason = notDeletedReason { return reason }
         if let date = deletesAt {
             return "Deletes " + date.formatted(date: .abbreviated, time: .shortened)
         }
@@ -50,7 +57,9 @@ struct HistoryEntry: Codable, Identifiable, Equatable {
     }
 }
 
-/// Local transfer history: newest first, at most 200 entries, never uploaded.
+/// Local transfer history: newest first, at most 200 entries, never uploaded. Entries of
+/// expiring drops still waiting for the Trash are never trimmed or cleared away: their row
+/// holds the only Keep button.
 final class HistoryStore {
     static let limit = 200
     private let url = AppPaths.supportDirectory.appendingPathComponent("history.json")
@@ -61,15 +70,30 @@ final class HistoryStore {
         decoder.dateDecodingStrategy = .iso8601
         if let data = try? Data(contentsOf: url),
            let list = try? decoder.decode([HistoryEntry].self, from: data) {
-            entries = Array(list.prefix(Self.limit))
+            entries = list
+            trim()
         }
     }
 
     func add(_ entry: HistoryEntry) {
         entries.removeAll { $0.id == entry.id }
         entries.insert(entry, at: 0)
-        if entries.count > Self.limit { entries = Array(entries.prefix(Self.limit)) }
+        trim()
         save()
+    }
+
+    /// Drops the oldest entries past the limit, skipping pending expiring drops.
+    private func trim() {
+        var excess = entries.count - Self.limit
+        guard excess > 0 else { return }
+        var index = entries.count - 1
+        while excess > 0, index >= 0 {
+            if !entries[index].isPendingExpiry {
+                entries.remove(at: index)
+                excess -= 1
+            }
+            index -= 1
+        }
     }
 
     /// Changes one entry in place (paths after sorting, deletion of an expiring drop).
@@ -79,8 +103,9 @@ final class HistoryStore {
         save()
     }
 
+    /// Clears the list except pending expiring drops (see the type's note).
     func clear() {
-        entries = []
+        entries = entries.filter { $0.isPendingExpiry }
         save()
     }
 

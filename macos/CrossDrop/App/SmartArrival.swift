@@ -7,10 +7,9 @@ import UniformTypeIdentifiers
 enum SmartArrival {
     /// The folder `url` belongs in, or nil to leave it in the receive destination.
     static func folder(for url: URL, deviceName: String, date: Date) -> URL? {
-        let name = url.lastPathComponent
         let type = UTType(filenameExtension: url.pathExtension.lowercased())
-        let isImage = type?.conforms(to: .image) ?? false
-        if isImage || name.localizedCaseInsensitiveContains("Screenshot") {
+        // Photos and screenshots are images; a name alone ("Screenshot tool.dmg") never decides.
+        if type?.conforms(to: .image) ?? false {
             return picturesFolder(deviceName: deviceName, date: date)
         }
         if let type = type, documentTypes.contains(where: { type.conforms(to: $0) }) {

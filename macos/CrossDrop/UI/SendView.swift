@@ -502,7 +502,8 @@ struct DeviceActionsMenu: View {
     var body: some View {
         let paired = model.trustedRecord(for: device.deviceId)
         let permanent = paired.map { !$0.isTemporary } ?? false
-        if device.platform == "android" && paired != nil {
+        // Photos only from your own paired phones, never from a Drip Room member's.
+        if device.platform == "android" && permanent {
             let busy = model.capture?.isActive == true
             Button("Take Photo with \(device.name)") { model.requestCapture(.photo, from: device) }
                 .disabled(busy)

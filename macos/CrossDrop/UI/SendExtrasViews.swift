@@ -198,7 +198,8 @@ struct PhoneCaptureCard: View {
             }
         case .failed:
             problem(capture, symbol: "exclamationmark.triangle.fill", tint: CDPalette.coral) {
-                Button("Try Again") { retry(capture) }
+                // The same phone again; if it isn't nearby the card says so (never another phone).
+                Button("Try Again") { model.retryCapture() }
                     .buttonStyle(PrimaryButtonStyle())
                 Button("Dismiss") { model.cancelCapture() }
                     .buttonStyle(GlassButtonStyle())
@@ -275,11 +276,6 @@ struct PhoneCaptureCard: View {
             .frame(width: ui(size), height: ui(size))
             .background(Circle().fill(CDPalette.mintSoft))
             .accessibilityHidden(true)
-    }
-
-    private func retry(_ capture: CaptureState) {
-        let device = model.nearby.first { $0.deviceId == capture.deviceId }
-        model.requestCapture(capture.kind, from: device)
     }
 
     static func elapsed(from start: Date, to now: Date) -> String {

@@ -11,38 +11,62 @@ struct MenuBarView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.cdScale) private var ui
 
+    /// Device rows shown here; the rest are a click away in the main window.
+    static let maxRows = 5
+
     var body: some View {
         Group {
-            VStack(alignment: .leading, spacing: ui.m) {
+            // Header and footer stay put; the middle scrolls once it would outgrow the screen
+            // (many devices, Shelf, waiting sends, a room and transfers at once).
+            VStack(alignment: .leading, spacing: ui(6)) {
                 header
-                DropZone(compact: true)
-                devices
-                if model.capture != nil || model.capturePhone != nil {
-                    PhoneCaptureCard(compact: true)
-                }
-                MenuBarShelf()
-                if !model.sendQueue.isEmpty {
-                    SendQueueCard(compact: true)
-                }
-                if let room = model.currentRoom {
-                    MenuBarRoomRow(room: room)
-                }
-                if !model.activeTransfers.isEmpty {
-                    VStack(spacing: ui.s) {
-                        ForEach(model.activeTransfers.prefix(3)) { item in
-                            TransferCard(item: item, compact: true)
+                    .padding(.horizontal, ui.l)
+                FittedScrollView(maxHeight: middleLimit) {
+                    VStack(alignment: .leading, spacing: ui.m) {
+                        DropZone(compact: true)
+                        devices
+                        if model.capture != nil || model.capturePhone != nil {
+                            PhoneCaptureCard(compact: true)
+                        }
+                        MenuBarShelf()
+                        if !model.sendQueue.isEmpty {
+                            SendQueueCard(compact: true)
+                        }
+                        if let room = model.currentRoom {
+                            MenuBarRoomRow(room: room)
+                        }
+                        if !model.activeTransfers.isEmpty {
+                            VStack(spacing: ui.s) {
+                                ForEach(model.activeTransfers.prefix(3)) { item in
+                                    TransferCard(item: item, compact: true)
+                                }
+                            }
                         }
                     }
+                    // Inside the scroll view, so card shadows and focus rings aren't clipped.
+                    .padding(.horizontal, ui.l)
+                    .padding(.vertical, ui(6))
                 }
                 footer
+                    .padding(.horizontal, ui.l)
             }
-            .padding(ui.l)
+            .padding(.vertical, ui.l)
             .frame(width: ui(368))
         }
         .background(MintBackdrop(mood: model.activeTransfers.isEmpty ? .idle : .active))
         .environment(\.colorScheme, .light)
-        .onAppear { model.beginDiscovery() }
+        .onAppear {
+            model.beginDiscovery()
+            model.refreshShelfPresence()
+        }
         .onDisappear { model.endDiscovery() }
+    }
+
+    /// Room for the scrolling middle: the screen's usable height less the header, footer,
+    /// margins and the menu bar gap.
+    private var middleLimit: CGFloat {
+        let screen = NSScreen.main?.visibleFrame.height ?? 800
+        return max(ui(260), screen - ui(250))
     }
 
     private var header: some View {
@@ -108,7 +132,7 @@ struct MenuBarView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
-                ForEach(model.nearby) { device in
+                ForEach(model.nearby.prefix(Self.maxRows)) { device in
                     Button {
                         if !model.hasSomethingToSend {
                             model.selectedDeviceId = device.deviceId
@@ -162,6 +186,14 @@ struct MenuBarView: View {
                     .accessibilityLabel(model.hasSomethingToSend ? "Send to \(device.name)" : "Choose files for \(device.name)")
                     .help("Right-click for photos from the phone, the clipboard and Deliver When Nearby")
                     .contextMenu { DeviceActionsMenu(device: device).environmentObject(model) }
+                }
+                if model.nearby.count > Self.maxRows {
+                    Button("+\(model.nearby.count - Self.maxRows) more in CrossDrop") {
+                        model.selectedTab = .send
+                        model.requestMainWindow()
+                    }
+                    .buttonStyle(TextLinkButtonStyle())
+                    .help("The Send page lists every nearby device")
                 }
             }
         }

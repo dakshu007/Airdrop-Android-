@@ -18,7 +18,7 @@ struct ShelfCard: View {
     @State private var targeted = false
 
     var body: some View {
-        let missing = model.shelf.filter { !$0.exists }.count
+        let missing = model.missingShelfIds.count
         VStack(alignment: .leading, spacing: ui.m) {
             HStack(spacing: ui.s) {
                 SectionHeader(title: "Shelf", detail: "\(Format.items(model.shelf.count)) kept for later")
@@ -150,7 +150,7 @@ struct ShelfTile: View {
     @State private var hovering = false
 
     var body: some View {
-        let present = item.exists
+        let present = model.isPresent(item)
         Button {
             if present {
                 model.addShelfToSelection([item])

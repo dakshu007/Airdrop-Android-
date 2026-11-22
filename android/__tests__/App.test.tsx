@@ -82,6 +82,7 @@ function transfer(overrides: Partial<Transfer> = {}): Transfer {
     text: null,
     expiresAfter: null,
     deleteAt: null,
+    deleted: false,
     streams: 1,
     queueId: null,
     answersCapture: false,

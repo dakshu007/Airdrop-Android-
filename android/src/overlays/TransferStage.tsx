@@ -149,11 +149,11 @@ function SendLater({ transfer }: { transfer: Transfer }) {
         style={styles.queued}
         accessible
         accessibilityLiveRegion="polite"
-        accessibilityLabel={`Waiting for ${transfer.peerName}. It goes by itself when it’s nearby.`}
+        accessibilityLabel={`Waiting for ${transfer.peerName}. It goes by itself once this phone finds it.`}
       >
         <Icon name="clock" size={18} color={t.link} />
         <Text variant="callout" tone="accent" style={styles.flex}>
-          Waiting for {transfer.peerName} · goes by itself when it’s nearby
+          Waiting for {transfer.peerName} · goes by itself once it’s found
         </Text>
       </View>
     );
@@ -215,6 +215,7 @@ export function TransferStage({
           now,
           transfer.direction,
           outgoing ? peer : undefined,
+          transfer.deleted,
         )
       : null;
   const photo = transfer.answersCapture && outgoing;

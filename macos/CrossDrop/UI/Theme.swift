@@ -1235,3 +1235,37 @@ private struct SegmentButtonStyle: ButtonStyle {
             .modifier(FocusRing(shape: Capsule()))
     }
 }
+
+/// A vertical scroll view exactly as tall as its content, up to `maxHeight`; past that it
+/// scrolls. For sheets and the menu bar panel, which size to their content and would
+/// otherwise grow past the window or screen and clip their bottom. The content is
+/// measured, so the height is explicit rather than left to the scroll view's ideal size.
+struct FittedScrollView<Content: View>: View {
+    let maxHeight: CGFloat
+    @ViewBuilder let content: Content
+    @State private var contentHeight: CGFloat? = nil
+
+    var body: some View {
+        ScrollView(.vertical) {
+            content
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(key: FittedScrollHeightKey.self, value: proxy.size.height)
+                    }
+                )
+        }
+        .frame(height: min(contentHeight ?? maxHeight, maxHeight))
+        .onPreferenceChange(FittedScrollHeightKey.self) { height in
+            // Whole points, so sub-point jitter can't start a layout loop.
+            let rounded = height.rounded(.up)
+            if contentHeight != rounded { contentHeight = rounded }
+        }
+    }
+}
+
+private struct FittedScrollHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}

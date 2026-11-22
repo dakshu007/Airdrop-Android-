@@ -70,7 +70,7 @@ struct RoomCard: View {
         .sheet(isPresented: $model.showingRoomSheet) {
             RoomSheet()
                 .environmentObject(model)
-                .environment(\.cdScale, ui.fitting(height: 840))
+                .environment(\.cdScale, ui.fitting(height: 940))
         }
     }
 
@@ -172,7 +172,7 @@ struct RoomSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: ui.l) {
+        VStack(spacing: ui(8)) {
             HStack {
                 Spacer()
                 Button {
@@ -184,21 +184,35 @@ struct RoomSheet: View {
                 .keyboardShortcut(.cancelAction)
                 .accessibilityLabel("Close")
             }
-            .padding(.bottom, -ui(8))
+            .padding(.horizontal, ui(28))
 
-            if let room = model.currentRoom {
-                RoomLiveContent(room: room)
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97)))
-            } else {
-                RoomSetupContent()
-                    .transition(.opacity)
+            // Scrolls when the window is too short for the whole room (QR code, members, End).
+            FittedScrollView(maxHeight: scrollLimit) {
+                Group {
+                    if let room = model.currentRoom {
+                        RoomLiveContent(room: room)
+                            .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97)))
+                    } else {
+                        RoomSetupContent()
+                            .transition(.opacity)
+                    }
+                }
+                // Inside the scroll view, so the panels' shadows aren't clipped at its edges.
+                .padding(.horizontal, ui(28))
+                .padding(.vertical, ui(8))
             }
         }
-        .padding(ui(28))
+        .padding(.top, ui(20))
+        .padding(.bottom, ui(20))
         .frame(width: ui(480))
         .background(MintBackdrop(mood: model.currentRoom == nil ? .idle : .done))
         .environment(\.colorScheme, .light)
         .animation(CDMotion.layout(reduceMotion), value: model.currentRoom)
+    }
+
+    /// The window's height less the close row and margins (a sheet shouldn't outgrow its window).
+    private var scrollLimit: CGFloat {
+        max(ui(360), ui.window.height - ui(96))
     }
 }
 
@@ -482,7 +496,8 @@ private struct RoomLiveContent: View {
         let joined = model.roomMembers
         let joinedIds = Set(joined.map { $0.deviceId })
         let nearbyOnly = model.roomDevicesNearby.filter { !joinedIds.contains($0.deviceId) && !model.isTrusted($0.deviceId) }
-        let shown = Array(joined.prefix(4))
+        // A few rows only: the sheet must fit a laptop window (the Devices page lists everyone).
+        let shown = Array(joined.prefix(3))
         VStack(alignment: .leading, spacing: ui(6)) {
             SectionHeader(title: "Members", detail: joined.isEmpty ? nil : "\(joined.count)")
             if joined.isEmpty && nearbyOnly.isEmpty {
@@ -506,7 +521,7 @@ private struct RoomLiveContent: View {
                     .font(ui.caption)
                     .foregroundColor(CDPalette.textTertiary)
             }
-            ForEach(nearbyOnly.prefix(3)) { device in
+            ForEach(nearbyOnly.prefix(2)) { device in
                 memberRow(name: device.name, platform: device.platform, detail: "Nearby in this room · not connected yet", joined: false)
             }
         }

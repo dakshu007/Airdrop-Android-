@@ -238,7 +238,9 @@ struct DripIslandView: View {
     @Environment(\.cdScale) private var ui
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    static let maxBubbles = 6
+    /// Five device bubbles plus the Shelf fit the panel: 6 × 86 + 5 × 14 + 2 × 22 = 630 pt of
+    /// 680, leaving room for the glass shadow. "+N more" covers the rest.
+    static let maxBubbles = 5
 
     var body: some View {
         VStack(spacing: 0) {

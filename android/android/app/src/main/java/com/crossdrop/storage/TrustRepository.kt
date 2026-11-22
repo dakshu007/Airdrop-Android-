@@ -59,10 +59,13 @@ class TrustRepository(private val context: Context) : TrustStore {
         gone.isNotEmpty()
     }
 
-    /** Drops temporary trust that ends at [expiresAt] (a Drip Room that was ended early). */
-    fun forgetTemporary(expiresAt: Long) {
+    /**
+     * Drops all temporary (Drip Room) trust: when the room is left or ends, and at start-up,
+     * since rooms are not kept across restarts. Permanent pairings stay.
+     */
+    fun forgetAllTemporary() {
         val removed = synchronized(this) {
-            val gone = peers.values.filter { it.expiresAt == expiresAt }.map { it.deviceId }
+            val gone = peers.values.filter { it.expiresAt != null }.map { it.deviceId }
             gone.forEach { remove(it) }
             gone.isNotEmpty()
         }

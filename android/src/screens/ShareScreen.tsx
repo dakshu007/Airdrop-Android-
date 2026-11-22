@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { RoundButton } from '../components/Chips';
 import { Logo } from '../components/Logo';
@@ -19,6 +19,8 @@ export function ShareScreen() {
   const files = snapshot.shared;
   const text = snapshot.sharedText;
   const { autoDelete, setAutoDelete } = useCrossDrop();
+  // Leaving the share (sent, cancelled or replaced) turns auto-delete back off.
+  useEffect(() => () => setAutoDelete(false), [setAutoDelete]);
   const resolveFiles = useCallback(async () => files, [files]);
   const flow = useSendFlow({
     resolveFiles,

@@ -27,6 +27,8 @@ tested, not "expected to fail".
 | Kotlin→Kotlin interop of §9.10: `send --turbo 3` with 4 files (5 MB random, 300 KB, 1 byte, empty) prints `STREAMS 3`; receiver's `RECEIVED` hashes and the files on disk match the sender's | `integration-tests/interop.sh` extras, Linux | Pass (2026-11-22) |
 | §9.7–§9.10 in Swift (`swift test`) and Kotlin↔Swift interop of them | GitHub macos-15 runner | Not yet run — Swift can't be built on the Linux dev box |
 | React Native: 73 unit/render tests incl. "This is my device", receive-mode sheet, shared link sent as a link, received link waits for Open/Copy, send to several devices | Jest (Linux) | Pass (2026-11-21) |
+| React Native: typecheck, lint, 97 unit/render tests, adding: Send when nearby offer / Try now anyway / queue full / queue from a failed send, queued items with Retry and Cancel, auto-delete toggle asks for 24 h, "Deletes in" shown in history, clipboard pill copy / dismiss / expired, Pocket open / share / remove, Drip Room start / can't start / join by scan / active room and members, Mac photo request opens the capture stage, widget device opens the picker, Settings switches Sort by type and Turbo. Native calls are mocked: these check the screens, not the Kotlin engine | Jest (Linux) | Pass (2026-11-22) |
+| Android app Kotlin and Mac app Swift for the features above (queue, Pocket, capture, clipboard pill and offer, rooms, widget, expiring drops, Smart arrival, Turbo setting, Drip Island, Shelf) | CI build | Not yet run. Locally the Kotlin was type-checked with kotlinc against the API 36 `android-all` jar and hand-written androidx/React stubs (CameraX not stubbed), and the Swift only syntax-checked with tree-sitter; neither is a build (no Android SDK or Swift toolchain on the dev box) |
 | macOS universal app (arm64 + x86_64), ad-hoc signature verified, DMG | GitHub macos-15 runner | Pass (2026-10-20) |
 
 ## Manual, on real devices
@@ -61,6 +63,18 @@ tested, not "expected to fail".
 | No-router mode (phone hotspot, Android 13+) | Not yet | Not yet |
 | TalkBack / VoiceOver, text scaling, reduced motion | Not yet | Not yet |
 | Mint Air UI on a phone and a Mac (layout on small/large screens, motion, haptics, done sound) | Not yet | Not yet |
+| Send when nearby: queue while away, sends when the device appears (app start, Wi‑Fi change, discovery), Retry / Cancel, survives app restart | Not yet | Not yet |
+| Take / Pick a photo with the phone: notification, in-app prompt, camera permission refused → Photo Picker, photo on the Mac clipboard, request expires after 10 min | Not yet | n/a |
+| Clipboard: Mac "Send what I copy to my phone" (concealed copies skipped), Android "Paste from" pill and Copy | n/a | Not yet |
+| Drip Rooms: host on each platform, join by scanning (phone) or pasting the code (Mac), pair with no codes, files still need approval, trust gone after the room ends and after a restart | Not yet | Not yet |
+| Expiring drops: Android deletes after 24 h (also after a reboot); Mac moves to Trash, Keep works, moved files are left alone | Not yet | Not yet |
+| Smart arrival (sort by type) | Not yet | Not yet |
+| Turbo (experimental): several files over parallel connections, speed compared with Turbo off | Not yet | Not yet |
+| Drip Island while dragging from Finder and other apps, drop on a device / on the Shelf | n/a | Not yet |
+| Mac Shelf: park, send, drag out, survives relaunch | n/a | Not yet |
+| Android Pocket: open, share, remove (with and without deleting the file) | n/a | Not yet |
+| Android haptic heartbeat in the background; Mac trackpad tap on done | Not yet | Not yet |
+| Android home-screen widget: add, device tap, Clipboard button, room devices not shown | Not yet | n/a |
 | Throughput, memory, battery | Not measured | Not measured |
 
 No performance numbers are claimed until they are measured on real hardware.

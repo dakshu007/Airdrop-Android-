@@ -105,11 +105,36 @@ struct QueuedSend: Codable, Identifiable, Equatable {
 
 /// A received file the sender asked to have deleted (§9.8). CrossDrop moves it to the
 /// Trash (never deletes outright) once `deleteAt` has passed, and only if the file at that
-/// path still has the size it arrived with, so a different file saved there later is safe.
+/// path is still the one that arrived: same file number (inode), size and modification
+/// date. A different file saved under that name later, even one of the same size, is safe.
 struct ExpiringFile: Codable, Identifiable, Equatable {
     let id: UUID
     let transferId: String
     var path: String
     let size: Int64
     let deleteAt: Date
+    /// The file's number on its volume when it was registered (nil in older records).
+    var fileNumber: UInt64? = nil
+    /// Its modification date then (nil in older records).
+    var modifiedAt: Date? = nil
+
+    /// Reads the identity of the file at `url`: size, file number and modification date.
+    static func identity(of url: URL) -> (size: Int64, fileNumber: UInt64?, modifiedAt: Date?)? {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true,
+              let size = values.fileSize else { return nil }
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let fileNumber = (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value
+        return (Int64(size), fileNumber, values.contentModificationDate)
+    }
+
+    /// True when the file at `path` is still the one that arrived. Records written before
+    /// file numbers were kept can't prove that, so they are never trashed.
+    var isUnchanged: Bool {
+        guard let fileNumber = fileNumber, let modifiedAt = modifiedAt,
+              let now = Self.identity(of: URL(fileURLWithPath: path)),
+              now.size == size, now.fileNumber == fileNumber, let modified = now.modifiedAt else { return false }
+        // Dates are stored to the second (ISO 8601).
+        return abs(modified.timeIntervalSince(modifiedAt)) < 1
+    }
 }

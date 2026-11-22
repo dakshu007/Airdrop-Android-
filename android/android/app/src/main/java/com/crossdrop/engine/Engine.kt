@@ -171,6 +171,8 @@ class Engine private constructor(private val app: Context) {
         val expiresAt: Long,
         /** "open", or "sending" while the answer is on its way. */
         var state: String = "open",
+        /** The camera / picker was opened for it: no more heads-up notifications. */
+        var opened: Boolean = false,
     )
 
     class Clip(val transferId: String, val from: String, val fromPlatform: String, val text: String, val expiresAt: Long)
@@ -185,6 +187,9 @@ class Engine private constructor(private val app: Context) {
     private var lastTileState = false
 
     init {
+        // Drip Rooms live in memory only, so a room from before a restart can't come back:
+        // its temporary trust (with no room, banner or "Leave" left to end it) goes now.
+        trust.forgetAllTemporary()
         trust.onChange = {
             publishDirectShare()
             // Home-screen widget: redrawn (coalesced) when paired devices change.
@@ -317,7 +322,8 @@ class Engine private constructor(private val app: Context) {
         main.removeCallbacks(autoOff)
         advertiser.unregister()
         s?.stop() // In-flight inbound transfers keep their own connections.
-        if (!discoveryWanted) network.setMulticast(false)
+        // Discovery (the UI's, or a "send when nearby" window) still needs the multicast lock.
+        if (!synchronized(lock) { discoveryWanted } && !queueWindowOpen()) network.setMulticast(false)
         changed()
         CrossDropService.update(app)
     }
@@ -820,12 +826,15 @@ class Engine private constructor(private val app: Context) {
     }
 
     fun dismiss(transferId: String) {
-        synchronized(lock) {
+        val capture = synchronized(lock) {
             val t = transfers[transferId] ?: return
             if (!t.isFinished) return
             transfers.remove(transferId)
             sendRequests.remove(transferId)
+            // A failed capture answer kept its photo for Retry; an open request still owns it.
+            t.captureRequestId?.takeIf { t.direction == "outgoing" && !captures.containsKey(it) }
         }
+        capture?.let { releaseCaptureFiles(it) }
         changed()
     }
 
@@ -838,13 +847,21 @@ class Engine private constructor(private val app: Context) {
     fun setAppVisible(visible: Boolean) {
         appVisible = visible
         val (prompts, pending) = synchronized(lock) { pairing.values.map { it.prompt } to offers.values.toList() }
+        val now = System.currentTimeMillis()
+        // Capture requests: all of them (to cancel), and those still waiting for an answer (to re-post).
+        val (asks, waiting) = synchronized(lock) {
+            captures.values.toList() to captures.values.filter { it.state == "open" && !it.opened && it.expiresAt > now }
+        }
         if (visible) {
             prompts.forEach { notifier.cancel(it.sessionId) }
             pending.forEach { notifier.cancel(it.transferId) }
+            asks.forEach { notifier.cancel(captureNotificationId(it.requestId)) }
         } else {
             // Leaving the app with a decision pending: make sure it can still be found.
             prompts.forEach(::notifyPairing)
             pending.forEach(::notifyOffer)
+            // Not for a request whose camera / picker is what covers the app now.
+            waiting.forEach { notifyCapture(it) }
         }
     }
 
@@ -1028,11 +1045,12 @@ class Engine private constructor(private val app: Context) {
     // ---------------------------------------------------------------- capture requests (§9.7)
 
     /**
-     * A paired Mac asks for a photo. Accepted only when the user will see it: the
-     * notification was posted (or CrossDrop is on screen, where the request shows).
+     * A paired Mac asks for a photo. Accepted only when the user will see it: CrossDrop
+     * is on screen (the request shows there), or the notification was posted. Only
+     * permanent pairings may ask; temporary Drip Room trust (§9.9) can't.
      */
     private fun onCapture(peer: PeerInfo, request: CaptureRequest): Boolean {
-        val trusted = trust.get(peer.deviceId) ?: return false
+        val trusted = trust.get(peer.deviceId)?.takeIf { it.expiresAt == null } ?: return false
         val entry = PendingCapture(
             request.requestId, request.kind, peer.deviceId, trusted.name,
             request.replyHost, request.replyPort, System.currentTimeMillis() + Protocol.CAPTURE_REQUEST_TTL_MS,
@@ -1041,8 +1059,9 @@ class Engine private constructor(private val app: Context) {
             if (captures.size >= MAX_CAPTURES && !captures.containsKey(request.requestId)) return false
             captures[request.requestId] = entry
         }
-        val posted = notifyCapture(entry)
-        if (!posted && !appVisible) {
+        // On screen the app shows the request itself; no heads-up on top of it.
+        val shown = appVisible || notifyCapture(entry)
+        if (!shown) {
             synchronized(lock) { captures.remove(request.requestId) }
             return false
         }
@@ -1088,21 +1107,56 @@ class Engine private constructor(private val app: Context) {
         changed()
     }
 
+    /** The camera or picker opened for [requestId]: its notification goes, and doesn't come back. */
+    fun openedCapture(requestId: String) {
+        synchronized(lock) { captures[requestId]?.opened = true }
+        notifier.cancel(captureNotificationId(requestId))
+    }
+
+    /**
+     * The camera or picker closed without an answer: the request is open again. If CrossDrop
+     * isn't on screen a moment later (where the request shows), its notification comes back.
+     */
+    fun closedCapture(requestId: String) {
+        synchronized(lock) { captures[requestId]?.opened = false }
+        main.postDelayed({
+            if (!appVisible) {
+                val now = System.currentTimeMillis()
+                val c = synchronized(lock) { captures[requestId]?.takeIf { it.state == "open" && !it.opened && it.expiresAt > now } }
+                if (c != null) notifyCapture(c)
+            }
+        }, CAPTURE_RENOTIFY_DELAY_MS)
+    }
+
     /** The user said no (or it expired): forget the request and any photo taken for it. The Mac is not told. */
     fun declineCapture(requestId: String) = endCapture(requestId)
 
     private fun endCapture(requestId: String) {
         val removed = synchronized(lock) {
             val c = captures[requestId] ?: return
-            // A request whose answer is on its way ends when that transfer does.
-            if (c.state == "sending" && c.expiresAt > System.currentTimeMillis()) return
+            // A request whose answer is on its way ends when that transfer does, even past its
+            // time: the photo is still being read (onCaptureAnswerFinished ends it).
+            if (c.state == "sending") return
             captures.remove(requestId)
             if (captureFocus == requestId) captureFocus = null
             c
         }
         notifier.cancel(captureNotificationId(removed.requestId))
-        File(app.cacheDir, "capture/$requestId").deleteRecursively()
+        releaseCaptureFiles(requestId)
         changed()
+    }
+
+    /**
+     * Deletes the photo taken for [requestId] unless something still reads it: an answer
+     * on its way, or a failed one that can still be retried (it goes when dismissed).
+     */
+    private fun releaseCaptureFiles(requestId: String) {
+        val inUse = synchronized(lock) {
+            captures[requestId]?.state == "sending" || transfers.values.any {
+                it.direction == "outgoing" && it.captureRequestId == requestId && (!it.isFinished || it.canRetry)
+            }
+        }
+        if (!inUse) File(app.cacheDir, "capture/$requestId").deleteRecursively()
     }
 
     /**
@@ -1136,14 +1190,22 @@ class Engine private constructor(private val app: Context) {
         changed()
     }
 
-    /** The answer's transfer ended: done ends the request; otherwise it is open again (retry from the app). */
+    /**
+     * The answer's transfer ended: done (or the request ran out meanwhile) ends the request;
+     * otherwise it is open again (answer again from the app, or Retry the transfer).
+     */
     private fun onCaptureAnswerFinished(requestId: String, status: String) {
-        val c = synchronized(lock) { captures[requestId] } ?: return
-        if (status == "completed") {
-            synchronized(lock) { c.state = "open" }
+        val now = System.currentTimeMillis()
+        val end = synchronized(lock) {
+            val c = captures[requestId]
+            c?.state = "open"
+            c == null || status == "completed" || c.expiresAt <= now
+        }
+        if (end) {
             endCapture(requestId)
+            // Also when the request was gone already; kept while the transfer can be retried.
+            releaseCaptureFiles(requestId)
         } else {
-            synchronized(lock) { c.state = "open" }
             changed()
         }
     }
@@ -1265,11 +1327,15 @@ class Engine private constructor(private val app: Context) {
         return invite.room.name to hostName
     }
 
-    /** Leaves (or, when hosting, ends) the room. Trust that came from it ends now too. */
+    /**
+     * Leaves (or, when hosting, ends) the room, also when it ran out. This phone's trust from
+     * the room ends now too. Members are not told; they keep the room among themselves.
+     */
     fun leaveRoom() {
-        val active = rooms.active()
         rooms.leaveAll()
-        active.forEach { trust.forgetTemporary(it.expiresAtMillis) }
+        // This phone is in at most one room, so all temporary trust is that room's (also
+        // trust that kept an older, longer end time from an earlier room).
+        trust.forgetAllTemporary()
         val stop = synchronized(lock) {
             roomHosting = null
             roomInvite = null
@@ -1277,7 +1343,8 @@ class Engine private constructor(private val app: Context) {
         }
         main.removeCallbacks(roomEnd)
         if (stop && prefs.receiveBase == "off") stopReceiving() else advertise()
-        if (active.isNotEmpty()) changed()
+        // Always: a room that ran out is already gone from rooms.active(), but the UI still shows it.
+        changed()
     }
 
     private val roomEnd = Runnable { leaveRoom() }
@@ -1316,6 +1383,9 @@ class Engine private constructor(private val app: Context) {
         send.clipData = ClipData.newRawUri(item.name, uri)
         return Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
+
+    /** True when CrossDrop confirmed deleting every expiring file of [transferId] (§9.8). */
+    fun isDropDeleted(transferId: String): Boolean = expiring.isDeleted(transferId)
 
     /** Expiring drops that were deleted: drop them from the Pocket. */
     fun onDropsDeleted(uris: List<String>) {
@@ -1686,6 +1756,8 @@ class Engine private constructor(private val app: Context) {
         /** Failures after which a queued item simply waits for the device again. */
         private val RETRYABLE = setOf(ErrorCode.UNREACHABLE.wire, ErrorCode.CONNECTION_LOST.wire, ErrorCode.TIMEOUT.wire, ErrorCode.BUSY.wire, ErrorCode.NOT_RECEIVING.wire)
         private const val MAX_CAPTURES = 4
+        /** After the camera closes unanswered: time for CrossDrop to come back to the front first. */
+        private const val CAPTURE_RENOTIFY_DELAY_MS = 1_000L
         const val CLIP_TTL_MS = 2 * 60_000L
         /** Room lengths the UI offers (minutes). */
         val ROOM_MINUTES = setOf(30, 60, 120, 240)

@@ -211,6 +211,7 @@ test('shows when a received drop deletes itself, in history', async () => {
     link: null,
     canSendAgain: false,
     deleteAt: Date.now() + 23.5 * 3600_000,
+    deleted: false,
   };
   const renderer = await render(emptySnapshot({ history: [entry] }));
   await openTab(renderer, 'Activity');
@@ -615,6 +616,7 @@ test('a send that can’t reach a paired Mac can be queued from the result', asy
     text: null,
     expiresAfter: null,
     deleteAt: null,
+    deleted: false,
     streams: 1,
     queueId: null,
     answersCapture: false,
@@ -641,6 +643,6 @@ test('a send that can’t reach a paired Mac can be queued from the result', asy
   expect(allText(renderer)).toContain('That didn’t go through');
   await press(renderer, 'Send when nearby');
   expect(native.queueFiles).toHaveBeenCalledWith('abc', FILE_JSON, '{}');
-  expect(allText(renderer)).toContain('goes by itself when it’s nearby');
+  expect(allText(renderer)).toContain('goes by itself once it’s found');
   await ReactTestRenderer.act(async () => renderer.unmount());
 });

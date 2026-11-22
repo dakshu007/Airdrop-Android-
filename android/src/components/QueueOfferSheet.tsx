@@ -75,9 +75,9 @@ export function QueueOfferSheet({
             Waiting for {device.name}
           </Text>
           <Text variant="callout" tone="secondary" center>
-            It goes by itself as soon as {device.name} is on the same Wi‑Fi with
-            CrossDrop open or receiving. You can follow or cancel it in
-            Activity.
+            It goes by itself the next time this phone finds {device.name}: when
+            you open CrossDrop, when Wi‑Fi reconnects, or while Nearby is open.
+            No scanning in the background. Follow or cancel it in Activity.
           </Text>
         </View>
         <Button title="Done" large onPress={onClose} />

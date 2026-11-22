@@ -77,6 +77,7 @@ function HistoryRow({ entry, now }: { entry: HistoryEntry; now: number }) {
           now,
           entry.direction,
           outgoing ? entry.peerName : undefined,
+          entry.deleted,
         )
       : null;
   const meta = `${outgoing ? 'To' : 'From'} ${entry.peerName} · ${formatBytes(
@@ -238,8 +239,8 @@ export function ActivityScreen() {
           </GlassCard>
           <Text variant="footnote" tone="tertiary" style={styles.note}>
             Sent by themselves when the device is found: when CrossDrop opens,
-            when Wi‑Fi reconnects, or when it shows up nearby. No scanning in
-            the background.
+            when Wi‑Fi reconnects, or while Nearby is open. No scanning in the
+            background.
           </Text>
         </>
       ) : null}

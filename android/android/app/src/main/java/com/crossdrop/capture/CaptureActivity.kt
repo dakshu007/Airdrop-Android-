@@ -39,13 +39,13 @@ class CaptureActivity : ComponentActivity() {
             answer(listOf(SharedFile(Uri.fromFile(file).toString(), file.name, file.length(), "image/jpeg")))
         } else {
             file?.delete()
-            finish()
+            cancelled()
         }
     }
 
     private val pickMedia = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_PICKED)) { uris ->
         if (uris.isEmpty()) {
-            finish()
+            cancelled()
             return@registerForActivityResult
         }
         val app = applicationContext
@@ -82,7 +82,7 @@ class CaptureActivity : ComponentActivity() {
             finish()
             return
         }
-        engine.notifier.cancel(Engine.captureNotificationId(requestId))
+        engine.openedCapture(requestId)
         if (intent.getStringExtra(EXTRA_MODE) == MODE_PICK) {
             launchPicker()
         } else if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -117,8 +117,14 @@ class CaptureActivity : ComponentActivity() {
             pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
         } catch (e: ActivityNotFoundException) {
             Toast.makeText(this, "No photo picker is available.", Toast.LENGTH_LONG).show()
-            finish()
+            cancelled()
         }
+    }
+
+    /** Closed without an answer: the request stays open (its notification can come back). */
+    private fun cancelled() {
+        Engine.get(applicationContext).closedCapture(requestId)
+        finish()
     }
 
     private fun answer(files: List<SharedFile>) {

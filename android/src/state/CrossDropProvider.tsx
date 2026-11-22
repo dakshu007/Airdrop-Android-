@@ -79,6 +79,19 @@ export function CrossDropProvider({ children }: { children: React.ReactNode }) {
 
   const clearSelection = useCallback(() => setSelection([]), []);
 
+  // The auto-delete switch lives in the tray of chosen files: once those are
+  // gone (sent, cleared or removed one by one), it goes back off rather than
+  // applying, unseen, to whatever is sent next.
+  const hadSelection = useRef(false);
+  useEffect(() => {
+    if (selection.length > 0) {
+      hadSelection.current = true;
+    } else if (hadSelection.current) {
+      hadSelection.current = false;
+      setAutoDelete(false);
+    }
+  }, [selection.length]);
+
   const value = useMemo(
     () => ({
       snapshot,

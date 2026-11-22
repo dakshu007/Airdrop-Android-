@@ -332,7 +332,9 @@ export function RoomSheet({
     Alert.alert(
       room.hosting ? `End ${room.name}?` : `Leave ${room.name}?`,
       room.hosting
-        ? 'The code stops working and trust from the room ends for everyone who joined through this phone.'
+        ? `This phone leaves the room and stops trusting its members. Others who joined keep the room among themselves until it ends at ${formatClock(
+            room.expiresAt,
+          )}.`
         : 'Devices you met in the room can no longer send to you without a code.',
       [
         { text: 'Cancel', style: 'cancel' },

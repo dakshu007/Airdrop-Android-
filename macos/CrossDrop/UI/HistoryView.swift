@@ -23,7 +23,8 @@ struct HistoryView: View {
     var body: some View {
         PageScroll(allowsWide: true) {
             PageTitle(title: "History", subtitle: "Stored only on this Mac.",
-                      trailing: model.history.isEmpty ? nil : AnyView(
+                      // Hidden when only pending expiring drops are left: clearing keeps those.
+                      trailing: model.history.count == model.pendingExpiringCount ? nil : AnyView(
                         Button("Clear History…") { confirmClear = true }
                             .buttonStyle(GlassButtonStyle(destructive: true))
                       ))
@@ -88,7 +89,9 @@ struct HistoryView: View {
             Button("Clear History", role: .destructive) { model.clearHistory() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the list only. Received files stay where they were saved.")
+            Text(model.pendingExpiringCount == 0
+                 ? "This removes the list only. Received files stay where they were saved."
+                 : "This removes the list only. Received files stay where they were saved. Files waiting to be moved to the Trash stay listed, so you can still keep them.")
         }
     }
 }
