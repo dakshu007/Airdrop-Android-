@@ -21,6 +21,8 @@ data class HistoryEntry(
     val kind: String = "files",
     /** The link itself for link entries (never the content of a text). */
     val link: String? = null,
+    /** Expiring drop (§9.8): when CrossDrop deletes what it saved (incoming), or asked the receiver to (outgoing). */
+    val deleteAt: Long? = null,
 )
 
 data class HistoryFile(val name: String, val size: Long, val uri: String?)
@@ -69,6 +71,7 @@ class HistoryRepository(context: Context) {
                 "peerId" to e.peerId,
                 "kind" to e.kind,
                 "link" to e.link,
+                "deleteAt" to e.deleteAt,
             )
         })
         val tmp = File(file.parentFile, "history.json.tmp")
@@ -97,6 +100,7 @@ class HistoryRepository(context: Context) {
                     peerId = m["peerId"] as String?,
                     kind = m["kind"] as String? ?: "files",
                     link = m["link"] as String?,
+                    deleteAt = (m["deleteAt"] as? Number)?.toLong(),
                 ),
             )
         }

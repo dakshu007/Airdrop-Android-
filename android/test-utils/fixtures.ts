@@ -38,7 +38,18 @@ export function emptySnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
       haptics: true,
       welcomed: true,
       screenshotOffer: false,
+      sortByType: false,
+      turbo: false,
     },
+    queue: [],
+    queueStorage: { usedBytes: 0, limitBytes: 536870912, searching: false },
+    captureRequests: [],
+    captureFocus: null,
+    pocket: [],
+    clip: null,
+    pendingTarget: null,
+    room: null,
+    roomDurations: [30, 60, 120, 240],
     ...overrides,
   };
 }

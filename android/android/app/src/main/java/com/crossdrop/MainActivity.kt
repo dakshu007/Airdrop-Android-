@@ -63,6 +63,16 @@ class MainActivity : ReactActivity() {
                 if (hasWindowFocus()) onWindowFocusChanged(true)
                 return
             }
+            // Home-screen widget: a paired device was tapped; the UI opens the picker for it.
+            ACTION_SEND_TO_DEVICE -> {
+                intent.getStringExtra(EXTRA_DEVICE_ID)?.let { engine.setPendingTarget(it) }
+                return
+            }
+            // A Mac's photo request notification was tapped: show the capture screen.
+            ACTION_CAPTURE -> {
+                intent.getStringExtra(EXTRA_REQUEST_ID)?.let { engine.focusCapture(it) }
+                return
+            }
         }
         // Direct Share: the user picked a paired device right in the share sheet.
         val target = DirectShare.deviceIdFromShortcut(intent?.getStringExtra(ShortcutManagerCompat.EXTRA_SHORTCUT_ID))
@@ -83,5 +93,9 @@ class MainActivity : ReactActivity() {
     companion object {
         const val ACTION_ENABLE_RECEIVING = "com.crossdrop.action.ENABLE_RECEIVING"
         const val ACTION_SEND_CLIPBOARD = "com.crossdrop.action.SEND_CLIPBOARD"
+        const val ACTION_SEND_TO_DEVICE = "com.crossdrop.action.SEND_TO_DEVICE"
+        const val ACTION_CAPTURE = "com.crossdrop.action.CAPTURE"
+        const val EXTRA_DEVICE_ID = "deviceId"
+        const val EXTRA_REQUEST_ID = "requestId"
     }
 }

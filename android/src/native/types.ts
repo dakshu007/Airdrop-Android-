@@ -1,6 +1,6 @@
 /**
  * Shapes of the JSON exchanged with the Kotlin engine (see specs/NativeCrossDrop.ts).
- * Kotlin side: android/android/app/src/main/java/com/crossdrop/bridge/SnapshotJson.kt.
+ * Kotlin side: android/android/app/src/main/java/com/crossdrop/engine/Snapshots.kt.
  * Keep both in sync. Timestamps are epoch milliseconds.
  */
 
@@ -53,6 +53,8 @@ export interface NearbyDevice {
   trusted: boolean;
   /** Paired but not found by discovery; CrossDrop will try the address that last worked. */
   remembered: boolean;
+  /** Says it is in this phone's Drip Room (a hint; pairing through the room proves it). */
+  inRoom: boolean;
 }
 
 /** 'files', or a link / text handed off without being saved as a file. */
@@ -66,6 +68,8 @@ export interface TrustedDevice {
   pairedAt: number;
   lastUsedAt: number | null;
   autoAccept: boolean;
+  /** Temporary trust from a Drip Room ends at this time; null = paired for good. */
+  expiresAt: number | null;
 }
 
 export type TransferStatus =
@@ -118,6 +122,16 @@ export interface Transfer {
   kind: TransferKind;
   /** Received (or sent) link / text; this app session only. */
   text: string | null;
+  /** Expiring drop: seconds after which the sender asked for deletion (null = keep). */
+  expiresAfter: number | null;
+  /** Incoming expiring drop: when CrossDrop deletes the saved files (outgoing: when the receiver was asked to). */
+  deleteAt: number | null;
+  /** Connections used; more than 1 with Turbo. */
+  streams: number;
+  /** Set when this transfer delivers a "send when nearby" item. */
+  queueId: string | null;
+  /** True for a photo sent back for (or received from) a capture request. */
+  answersCapture: boolean;
 }
 
 export interface PairingPrompt {
@@ -143,6 +157,10 @@ export interface IncomingOffer {
   totalBytes: number;
   expiresAt: number;
   kind: TransferKind;
+  /** The sender asks for deletion this many seconds after receiving (a courtesy, not enforced). */
+  expiresAfter: number | null;
+  /** Answers a photo request this device sent; accepted without asking. */
+  answersCapture: boolean;
 }
 
 export interface HistoryEntry {
@@ -160,6 +178,8 @@ export interface HistoryEntry {
   /** The link, for link entries. Text content is never kept in history. */
   link: string | null;
   canSendAgain: boolean;
+  /** Expiring drop: incoming — when CrossDrop deletes (or deleted) the files; outgoing — when the receiver was asked to. */
+  deleteAt: number | null;
 }
 
 export interface SharedFile {
@@ -189,6 +209,10 @@ export interface Preferences {
   welcomed: boolean;
   /** Offer to send each new screenshot to the last device used. */
   screenshotOffer: boolean;
+  /** Smart arrival: images, videos and audio go to Pictures, Movies and Music › CrossDrop. */
+  sortByType: boolean;
+  /** Turbo (experimental): multi-file sends ask for parallel connections. */
+  turbo: boolean;
 }
 
 export interface HotspotState {
@@ -198,7 +222,106 @@ export interface HotspotState {
   error: string | null;
 }
 
-export type PreferenceKey = 'sound' | 'haptics' | 'welcomed';
+export type PreferenceKey =
+  | 'sound'
+  | 'haptics'
+  | 'welcomed'
+  | 'sortByType'
+  | 'turbo';
+
+/** Per-send options passed with sendFiles / queueFiles. */
+export interface SendOptions {
+  /** Ask the receiver to delete the files after this many seconds (60 … 2 592 000). */
+  expiresAfter?: number;
+}
+
+/** A "send when nearby" item waiting for a paired device. */
+export interface QueuedSend {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  devicePlatform: Platform | null;
+  /** False when the device was forgotten since; the item can only be cancelled. */
+  paired: boolean;
+  kind: TransferKind;
+  files: { name: string; size: number | null; mime: string | null; copied: boolean }[];
+  /** First 200 characters of a queued link / text. */
+  preview: string | null;
+  totalBytes: number;
+  createdAt: number;
+  status: 'waiting' | 'sending' | 'failed';
+  /** For 'failed': a protocol error code, 'rejected' or 'file_unreadable'. */
+  error: string | null;
+  attempts: number;
+  /** The running transfer while 'sending'. */
+  transferId: string | null;
+  expiresAfter: number | null;
+}
+
+export interface QueueStorage {
+  /** Bytes held in CrossDrop's own copies of queued share-sheet files. */
+  usedBytes: number;
+  limitBytes: number;
+  /** True during the short discovery window that looks for queued devices. */
+  searching: boolean;
+}
+
+/** A paired Mac asked this phone for a photo. */
+export interface CaptureRequestInfo {
+  requestId: string;
+  peerId: string;
+  peerName: string;
+  /** 'photo': take a new one; 'pick': choose existing ones. */
+  kind: 'photo' | 'pick';
+  expiresAt: number;
+  /** 'sending' while the answer is on its way. */
+  state: 'open' | 'sending';
+}
+
+/** A recently received file (newest first, at most 30). */
+export interface PocketItem {
+  id: string;
+  uri: string;
+  name: string;
+  size: number;
+  mime: string | null;
+  receivedAt: number;
+  from: string;
+  fromPlatform: Platform;
+  /** Expiring drop: when CrossDrop deletes it. */
+  deleteAt: number | null;
+}
+
+/** Text that just arrived from a paired Mac: offered for pasting for two minutes. */
+export interface Clip {
+  transferId: string;
+  from: string;
+  fromPlatform: Platform;
+  preview: string;
+  length: number;
+  expiresAt: number;
+}
+
+/** A device tapped on the home-screen widget: open the file picker for it. */
+export interface PendingTarget {
+  deviceId: string;
+  name: string;
+  platform: Platform;
+  at: number;
+}
+
+/** The Drip Room this phone is in. */
+export interface RoomInfo {
+  id: string;
+  name: string;
+  expiresAt: number;
+  /** This phone shows the code. */
+  hosting: boolean;
+  /** crossdrop://room?... while hosting, else null. */
+  invite: string | null;
+  /** Nearby devices that say they are in the room. */
+  members: number;
+}
 
 /** 'tick' when a code digit lands, 'confirm' for a confirmed code, 'done' and 'error' when a transfer ends. */
 export type FeedbackKind = 'tick' | 'confirm' | 'done' | 'error';
@@ -234,4 +357,18 @@ export interface Snapshot {
   appVersion: string;
   /** Local preferences; nothing here leaves the device. */
   prefs: Preferences;
+  /** "Send when nearby" items, oldest first. */
+  queue: QueuedSend[];
+  queueStorage: QueueStorage;
+  /** Photo requests from paired Macs. */
+  captureRequests: CaptureRequestInfo[];
+  /** The request whose capture screen should be shown (opened from its notification). */
+  captureFocus: string | null;
+  /** Recent received files. */
+  pocket: PocketItem[];
+  clip: Clip | null;
+  pendingTarget: PendingTarget | null;
+  room: RoomInfo | null;
+  /** Room lengths offered, in minutes. */
+  roomDurations: number[];
 }

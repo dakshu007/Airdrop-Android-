@@ -20,12 +20,20 @@ import java.io.OutputStream
  * invisible to other apps until verified; MediaStore picks a non-colliding
  * name ("name (1).ext") instead of overwriting.
  *
+ * With "Sort by type" on, loose images go to Pictures/CrossDrop, videos to
+ * Movies/CrossDrop and audio to Music/CrossDrop; everything else, and every file
+ * of a folder transfer (so the folder stays together), goes to Download/CrossDrop.
+ *
  * Folders (protocol §9.1) become sub-folders of Download/CrossDrop. A transfer
  * that drops mid-file keeps its pending item for a day so the same file from the
  * same device can continue where it stopped (§9.3); the index of kept items
  * lives in private preferences and holds only content URIs.
  */
-class MediaStoreStorage(private val context: Context) : ReceiveStorage {
+class MediaStoreStorage(
+    private val context: Context,
+    /** Smart arrival: sort loose files into Pictures / Movies / Music by type (read per file). */
+    private val sortByType: () -> Boolean = { false },
+) : ReceiveStorage {
     private val resolver = context.contentResolver
     private val kept = context.getSharedPreferences("crossdrop_resume", Context.MODE_PRIVATE)
 
@@ -84,13 +92,9 @@ class MediaStoreStorage(private val context: Context) : ReceiveStorage {
         // MediaStore append an extra extension, and the sender's value is only a hint.
         val ext = name.substringAfterLast('.', "").lowercase()
         val type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, name)
-            put(MediaStore.Downloads.MIME_TYPE, type)
-            put(MediaStore.Downloads.RELATIVE_PATH, (listOf(RELATIVE_PATH) + path).joinToString("/"))
-            put(MediaStore.Downloads.IS_PENDING, 1)
-        }
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        val target = if (path.isEmpty() && sortByType()) targetFor(type) else null
+        val uri = target?.let { (collection, root) -> runCatching { insert(collection, root, name, type, path) }.getOrNull() }
+            ?: insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, RELATIVE_PATH, name, type, path)
             ?: throw IOException("MediaStore insert failed")
         val out = try {
             resolver.openOutputStream(uri, "w") ?: throw IOException("no output stream")
@@ -99,6 +103,24 @@ class MediaStoreStorage(private val context: Context) : ReceiveStorage {
             throw IOException("cannot open destination", e)
         }
         return Pending(uri, out.buffered(256 * 1024), resumeKey, 0, path)
+    }
+
+    private fun insert(collection: Uri, root: String, name: String, type: String, path: List<String>): Uri? {
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, type)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, (listOf(root) + path).joinToString("/"))
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        return resolver.insert(collection, values)
+    }
+
+    /** Collection and folder for a sorted file, or null for Download/CrossDrop. */
+    private fun targetFor(type: String): Pair<Uri, String>? = when {
+        type.startsWith("image/") -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI to "${Environment.DIRECTORY_PICTURES}/CrossDrop"
+        type.startsWith("video/") -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI to "${Environment.DIRECTORY_MOVIES}/CrossDrop"
+        type.startsWith("audio/") -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI to "${Environment.DIRECTORY_MUSIC}/CrossDrop"
+        else -> null
     }
 
     private inner class Pending(
@@ -123,9 +145,9 @@ class MediaStoreStorage(private val context: Context) : ReceiveStorage {
         }
 
         override fun commit(): SavedFile {
-            val values = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+            val values = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
             if (resolver.update(uri, values, null, null) != 1) throw IOException("publish failed")
-            val finalName = resolver.query(uri, arrayOf(MediaStore.Downloads.DISPLAY_NAME), null, null, null)?.use {
+            val finalName = resolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use {
                 if (it.moveToFirst()) it.getString(0) else null
             }
             return SavedFile((path + (finalName ?: "file")).joinToString("/"), uri.toString())
@@ -140,5 +162,15 @@ class MediaStoreStorage(private val context: Context) : ReceiveStorage {
     companion object {
         val RELATIVE_PATH = "${Environment.DIRECTORY_DOWNLOADS}/CrossDrop"
         const val LABEL = "Download/CrossDrop"
+        const val SORTED_LABEL = "Pictures, Movies, Music or Download › CrossDrop"
+
+        /** Deletes an item CrossDrop saved (expiring drops, Pocket). False when it isn't ours any more or is gone. */
+        fun delete(context: Context, uri: String): Boolean = try {
+            context.contentResolver.delete(Uri.parse(uri), null, null) > 0
+        } catch (e: SecurityException) {
+            false
+        } catch (e: IllegalArgumentException) {
+            false
+        }
     }
 }

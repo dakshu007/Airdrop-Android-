@@ -25,6 +25,7 @@ class CrossDropService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val engine = Engine.get(this)
+        val fresh = running == null
         // Always satisfy the startForeground contract first, then stop if nothing needs us.
         val (title, text, progress) = engine.serviceStatus()
         val notification = engine.notifier.status(title, text, progress)
@@ -39,7 +40,12 @@ class CrossDropService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (!engine.needsService()) stopNow()
+        if (!engine.needsService()) {
+            stopNow()
+        } else if (fresh) {
+            // The service just started: delete expiring drops that are due (§9.8).
+            engine.purgeExpiredDrops()
+        }
         return START_NOT_STICKY
     }
 

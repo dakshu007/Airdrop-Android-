@@ -14,6 +14,34 @@ enum AppSettings {
         static let receiveMode = "receiveMode"
         static let heicToJpeg = "heicToJpeg"
         static let uiZoom = "uiZoom"
+        static let dripIsland = "dripIsland"
+        static let offerClipboard = "offerClipboardToPhone"
+        static let sortByType = "sortByType"
+        static let turbo = "turbo"
+    }
+
+    /// Drip Island: the shelf that appears at the top of the screen while files are dragged. On by default.
+    static var dripIsland: Bool {
+        get { defaults.object(forKey: Key.dripIsland) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.dripIsland) }
+    }
+
+    /// Send text copied on this Mac to a paired phone marked "mine". Off by default.
+    static var offerClipboard: Bool {
+        get { defaults.object(forKey: Key.offerClipboard) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.offerClipboard) }
+    }
+
+    /// Smart arrival: sort received photos into Pictures and documents into Documents. Off by default.
+    static var sortByType: Bool {
+        get { defaults.object(forKey: Key.sortByType) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.sortByType) }
+    }
+
+    /// Turbo (experimental): ask for parallel connections on multi-file sends. Off by default.
+    static var turbo: Bool {
+        get { defaults.object(forKey: Key.turbo) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.turbo) }
     }
 
     /// View › Zoom level of the main window (1 = actual size), on top of the automatic

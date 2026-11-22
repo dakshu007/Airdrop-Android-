@@ -6,6 +6,10 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import com.crossdrop.R
 import com.crossdrop.storage.Prefs
@@ -34,6 +38,32 @@ class Feedback(private val context: Context, private val prefs: Prefs) {
         }
         if (kind == "done" && prefs.sound) playDone()
     }
+
+    /**
+     * Haptic heartbeat: a light tick at every 10% of a transfer, on screen or not.
+     * Uses the vibrator (the app may be in the background), only when CrossDrop's
+     * haptics setting and the system's touch-feedback setting are both on.
+     */
+    fun heartbeat() = vibrate(VibrationEffect.EFFECT_TICK)
+
+    /** The "done" haptic for a verified transfer while CrossDrop is not on screen (no sound: the notification has one). */
+    fun doneInBackground() = vibrate(VibrationEffect.EFFECT_CLICK)
+
+    private fun vibrate(effect: Int) {
+        if (!prefs.haptics || !systemHapticsOn()) return
+        val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= 31) {
+            context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+        if (vibrator == null || !vibrator.hasVibrator()) return
+        runCatching { vibrator.vibrate(VibrationEffect.createPredefined(effect)) }
+    }
+
+    @Suppress("DEPRECATION") // Still the user's touch-feedback switch; the replacement needs API 33.
+    private fun systemHapticsOn(): Boolean =
+        Settings.System.getInt(context.contentResolver, Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) != 0
 
     private fun playDone() {
         val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return

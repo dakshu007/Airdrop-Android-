@@ -34,7 +34,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Full-screen camera that looks for a CrossDrop pairing QR code. Frames are
+ * Full-screen camera that looks for a CrossDrop pairing or Drip Room QR code. Frames are
  * decoded on the device with ZXing and never stored or sent anywhere. Returns
  * the code's text in [EXTRA_CODE], or RESULT_CANCELED.
  */
@@ -58,7 +58,7 @@ class ScanActivity : ComponentActivity() {
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             gravity = Gravity.CENTER
-            text = "Point at the code on your Mac\n(CrossDrop › Pair a phone)"
+            text = "Point at the code on your Mac\n(CrossDrop › Pair a phone) or at a Drip Room code"
             setPadding(dp(32), 0, dp(32), dp(96))
         }
         root.addView(hint, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
@@ -112,8 +112,9 @@ class ScanActivity : ComponentActivity() {
     }
 
     private fun onCode(text: String) {
-        if (PairingCode.parse(text) == null) {
-            runOnUiThread { hint.text = "That's not a CrossDrop pairing code." }
+        // Pairing codes (§9.4) and Drip Room codes (§9.9); the engine decides what to do with each.
+        if (PairingCode.kindOf(text) == null) {
+            runOnUiThread { hint.text = "That's not a CrossDrop code." }
             return
         }
         if (!delivered.compareAndSet(false, true)) return

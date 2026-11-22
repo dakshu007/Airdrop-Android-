@@ -23,6 +23,20 @@ class TransferModel(
     var kind: String = "files"
     /** The received (or sent) link / text, kept in memory only for this app session. */
     var text: String? = null
+    /** Expiring drop (§9.8): seconds after which the sender asked for deletion. */
+    var expiresAfter: Long? = null
+    /** Incoming expiring drop: when CrossDrop deletes the saved files. */
+    var deleteAt: Long? = null
+    /** Set when this transfer delivers a "send when nearby" queue item. */
+    var queueId: String? = null
+    /** Set when this transfer answers a capture request (§9.7). */
+    var captureRequestId: String? = null
+    /** The address the (current attempt of the) outgoing transfer connects to. */
+    var targetHost: String? = null
+    /** Connections used: more than 1 with Turbo (§9.10). */
+    var streams: Int = 1
+    /** Last 10% step that produced a haptic tick. */
+    var lastDecile: Int = 0
 
     val totalBytes: Long get() = files.sumOf { it.size }
     val isFinished: Boolean get() = status in FINISHED

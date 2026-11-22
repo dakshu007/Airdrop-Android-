@@ -1,4 +1,11 @@
 <resources>
     <color name="window_background">#EAF7EE</color>
     <color name="brand">#149A5B</color>
+    <!-- Home-screen widget: mint glass (light). -->
+    <color name="widget_glass_top">#E6F4FBF6</color>
+    <color name="widget_glass_bottom">#D9DDF3E5</color>
+    <color name="widget_stroke">#B3FFFFFF</color>
+    <color name="widget_chip">#B3FFFFFF</color>
+    <color name="widget_text">#0F3B28</color>
+    <color name="widget_text_secondary">#3F6B55</color>
 </resources>

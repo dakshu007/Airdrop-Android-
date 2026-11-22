@@ -80,6 +80,11 @@ function transfer(overrides: Partial<Transfer> = {}): Transfer {
     canRetry: false,
     kind: 'files',
     text: null,
+    expiresAfter: null,
+    deleteAt: null,
+    streams: 1,
+    queueId: null,
+    answersCapture: false,
     ...overrides,
   };
 }
@@ -96,6 +101,8 @@ test('welcomes a first-time user and remembers it', async () => {
         haptics: true,
         welcomed: false,
         screenshotOffer: false,
+        sortByType: false,
+        turbo: false,
       },
     }),
   );
@@ -163,6 +170,7 @@ test('shows a nearby Mac as a chip with its trust state', async () => {
           platform: 'macos',
           trusted: true,
           remembered: false,
+          inRoom: false,
         },
       ],
     }),
@@ -224,6 +232,8 @@ test('shows an incoming offer with total size and accepts it', async () => {
           totalBytes: 2_000_000,
           expiresAt: Date.now() + 60000,
           kind: 'files',
+          expiresAfter: null,
+          answersCapture: false,
         },
       ],
     }),
@@ -318,6 +328,7 @@ const MAC = {
   platform: 'macos' as const,
   trusted: true,
   remembered: false,
+  inRoom: false,
 };
 
 test('"This is my device" goes along with the pairing answer', async () => {
@@ -447,7 +458,15 @@ test('sends to several devices at once', async () => {
     pressable(renderer, 'Send to 2 devices').props.onPress(),
   );
   expect(native.sendFiles).toHaveBeenCalledTimes(2);
-  expect(native.sendFiles).toHaveBeenCalledWith('abc', expect.any(String));
-  expect(native.sendFiles).toHaveBeenCalledWith('def', expect.any(String));
+  expect(native.sendFiles).toHaveBeenCalledWith(
+    'abc',
+    expect.any(String),
+    '{}',
+  );
+  expect(native.sendFiles).toHaveBeenCalledWith(
+    'def',
+    expect.any(String),
+    '{}',
+  );
   await ReactTestRenderer.act(async () => renderer.unmount());
 });

@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Asked only when the user scans a pairing QR code; frames never leave the phone. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Haptic heartbeat (a light tick at each 10% of a transfer) while CrossDrop is in the
+         background; follows the in-app haptics setting and the system touch-feedback setting. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <!-- Asked only if the user turns on "Offer to send screenshots". -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
@@ -64,7 +67,47 @@
         android:exported="false"
         android:theme="@style/Theme.AppCompat.NoActionBar" />
 
+      <!-- Answers a paired Mac's photo request (§9.7): system camera or Photo Picker, no UI of its own. -->
+      <activity
+        android:name=".capture.CaptureActivity"
+        android:exported="false"
+        android:excludeFromRecents="true"
+        android:taskAffinity=""
+        android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+      <!-- Lets the camera app write a photo for a Mac into CrossDrop's private cache only. -->
+      <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.fileprovider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/file_paths" />
+      </provider>
+
       <receiver android:name=".notifications.NotificationActionReceiver" android:exported="false" />
+
+      <!-- Deletes expiring drops (§9.8) when due, from an inexact alarm; re-arms after a restart. -->
+      <receiver android:name=".storage.ExpiryReceiver" android:exported="false">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED" />
+            <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        </intent-filter>
+      </receiver>
+
+      <!-- Home-screen widget: recent paired devices and a Clipboard button. Never updates on a timer. -->
+      <receiver
+        android:name=".widget.DevicesWidgetProvider"
+        android:exported="false"
+        android:label="@string/widget_label">
+        <intent-filter>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent-filter>
+        <meta-data
+            android:name="android.appwidget.provider"
+            android:resource="@xml/devices_widget_info" />
+      </receiver>
 
       <receiver android:name=".service.BootReceiver" android:exported="false">
         <intent-filter>

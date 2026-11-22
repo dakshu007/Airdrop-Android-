@@ -70,7 +70,7 @@ class Notifier(private val context: Context) {
             .apply { if (progress != null) setProgress(100, progress.coerceIn(0, 100), false) }
             .build()
 
-    fun request(id: String, title: String, text: String, actions: List<NotificationCompat.Action> = emptyList()) = post(
+    fun request(id: String, title: String, text: String, actions: List<NotificationCompat.Action> = emptyList()): Boolean = post(
         id.hashCode(),
         base(CHANNEL_REQUESTS, title, text, "CrossDrop request")
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
@@ -95,6 +95,40 @@ class Notifier(private val context: Context) {
                 actions.forEach(::addAction)
                 if (tap != null) setContentIntent(tap)
             }
+            .build(),
+    )
+
+    /**
+     * A paired Mac asks for a photo (§9.7). High priority; never names files. Tapping opens
+     * CrossDrop on its capture screen; the actions go straight to the camera or the photo picker.
+     * Returns true only when the notification was actually posted.
+     */
+    fun capture(
+        id: String,
+        title: String,
+        text: String,
+        tap: PendingIntent,
+        actions: List<NotificationCompat.Action>,
+        timeoutMs: Long,
+    ): Boolean = channelEnabled(CHANNEL_REQUESTS) && post(
+        id.hashCode(),
+        base(CHANNEL_REQUESTS, title, text, "CrossDrop request")
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .setTimeoutAfter(timeoutMs)
+            .apply { actions.forEach(::addAction) }
+            .build(),
+    )
+
+    /** "Paste from <Mac>": text that arrived, with Copy, gone after [timeoutMs]. The text itself is not shown. */
+    fun clip(id: String, title: String, text: String, copy: NotificationCompat.Action, timeoutMs: Long): Boolean = post(
+        id.hashCode(),
+        base(CHANNEL_RESULTS, title, text, "CrossDrop received something")
+            .setAutoCancel(true)
+            .setTimeoutAfter(timeoutMs)
+            .addAction(copy)
             .build(),
     )
 
@@ -132,15 +166,21 @@ class Notifier(private val context: Context) {
 
     fun cancel(id: String) = nm.cancel(id.hashCode())
 
+    /** False when the user turned this channel off in system settings. */
+    private fun channelEnabled(channel: String): Boolean =
+        (nm.getNotificationChannel(channel)?.importance ?: NotificationManager.IMPORTANCE_DEFAULT) != NotificationManager.IMPORTANCE_NONE
+
     fun canPost(): Boolean = nm.areNotificationsEnabled() &&
         (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
 
-    private fun post(id: Int, n: android.app.Notification) {
-        if (!canPost()) return
-        try {
+    private fun post(id: Int, n: android.app.Notification): Boolean {
+        if (!canPost()) return false
+        return try {
             nm.notify(id, n)
+            true
         } catch (e: SecurityException) {
             // Permission revoked between the check and the call.
+            false
         }
     }
 

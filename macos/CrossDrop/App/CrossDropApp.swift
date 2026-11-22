@@ -25,6 +25,7 @@ struct CrossDropApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController?
     private var mainWindow: MainWindowController?
+    private var dripIsland: DripIslandController?
     private let services = ServicesProvider()
     private var subscriptions = Set<AnyCancellable>()
 
@@ -41,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let window = MainWindowController(model: model)
         mainWindow = window
         statusItem = StatusItemController(model: model)
+        dripIsland = DripIslandController(model: model)
         model.$windowRequest
             .dropFirst()
             .receive(on: RunLoop.main)
@@ -108,6 +110,11 @@ struct CrossDropCommands: Commands {
                 }
             }
             .keyboardShortcut("v", modifiers: [.command, .shift])
+            Divider()
+            Button("Take Photo with Phone") { model.requestCapture(.photo) }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+            Button("Pick Photo from Phone") { model.requestCapture(.pick) }
+            Divider()
             Button("Pair a Phone…") {
                 model.selectedTab = .devices
                 model.showingPairSheet = true

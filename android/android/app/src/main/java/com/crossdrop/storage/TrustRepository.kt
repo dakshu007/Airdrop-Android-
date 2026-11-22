@@ -26,24 +26,82 @@ class TrustRepository(private val context: Context) : TrustStore {
         }
     }
 
-    @Synchronized
-    override fun get(deviceId: String): TrustedPeer? = peers[deviceId]
+    override fun get(deviceId: String): TrustedPeer? {
+        val purged: Boolean
+        val result: TrustedPeer?
+        synchronized(this) {
+            val p = peers[deviceId]
+            purged = p != null && p.isExpired()
+            if (purged) remove(deviceId)
+            result = if (purged) null else p
+        }
+        // Temporary (Drip Room) trust that ran out: the device is untrusted again (§9.9).
+        if (purged) onChange?.invoke()
+        return result
+    }
 
-    @Synchronized
-    fun all(): List<TrustedPeer> = peers.values.sortedByDescending { it.lastUsedAt ?: it.pairedAt }
+    /** Paired devices, most recently used first; trust that has expired is dropped. */
+    fun all(): List<TrustedPeer> {
+        val purged = purgeExpired()
+        val list = synchronized(this) { peers.values.sortedByDescending { it.lastUsedAt ?: it.pairedAt } }
+        if (purged) onChange?.invoke()
+        return list
+    }
 
-    override fun trust(peer: PeerInfo) = trust(peer, false)
+    /** Only permanent pairings (no Drip Room trust): for the widget and Direct Share. */
+    fun permanent(): List<TrustedPeer> = all().filter { it.expiresAt == null }
+
+    /** Removes expired temporary trust. Returns true when something was removed (caller notifies). */
+    private fun purgeExpired(): Boolean = synchronized(this) {
+        val now = System.currentTimeMillis()
+        val gone = peers.values.filter { it.isExpired(now) }.map { it.deviceId }
+        gone.forEach { remove(it) }
+        gone.isNotEmpty()
+    }
+
+    /** Drops temporary trust that ends at [expiresAt] (a Drip Room that was ended early). */
+    fun forgetTemporary(expiresAt: Long) {
+        val removed = synchronized(this) {
+            val gone = peers.values.filter { it.expiresAt == expiresAt }.map { it.deviceId }
+            gone.forEach { remove(it) }
+            gone.isNotEmpty()
+        }
+        if (removed) onChange?.invoke()
+    }
+
+    override fun trust(peer: PeerInfo) = trust(peer, false, null)
 
     /** [autoAccept] is the "This is my device" choice made while pairing. */
-    override fun trust(peer: PeerInfo, autoAccept: Boolean) {
+    override fun trust(peer: PeerInfo, autoAccept: Boolean) = trust(peer, autoAccept, null)
+
+    /**
+     * [expiresAt] (epoch ms) makes the trust temporary (Drip Rooms, §9.9). Temporary trust
+     * never replaces a permanent pairing with the same key, and never sets auto-accept.
+     */
+    override fun trust(peer: PeerInfo, autoAccept: Boolean, expiresAt: Long?) {
         synchronized(this) {
-            val existing = peers[peer.deviceId]?.takeIf { it.identityKey.contentEquals(peer.identityKey) }
+            val existing = peers[peer.deviceId]?.takeIf { it.identityKey.contentEquals(peer.identityKey) && !it.isExpired() }
             val now = System.currentTimeMillis()
-            save(TrustedPeer(peer.deviceId, peer.identityKey, peer.name, peer.platform, now, existing?.lastUsedAt, autoAccept || (existing?.autoAccept ?: false)))
+            if (expiresAt != null && existing != null && existing.expiresAt == null) {
+                // Already paired for good: keep that, just refresh the name.
+                save(existing.copy(name = peer.name))
+            } else {
+                val permanent = expiresAt == null
+                save(
+                    TrustedPeer(
+                        peer.deviceId, peer.identityKey, peer.name, peer.platform, now, existing?.lastUsedAt,
+                        permanent && (autoAccept || (existing?.autoAccept ?: false)),
+                        expiresAt,
+                    ),
+                )
+            }
             if (existing == null) addresses.remove(peer.deviceId)
         }
         onChange?.invoke()
     }
+
+    /** Expiring trust is stored with its end time and ignored once it has passed. */
+    override val supportsTrustExpiry: Boolean get() = true
 
     // ---- last address that worked, per paired device (§9.5) ----
     // Lets a paired device be reached on networks that block discovery. The handshake
@@ -59,7 +117,8 @@ class TrustRepository(private val context: Context) : TrustStore {
     }
 
     @Synchronized
-    fun lastAddress(deviceId: String): Pair<String, Int>? = if (peers.containsKey(deviceId)) addresses[deviceId] else null
+    fun lastAddress(deviceId: String): Pair<String, Int>? =
+        if (peers[deviceId]?.isExpired() == false) addresses[deviceId] else null
 
     @Synchronized
     fun rememberAddress(deviceId: String, host: String, port: Int) {
@@ -70,25 +129,29 @@ class TrustRepository(private val context: Context) : TrustStore {
 
     override fun touch(deviceId: String, name: String) {
         synchronized(this) {
-            val p = peers[deviceId] ?: return
+            val p = peers[deviceId]?.takeIf { !it.isExpired() } ?: return
             save(p.copy(name = name, lastUsedAt = System.currentTimeMillis()))
         }
         onChange?.invoke()
     }
 
     fun forget(deviceId: String) {
-        synchronized(this) {
-            peers.remove(deviceId)
-            addresses.remove(deviceId)
-            sp.edit().remove(deviceId).apply()
-            addressPrefs.edit().remove(deviceId).apply()
-        }
+        synchronized(this) { remove(deviceId) }
         onChange?.invoke()
+    }
+
+    /** Caller holds the lock. */
+    private fun remove(deviceId: String) {
+        peers.remove(deviceId)
+        addresses.remove(deviceId)
+        sp.edit().remove(deviceId).apply()
+        addressPrefs.edit().remove(deviceId).apply()
     }
 
     fun setAutoAccept(deviceId: String, enabled: Boolean) {
         synchronized(this) {
-            val p = peers[deviceId] ?: return
+            // Temporary room trust never auto-accepts (§9.9).
+            val p = peers[deviceId]?.takeIf { it.expiresAt == null } ?: return
             save(p.copy(autoAccept = enabled))
         }
         onChange?.invoke()
@@ -108,6 +171,7 @@ class TrustRepository(private val context: Context) : TrustStore {
             "pairedAt" to p.pairedAt,
             "lastUsedAt" to p.lastUsedAt,
             "autoAccept" to p.autoAccept,
+            "expiresAt" to p.expiresAt,
         ),
     )
 
@@ -122,6 +186,8 @@ class TrustRepository(private val context: Context) : TrustStore {
             pairedAt = m["pairedAt"] as Long,
             lastUsedAt = m["lastUsedAt"] as Long?,
             autoAccept = m["autoAccept"] as Boolean,
+            // Absent in records written before Drip Rooms: permanent.
+            expiresAt = (m["expiresAt"] as? Number)?.toLong(),
         )
     }
 }

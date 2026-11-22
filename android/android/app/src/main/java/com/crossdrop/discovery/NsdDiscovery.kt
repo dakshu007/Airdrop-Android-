@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import com.crossdrop.core.Platform
 import com.crossdrop.core.Protocol
+import com.crossdrop.core.Rooms
 import java.net.Inet4Address
 
 /** A CrossDrop device seen via DNS-SD. Display hints only; the handshake proves identity. */
@@ -19,6 +20,8 @@ data class DiscoveredDevice(
     val serviceName: String,
     /** Advertised as "My devices only" (§9.5); only worth showing when already paired. */
     val private: Boolean = false,
+    /** TXT `r` Drip Room hints (§9.9): which rooms it says it is in. A hint, never proof. */
+    val roomHints: List<String> = emptyList(),
 )
 
 /**
@@ -128,6 +131,9 @@ class NsdDiscovery(
         val address = info.host ?: return null
         // Prefer IPv4 when available: link-local IPv6 needs a scope id that is easy to lose.
         val host = if (address is Inet4Address) address.hostAddress else address.hostAddress?.substringBefore('%')
-        return DiscoveredDevice(id, info.serviceName, platform, host ?: return null, info.port, info.serviceName, attr("m") == "1")
+        return DiscoveredDevice(
+            id, info.serviceName, platform, host ?: return null, info.port, info.serviceName, attr("m") == "1",
+            Rooms.parseHints(attr("r")),
+        )
     }
 }

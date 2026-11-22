@@ -7,8 +7,17 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 
-/** Tracks whether a Wi-Fi or Ethernet network is up, and holds a multicast lock on request. */
-class NetworkMonitor(context: Context, private val onChange: (Boolean) -> Unit) {
+/**
+ * Tracks whether a Wi-Fi or Ethernet network is up, and holds a multicast lock on request.
+ * [onNetworkAvailable] fires whenever a new Wi-Fi / Ethernet network comes up (including a switch
+ * from one Wi-Fi to another, which leaves [localNetwork] true); [onChange] when
+ * [localNetwork] flips. Both come from the system's network callbacks: no polling.
+ */
+class NetworkMonitor(
+    context: Context,
+    private val onNetworkAvailable: () -> Unit = {},
+    private val onChange: (Boolean) -> Unit,
+) {
     private val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
     private val networks = HashSet<Network>()
@@ -24,7 +33,10 @@ class NetworkMonitor(context: Context, private val onChange: (Boolean) -> Unit) 
             .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET)
             .build()
         cm.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) = update { networks.add(network) }
+            override fun onAvailable(network: Network) {
+                update { networks.add(network) }
+                this@NetworkMonitor.onNetworkAvailable()
+            }
             override fun onLost(network: Network) = update { networks.remove(network) }
         })
     }

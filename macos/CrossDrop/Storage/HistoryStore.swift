@@ -25,8 +25,29 @@ struct HistoryEntry: Codable, Identifiable, Equatable {
     var kind: String?
     /// The link itself for link entries; text content is never stored.
     var link: String?
+    /// Expiring drop (§9.8): seconds after arrival the sender asked for deletion.
+    var expiresAfter: Int64? = nil
+    /// Incoming expiring drop: when CrossDrop moves the saved files to the Trash.
+    var deletesAt: Date? = nil
+    /// Set once those files were moved to the Trash.
+    var deletedAt: Date? = nil
+    /// Answer to a "Take Photo / Pick Photo" request from this Mac (§9.7).
+    var isCaptureReply: Bool? = nil
 
     var isIncoming: Bool { direction == TransferDirection.incoming.rawValue }
+
+    /// "Deletes Nov 23, 10:42" / "Deleted" for expiring drops, nil otherwise.
+    var expiryText: String? {
+        if deletedAt != nil { return "Moved to Trash" }
+        if let date = deletesAt {
+            return "Deletes " + date.formatted(date: .abbreviated, time: .shortened)
+        }
+        if !isIncoming, let seconds = expiresAfter {
+            let hours = Int((Double(seconds) / 3600).rounded())
+            return hours >= 1 ? "Auto-deletes \(hours) h after arrival" : "Auto-deletes after arrival"
+        }
+        return nil
+    }
 }
 
 /// Local transfer history: newest first, at most 200 entries, never uploaded.
@@ -48,6 +69,13 @@ final class HistoryStore {
         entries.removeAll { $0.id == entry.id }
         entries.insert(entry, at: 0)
         if entries.count > Self.limit { entries = Array(entries.prefix(Self.limit)) }
+        save()
+    }
+
+    /// Changes one entry in place (paths after sorting, deletion of an expiring drop).
+    func update(id: String, _ change: (inout HistoryEntry) -> Void) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        change(&entries[index])
         save()
     }
 

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home-screen widget: up to three recent paired devices and a Clipboard button.
+     RemoteViews only: LinearLayout / ImageView / TextView with shape backgrounds. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:paddingStart="12dp"
+    android:paddingTop="10dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="10dp">
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:layout_marginBottom="6dp"
+        android:text="@string/widget_title"
+        android:textColor="@color/widget_text_secondary"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:id="@+id/slot1"
+            style="@style/WidgetChip">
+            <ImageView
+                android:id="@+id/slot1_icon"
+                style="@style/WidgetChipIcon"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_share_mac" />
+            <TextView
+                android:id="@+id/slot1_name"
+                style="@style/WidgetChipLabel" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/slot2"
+            style="@style/WidgetChip">
+            <ImageView
+                android:id="@+id/slot2_icon"
+                style="@style/WidgetChipIcon"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_share_mac" />
+            <TextView
+                android:id="@+id/slot2_name"
+                style="@style/WidgetChipLabel" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/slot3"
+            style="@style/WidgetChip">
+            <ImageView
+                android:id="@+id/slot3_icon"
+                style="@style/WidgetChipIcon"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_share_mac" />
+            <TextView
+                android:id="@+id/slot3_name"
+                style="@style/WidgetChipLabel" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/widget_empty"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="6dp"
+            android:layout_weight="3"
+            android:background="@drawable/widget_chip"
+            android:gravity="center"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:text="@string/widget_empty"
+            android:textColor="@color/widget_text"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/clipboard"
+            style="@style/WidgetChip"
+            android:layout_marginEnd="0dp"
+            android:contentDescription="@string/widget_clipboard_description">
+            <ImageView
+                style="@style/WidgetChipIcon"
+                android:background="@drawable/widget_icon_disc"
+                android:importantForAccessibility="no"
+                android:padding="7dp"
+                android:src="@drawable/ic_tile_clipboard" />
+            <TextView
+                style="@style/WidgetChipLabel"
+                android:text="@string/widget_clipboard" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

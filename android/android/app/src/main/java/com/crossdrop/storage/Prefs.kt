@@ -45,6 +45,19 @@ class Prefs(private val context: Context) {
         get() = sp.getString("lastDeviceId", null)
         set(value) = sp.edit().putString("lastDeviceId", value).apply()
 
+    /**
+     * Smart arrival: images to Pictures/CrossDrop, videos to Movies/CrossDrop, audio to
+     * Music/CrossDrop, everything else (and folders) to Download/CrossDrop. Off by default.
+     */
+    var sortByType: Boolean
+        get() = sp.getBoolean("sortByType", false)
+        set(value) = sp.edit().putBoolean("sortByType", value).apply()
+
+    /** Turbo (experimental, §9.10): multi-file sends ask the receiver for parallel connections. */
+    var turbo: Boolean
+        get() = sp.getBoolean("turbo", false)
+        set(value) = sp.edit().putBoolean("turbo", value).apply()
+
     var notificationPermissionAsked: Boolean
         get() = sp.getBoolean("notificationAsked", false)
         set(value) = sp.edit().putBoolean("notificationAsked", value).apply()

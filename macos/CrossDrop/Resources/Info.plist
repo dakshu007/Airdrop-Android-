@@ -28,6 +28,12 @@
 	<string>CrossDrop. Local-first file transfer.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>CrossDrop finds your nearby devices and exchanges files with them directly over your local network.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>CrossDrop saves files you accept from your devices in your Downloads folder unless you choose another folder.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>With “Sort by type” on, CrossDrop puts received documents in Documents › CrossDrop. Files you send or keep on the Shelf from this folder are read only when you send them.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>CrossDrop reads files from your Desktop only when you send them or keep them on the Shelf.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_crossdrop._tcp</string>

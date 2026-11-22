@@ -1,4 +1,11 @@
 <resources>
     <color name="window_background">#EAF7EE</color>
     <color name="brand">#149A5B</color>
+    <!-- Home-screen widget: deep green glass (dark). -->
+    <color name="widget_glass_top">#E61A3328</color>
+    <color name="widget_glass_bottom">#D90F241B</color>
+    <color name="widget_stroke">#40FFFFFF</color>
+    <color name="widget_chip">#26FFFFFF</color>
+    <color name="widget_text">#EAF7EE</color>
+    <color name="widget_text_secondary">#A9CDB8</color>
 </resources>

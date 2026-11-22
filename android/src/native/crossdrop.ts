@@ -5,6 +5,7 @@ import type {
   NotificationPermission,
   PreferenceKey,
   ReceiveMode,
+  SendOptions,
   SharedFile,
   Snapshot,
 } from './types';
@@ -40,9 +41,72 @@ export async function pickFiles(): Promise<SharedFile[]> {
 export function sendFiles(
   deviceId: string,
   files: SharedFile[],
+  options: SendOptions = {},
 ): Promise<string> {
-  return NativeCrossDrop.sendFiles(deviceId, JSON.stringify(files));
+  return NativeCrossDrop.sendFiles(
+    deviceId,
+    JSON.stringify(files),
+    JSON.stringify(options),
+  );
 }
+
+/** "Send when nearby": resolves to the queue item id; rejects 'queue_full' or 'not_paired'. */
+export function queueFiles(
+  deviceId: string,
+  files: SharedFile[],
+  options: SendOptions = {},
+): Promise<string> {
+  return NativeCrossDrop.queueFiles(
+    deviceId,
+    JSON.stringify(files),
+    JSON.stringify(options),
+  );
+}
+
+export const queueSharedText = (deviceId: string) =>
+  NativeCrossDrop.queueSharedText(deviceId);
+export const cancelQueued = (queueId: string) =>
+  NativeCrossDrop.cancelQueued(queueId);
+export const retryQueued = (queueId: string) =>
+  NativeCrossDrop.retryQueued(queueId);
+
+/** Answers a Mac's photo request with the camera ('photo') or the photo picker ('pick'). */
+export const startCapture = (requestId: string, mode: 'photo' | 'pick') =>
+  NativeCrossDrop.startCapture(requestId, mode);
+export const declineCapture = (requestId: string) =>
+  NativeCrossDrop.declineCapture(requestId);
+export const clearCaptureFocus = () => NativeCrossDrop.clearCaptureFocus();
+
+export const openPocketItem = (id: string) => NativeCrossDrop.openPocketItem(id);
+export const sharePocketItem = (id: string) =>
+  NativeCrossDrop.sharePocketItem(id);
+/** Removes from the Pocket; deleteFile also deletes the saved file. */
+export const removePocketItem = (id: string, deleteFile = false) =>
+  NativeCrossDrop.removePocketItem(id, deleteFile);
+
+export const copyClip = () => NativeCrossDrop.copyClip();
+export const dismissClip = () => NativeCrossDrop.dismissClip();
+
+/** Hosts a Drip Room; resolves to the invite URI. */
+export const startRoom = (name: string, minutes: number) =>
+  NativeCrossDrop.startRoom(name, minutes);
+
+export async function joinRoom(
+  code: string,
+): Promise<{ name: string; hostName: string | null }> {
+  return JSON.parse(await NativeCrossDrop.joinRoom(code)) as {
+    name: string;
+    hostName: string | null;
+  };
+}
+
+export const leaveRoom = () => NativeCrossDrop.leaveRoom();
+/** The hosted room's QR code as a data: URI for <Image>. */
+export async function roomQrDataUri(sizePx: number): Promise<string> {
+  return `data:image/png;base64,${await NativeCrossDrop.roomQrPng(sizePx)}`;
+}
+
+export const clearPendingTarget = () => NativeCrossDrop.clearPendingTarget();
 
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
   return (await NativeCrossDrop.requestNotificationPermission()) as NotificationPermission;

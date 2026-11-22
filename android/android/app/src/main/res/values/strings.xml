@@ -6,4 +6,11 @@
     <string name="tile_subtitle_off">Off</string>
     <string name="tile_clipboard_label">Send clipboard</string>
     <string name="shortcut_scan">Pair with a Mac</string>
+    <string name="widget_label">CrossDrop devices</string>
+    <string name="widget_title">Send with CrossDrop</string>
+    <string name="widget_description">Send to a recent paired device, or send your clipboard, in one tap.</string>
+    <string name="widget_empty">Pair a device in CrossDrop to send in one tap</string>
+    <string name="widget_clipboard">Clipboard</string>
+    <string name="widget_clipboard_description">Send clipboard with CrossDrop</string>
+    <string name="widget_send_to">Send files to %1$s</string>
 </resources>

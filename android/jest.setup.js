@@ -62,6 +62,27 @@ jest.mock('./specs/NativeCrossDrop', () => ({
     copyText: jest.fn(),
     setScreenshotOffer: jest.fn(() => Promise.resolve(true)),
     setHotspot: jest.fn(() => Promise.resolve(true)),
+    queueFiles: jest.fn(() => Promise.resolve('q-1')),
+    queueSharedText: jest.fn(() => Promise.resolve('q-2')),
+    cancelQueued: jest.fn(),
+    retryQueued: jest.fn(),
+    startCapture: jest.fn(() => Promise.resolve(true)),
+    declineCapture: jest.fn(),
+    clearCaptureFocus: jest.fn(),
+    openPocketItem: jest.fn(),
+    sharePocketItem: jest.fn(() => Promise.resolve(true)),
+    removePocketItem: jest.fn(() => Promise.resolve(true)),
+    copyClip: jest.fn(() => Promise.resolve(true)),
+    dismissClip: jest.fn(),
+    startRoom: jest.fn(() =>
+      Promise.resolve('crossdrop://room?v=1&id=AAECAwQFBgcICQoLDA0ODw'),
+    ),
+    joinRoom: jest.fn(() =>
+      Promise.resolve('{"name":"Design review","hostName":"Studio Mac"}'),
+    ),
+    leaveRoom: jest.fn(),
+    roomQrPng: jest.fn(() => Promise.resolve('iVBORw0KGgo=')),
+    clearPendingTarget: jest.fn(),
   },
 }));
 

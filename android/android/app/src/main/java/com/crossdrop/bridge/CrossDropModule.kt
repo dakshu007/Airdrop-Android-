@@ -9,9 +9,13 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import com.crossdrop.capture.CaptureActivity
+import com.crossdrop.core.Json
+import com.crossdrop.core.Protocol
 import com.crossdrop.engine.Engine
 import com.crossdrop.engine.NotificationPermissions
 import com.crossdrop.pairing.ScanActivity
+import com.crossdrop.queue.QueueFullException
 import com.crossdrop.screenshots.ScreenshotWatcher
 import com.crossdrop.share.SharedFile
 import com.crossdrop.share.SharedFiles
@@ -87,7 +91,7 @@ class CrossDropModule(private val context: ReactApplicationContext) : NativeCros
             try {
                 promise.resolve(engine.pairWithCode(code, mine))
             } catch (e: IllegalArgumentException) {
-                promise.reject("bad_code", "That isn't a CrossDrop pairing code")
+                promise.reject(codeError(e), "That isn't a valid CrossDrop code")
             } catch (e: com.crossdrop.core.ProtocolException) {
                 promise.reject(e.code.wire, e.code.wire)
             } catch (e: Exception) {
@@ -235,26 +239,194 @@ class CrossDropModule(private val context: ReactApplicationContext) : NativeCros
 
     override fun onNewIntent(intent: Intent) {}
 
-    override fun sendFiles(deviceId: String, filesJson: String, promise: Promise) {
-        val files: List<SharedFile> = try {
-            SharedFiles.listFromJson(filesJson)
-        } catch (e: Exception) {
-            promise.reject("bad_request", "Invalid file list")
-            return
-        }
-        if (files.isEmpty()) {
-            promise.reject("bad_request", "No files")
-            return
-        }
+    override fun sendFiles(deviceId: String, filesJson: String, optionsJson: String, promise: Promise) {
+        val files = parseFiles(filesJson, promise) ?: return
+        val expiresAfter = parseExpiresAfter(optionsJson, promise) ?: return
         io.execute {
             try {
-                promise.resolve(engine.send(deviceId, files))
+                promise.resolve(engine.send(deviceId, files, expiresAfter.value))
             } catch (e: IllegalStateException) {
                 promise.reject("unreachable", "That device is no longer nearby")
             } catch (e: Exception) {
                 promise.reject("internal", e.javaClass.simpleName)
             }
         }
+    }
+
+    override fun queueFiles(deviceId: String, filesJson: String, optionsJson: String, promise: Promise) {
+        val files = parseFiles(filesJson, promise) ?: return
+        val expiresAfter = parseExpiresAfter(optionsJson, promise) ?: return
+        io.execute {
+            try {
+                promise.resolve(engine.queueFiles(deviceId, files, expiresAfter.value))
+            } catch (e: QueueFullException) {
+                promise.reject("queue_full", "The send-when-nearby queue is full")
+            } catch (e: IllegalStateException) {
+                promise.reject("not_paired", "Only paired devices can be sent to later")
+            } catch (e: java.io.IOException) {
+                promise.reject("file_unreadable", "A file could not be read")
+            } catch (e: SecurityException) {
+                promise.reject("file_unreadable", "A file could not be read")
+            } catch (e: Exception) {
+                promise.reject("internal", e.javaClass.simpleName)
+            }
+        }
+    }
+
+    override fun queueSharedText(deviceId: String, promise: Promise) {
+        io.execute {
+            try {
+                promise.resolve(engine.queueSharedText(deviceId))
+            } catch (e: QueueFullException) {
+                promise.reject("queue_full", "The send-when-nearby queue is full")
+            } catch (e: IllegalStateException) {
+                promise.reject("not_paired", e.message ?: "not_paired")
+            } catch (e: Exception) {
+                promise.reject("internal", e.javaClass.simpleName)
+            }
+        }
+    }
+
+    override fun cancelQueued(queueId: String) {
+        io.execute { engine.cancelQueued(queueId) }
+    }
+
+    override fun retryQueued(queueId: String) {
+        io.execute { engine.retryQueued(queueId) }
+    }
+
+    override fun startCapture(requestId: String, mode: String, promise: Promise) {
+        if (mode != CaptureActivity.MODE_PHOTO && mode != CaptureActivity.MODE_PICK) return promise.reject("bad_request", "Unknown mode")
+        if (!engine.hasCaptureRequest(requestId)) return promise.reject("expired", "That request has expired")
+        val activity = context.currentActivity ?: return promise.reject("no_activity", "CrossDrop is not in the foreground")
+        try {
+            activity.startActivity(CaptureActivity.intent(activity, requestId, mode))
+            engine.clearCaptureFocus()
+            promise.resolve(true)
+        } catch (e: ActivityNotFoundException) {
+            promise.resolve(false)
+        }
+    }
+
+    override fun declineCapture(requestId: String) = engine.declineCapture(requestId)
+
+    override fun clearCaptureFocus() = engine.clearCaptureFocus()
+
+    override fun openPocketItem(id: String) {
+        val item = engine.pocketItem(id) ?: return
+        openFile(item.uri)
+    }
+
+    override fun sharePocketItem(id: String, promise: Promise) {
+        val item = engine.pocketItem(id) ?: return promise.resolve(false)
+        try {
+            context.startActivity(engine.shareIntent(item))
+            promise.resolve(true)
+        } catch (e: ActivityNotFoundException) {
+            promise.resolve(false)
+        } catch (e: SecurityException) {
+            promise.resolve(false)
+        }
+    }
+
+    override fun removePocketItem(id: String, deleteFile: Boolean, promise: Promise) {
+        io.execute { promise.resolve(engine.removePocketItem(id, deleteFile)) }
+    }
+
+    override fun copyClip(promise: Promise) {
+        promise.resolve(engine.copyClip())
+    }
+
+    override fun dismissClip() {
+        context.runOnUiQueueThread { engine.dismissClip() }
+    }
+
+    override fun startRoom(name: String, minutes: Double, promise: Promise) {
+        io.execute {
+            try {
+                promise.resolve(engine.startRoom(name, minutes.toInt()))
+            } catch (e: IllegalArgumentException) {
+                promise.reject("bad_request", e.message ?: "bad_request")
+            } catch (e: IllegalStateException) {
+                val code = e.message?.takeIf { it == "not_receiving" || it == "no_network" } ?: "internal"
+                promise.reject(code, code)
+            } catch (e: Exception) {
+                promise.reject("internal", e.javaClass.simpleName)
+            }
+        }
+    }
+
+    override fun joinRoom(code: String, promise: Promise) {
+        io.execute {
+            try {
+                val (name, host) = engine.joinRoom(code)
+                promise.resolve(Json.write(linkedMapOf("name" to name, "hostName" to host)))
+            } catch (e: IllegalArgumentException) {
+                promise.reject(codeError(e), "That isn't a valid Drip Room code")
+            } catch (e: com.crossdrop.core.ProtocolException) {
+                promise.reject(e.code.wire, e.code.wire)
+            } catch (e: Exception) {
+                promise.reject("internal", e.javaClass.simpleName)
+            }
+        }
+    }
+
+    override fun leaveRoom() {
+        io.execute { engine.leaveRoom() }
+    }
+
+    override fun roomQrPng(sizePx: Double, promise: Promise) {
+        io.execute {
+            try {
+                val png = engine.roomQrPng(sizePx.toInt()) ?: return@execute promise.reject("no_room", "Not hosting a room")
+                promise.resolve(png)
+            } catch (e: Exception) {
+                promise.reject("internal", e.javaClass.simpleName)
+            }
+        }
+    }
+
+    override fun clearPendingTarget() = engine.clearPendingTarget()
+
+    /** 'bad_code' | 'own_code' | 'expired' for a code that can't be used. */
+    private fun codeError(e: IllegalArgumentException): String =
+        e.message?.takeIf { it == "bad_code" || it == "own_code" || it == "expired" } ?: "bad_code"
+
+    private fun parseFiles(filesJson: String, promise: Promise): List<SharedFile>? {
+        val files: List<SharedFile> = try {
+            SharedFiles.listFromJson(filesJson)
+        } catch (e: Exception) {
+            promise.reject("bad_request", "Invalid file list")
+            return null
+        }
+        if (files.isEmpty()) {
+            promise.reject("bad_request", "No files")
+            return null
+        }
+        return files
+    }
+
+    /** Wraps the optional value so "absent" and "invalid" (null) can be told apart. */
+    private class Opt(val value: Long?)
+
+    /** SendOptions JSON: {"expiresAfter"?: seconds (60…2 592 000)}. Unknown keys are ignored. */
+    private fun parseExpiresAfter(optionsJson: String, promise: Promise): Opt? {
+        val options = try {
+            if (optionsJson.isBlank()) emptyMap<String, Any?>() else Json.parse(optionsJson) as? Map<*, *>
+        } catch (e: Exception) {
+            null
+        }
+        if (options == null) {
+            promise.reject("bad_request", "Invalid options")
+            return null
+        }
+        val raw = options["expiresAfter"] ?: return Opt(null)
+        val seconds = (raw as? Number)?.toDouble()
+        if (seconds == null || seconds % 1.0 != 0.0 || seconds < Protocol.MIN_EXPIRES_AFTER || seconds > Protocol.MAX_EXPIRES_AFTER) {
+            promise.reject("bad_request", "expiresAfter must be 60 s to 30 days")
+            return null
+        }
+        return Opt(seconds.toLong())
     }
 
     override fun respondToPairing(sessionId: String, accept: Boolean, mine: Boolean) = engine.respondToPairing(sessionId, accept, mine)

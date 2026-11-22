@@ -18,6 +18,13 @@ data class PairingCode(
     val hosts: List<String>,
 ) {
     companion object {
+        /** "pair" for a pairing code, "room" for a valid, unexpired Drip Room code, else null. */
+        fun kindOf(raw: String): String? = when {
+            parse(raw) != null -> "pair"
+            com.crossdrop.core.RoomInvite.parse(raw.trim()) != null -> "room"
+            else -> null
+        }
+
         private val HEX64 = Regex("^[0-9a-f]{64}$")
         private val TOKEN = Regex("^[A-Za-z0-9_-]{8,64}$")
         private val HOST = Regex("^[0-9A-Za-z.:%_-]{1,64}$")
