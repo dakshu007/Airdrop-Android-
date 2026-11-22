@@ -515,7 +515,7 @@ paired with, or from a device presenting a valid QR token (§9.4).
 
 ### 9.6 Limits added by this section
 
-Covers §9.1–§9.9.
+Covers §9.1–§9.10.
 
 | item | limit |
 |---|---|
@@ -532,6 +532,9 @@ Covers §9.1–§9.9.
 | room code URI | 2048 bytes, at most 8 hosts |
 | room hints in TXT `r` | 4 |
 | room joiner waiting for the room-proved `pair.confirm` | 5 s, then codes |
+| Turbo `parallel` / `join.max` | 2–4 connections per transfer, main one included |
+| Turbo connections vs. the inbound limit | each one counts (reference cores: 3 in total) |
+| Turbo join token | 16 random bytes, one transfer, until it ends |
 
 ### 9.7 Capture requests ("Take a photo with your phone")
 
@@ -649,3 +652,84 @@ scan it.
   Transfers between room members still go through the normal approval rules
   (no auto-accept).
 
+### 9.10 Turbo (parallel connections)
+
+A multi-file transfer may be spread over several TCP connections to the same
+receiver, so one slow file or one congested connection does not hold up the
+rest. It is opt-in on both sides; without agreement the transfer runs exactly
+as in §6.
+
+* **Asking.** A sender with at least two files may add `"parallel": n` to
+  `transfer.offer`, `n` an integer 2–4 (the total number of connections it
+  would like, the main one included). Any other value or type is
+  `bad_message`. Receivers ignore it on `link` / `text` offers and on
+  one-file offers.
+* **Granting.** A receiver that supports Turbo and accepts the offer may add
+  to `transfer.accept`:
+
+  ```json
+  "join": {"token": "<16 random bytes, base64url, no padding>", "max": m}
+  ```
+
+  with `2 <= m <= n`. `m` is the total number of connections it allows, main
+  one included. Every connection counts toward the receiver's inbound
+  connection limit (§7), so the reference receivers grant at most
+  `min(n, 4, files, 3 − open connections + 1)` and omit `join` when that is
+  below 2. A sender that asked rejects a malformed `join` (token not 22
+  characters of `[A-Za-z0-9_-]`, `max` outside 2…`n`) with `bad_message`; a
+  sender that did not ask ignores the field. Old receivers ignore `parallel`
+  and old senders never see `join`.
+* **Joining.** The sender may then open up to `m − 1` extra connections to the
+  address the main connection reached. Each runs the full handshake (§4). The
+  peer must already be trusted **on both sides** (the main connection paired
+  them if needed): no pairing happens on an extra connection, and a sender
+  checks that the handshake reached the same `deviceId` with the same identity
+  key before going on. Its first message is
+
+  ```json
+  {"type":"transfer.join","v":1,"transferId":"…","token":"…"}
+  ```
+
+  and the receiver answers `{"type":"transfer.joined","v":1,"transferId":"…"}`
+  or an `error` and closes that connection:
+
+  | case | code |
+  |---|---|
+  | client not trusted | `pairing_required` (`not_receiving` in "My devices only") |
+  | unknown or finished transfer, or a transfer of another device | `unexpected_message` |
+  | wrong token (compared in constant time) | `auth_failed` |
+  | `m` connections already in use | `busy` |
+
+  A refused join never affects the transfer; the sender simply carries on with
+  fewer connections. The token is valid for that one transfer until it ends.
+* **Files.** The sender assigns each file to one connection and streams it
+  whole there: `transfer.start` (with `offset` when resuming, §9.3) followed by
+  its data records, exactly as in §6.3. On a Turbo transfer `transfer.start`
+  may arrive on any of its connections and files may arrive in any order (the
+  "array order" rule of §6.1 does not apply); a `transfer.start` for a file
+  that was already started, or for an unknown `fileId`, is `bad_message`. The
+  reference senders hand out files in offer order from one shared queue, each
+  connection taking the next file when it is free, and give the extra
+  connections up to 1 s to join before the first file starts.
+* **Receiving.** The receiver verifies each file's SHA-256 and saves it as
+  today (§6.5; parallel saves never overwrite each other). It sends
+  `transfer.progress` on the connection that carries that file, and
+  `transfer.complete` on the **main** connection once every file is verified.
+  The sender then closes the extra connections; the receiver closes any that
+  are still open shortly afterwards. Inactivity (§4.5) is judged over all the
+  transfer's connections together: one connection may be idle while another is
+  busy.
+* **Failure.** `transfer.cancel` or `error` on any connection, a failed file, or
+  a dropped connection that is carrying a file ends the whole transfer: every
+  one of its connections is closed, and the receiver tells the sender why on
+  the others when it is its own error. Partial files follow §9.3 (kept for a
+  resume only when the reason is a dropped connection or a timeout). An extra
+  connection that drops while it carries nothing loses nothing; the sender
+  ignores it.
+* **Security notes.** Every connection is a fully authenticated, encrypted
+  session of its own (§4); the token only links it to the transfer and is
+  checked against the device that made the offer, so another paired device
+  cannot attach itself to someone else's transfer. Turbo changes neither the
+  approval rules nor the trust model. It can be switched off on the receiver
+  (the reference servers take a `turbo` setting); a sender that is refused
+  falls back to one connection.

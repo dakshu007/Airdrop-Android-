@@ -76,6 +76,8 @@ public struct TransferSnapshot: Equatable {
     /// Seconds after which the sender asks that the received items be deleted (§9.8).
     /// The receiving app does the deleting; the core only reports it.
     public var expiresAfter: Int64?
+    /// Connections this transfer uses, the main one included: more than 1 with Turbo (§9.10).
+    public var streams: Int
 
     public init(id: String, direction: TransferDirection, peerId: String?, peerName: String,
                 peerPlatform: String?, phase: TransferPhase, files: [TransferFileState]) {
@@ -96,6 +98,7 @@ public struct TransferSnapshot: Equatable {
         self.resumedBytes = 0
         self.requestId = nil
         self.expiresAfter = nil
+        self.streams = 1
     }
 
     public var totalBytes: Int64 { files.reduce(0) { $0 + $1.size } }

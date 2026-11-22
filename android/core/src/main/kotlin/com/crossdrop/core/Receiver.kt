@@ -16,6 +16,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /** Where received files go. Platform-specific (MediaStore on Android, a directory on the JVM). */
 interface ReceiveStorage {
@@ -106,11 +107,22 @@ class IncomingTransfer internal constructor(
 ) {
     val totalBytes: Long = files.sumOf { it.size }
     internal val cancelled = AtomicBoolean(false)
+    /** Set when the sender spreads this transfer over several connections (§9.10). */
+    @Volatile internal var group: IncomingTurbo? = null
+    /** Bytes received so far over all connections. */
+    internal val received = AtomicLong(0)
+    /** Serialises event callbacks when files arrive on several connections at once (§9.10). */
+    internal val eventLock = Any()
+
+    /** Connections this transfer used, the main one included: more than 1 with Turbo (§9.10). */
+    val streams: Int get() = group?.streams ?: 1
 
     fun cancel() {
         if (!cancelled.compareAndSet(false, true)) return
         runCatching { conn.sendControl(Message.build("transfer.cancel", "transferId" to transferId, "reason" to "user")) }
         conn.close()
+        // A Turbo transfer ends on every connection (§9.10).
+        group?.fail(ProtocolException(ErrorCode.CANCELLED, "cancelled"), conn)
     }
 }
 
@@ -128,6 +140,8 @@ class CrossDropServer(
     private val privateMode: () -> Boolean = { false },
     /** Drip Rooms this device is in (§9.9); pass the same registry to outgoing transfers. */
     val rooms: Rooms = Rooms(),
+    /** Turbo (§9.10): let a sender add connections to a multi-file transfer. Read per offer. */
+    private val turbo: () -> Boolean = { true },
 ) {
     /** Tokens for pairing QR codes shown by this device (§9.4). */
     val pairingTokens = PairingTokens()
@@ -137,6 +151,10 @@ class CrossDropServer(
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
     private val active = AtomicInteger(0)
+    private val turboGroups = TurboRegistry()
+
+    /** Inbound connections currently open (each Turbo connection counts, §9.10). */
+    val activeConnections: Int get() = active.get()
     private val pool: ExecutorService = Executors.newCachedThreadPool { r ->
         Thread(r, "crossdrop-inbound").apply { isDaemon = true }
     }
@@ -188,26 +206,40 @@ class CrossDropServer(
         private var peer: PeerInfo? = null
         private var transfer: IncomingTransfer? = null
         private var partial: PartialFile? = null
+        /** The Turbo group this (main) session owns (§9.10). */
+        private var group: IncomingTurbo? = null
+        /** The Turbo group this extra connection joined (§9.10). */
+        private var joined: IncomingTurbo? = null
 
         fun run() {
             try {
                 runInner()
             } catch (e: ProtocolException) {
-                val t = transfer
-                val error = if (t != null && t.cancelled.get()) ProtocolException(ErrorCode.CANCELLED, "cancelled") else e
-                // A dropped connection keeps the file so far for a resume (§9.3); anything else discards it.
-                if (error.code == ErrorCode.CONNECTION_LOST || error.code == ErrorCode.TIMEOUT) partial?.keepForResume() else partial?.abort()
-                if (!error.remote && error.code != ErrorCode.CANCELLED && error.code != ErrorCode.CONNECTION_LOST && !conn.isClosed) {
-                    conn.sendErrorAndClose(error.code, encrypted)
-                }
-                events.onFailed(t, peer, error)
+                fail(e)
             } catch (e: Exception) {
-                partial?.abort()
-                if (!conn.isClosed) conn.sendErrorAndClose(ErrorCode.INTERNAL, encrypted)
-                events.onFailed(transfer, peer, ProtocolException(ErrorCode.INTERNAL, e.javaClass.simpleName))
+                fail(ProtocolException(ErrorCode.INTERNAL, e.javaClass.simpleName))
             } finally {
                 conn.close()
             }
+        }
+
+        private fun fail(e: ProtocolException) {
+            val t = transfer ?: joined?.transfer
+            var error = if (t != null && t.cancelled.get()) ProtocolException(ErrorCode.CANCELLED, "cancelled") else e
+            // In a Turbo transfer the first failure on any connection decides for all of them (§9.10).
+            val g = group ?: joined
+            var first = true
+            if (g != null) {
+                first = g.fail(error, conn)
+                error = g.error ?: error
+            }
+            // A dropped connection keeps the file so far for a resume (§9.3); anything else discards it.
+            if (error.code == ErrorCode.CONNECTION_LOST || error.code == ErrorCode.TIMEOUT) partial?.keepForResume() else partial?.abort()
+            if (first && !error.remote && error.code != ErrorCode.CANCELLED && error.code != ErrorCode.CONNECTION_LOST && !conn.isClosed) {
+                conn.sendErrorAndClose(error.code, encrypted)
+            }
+            // The main session reports the transfer; an extra connection never does.
+            if (joined == null) events.onFailed(t, peer, error)
         }
 
         private fun runInner() {
@@ -273,6 +305,15 @@ class CrossDropServer(
                         handleOffer(hs.peer, msg)
                         return
                     }
+                    "transfer.join" -> {
+                        if (untrusted) {
+                            if (privateMode()) throw ProtocolException(ErrorCode.NOT_RECEIVING, "paired devices only")
+                            // No pairing on an extra connection (§9.10).
+                            throw ProtocolException(ErrorCode.PAIRING_REQUIRED, "join from unpaired device")
+                        }
+                        handleJoin(hs.peer, msg)
+                        return
+                    }
                     else -> Sessions.handleUnexpected(msg)
                 }
             }
@@ -317,11 +358,23 @@ class CrossDropServer(
             mapIo { conn.sendControl(Message.build("transfer.reject", "transferId" to transferId, "reason" to reason)) }
         }
 
+        /** An extra connection of a Turbo transfer (§9.10): check the token, then take files. */
+        private fun handleJoin(peer: PeerInfo, msg: Message) {
+            val transferId = msg.transferId()
+            val token = msg.string("token", 64)
+            val g = turboGroups.find(transferId) ?: throw ProtocolException(ErrorCode.UNEXPECTED_MESSAGE, "no such transfer")
+            g.join(conn, peer.deviceId, token)?.let { throw ProtocolException(it, "join refused") }
+            joined = g
+            mapIo { conn.sendControl(Message.build("transfer.joined", "transferId" to transferId)) }
+            receiveTurbo(g, isMain = false)
+        }
+
         private fun handleOffer(peer: PeerInfo, msg: Message) {
             val transferId = msg.transferId()
             val files = OfferFile.parseOffer(msg)
             val kind = OfferFile.parseKind(msg, files)
             val expiresAfter = if (msg.fields["expiresAfter"] == null) null else msg.long("expiresAfter", Protocol.MIN_EXPIRES_AFTER, Protocol.MAX_EXPIRES_AFTER)
+            val parallel = if (msg.fields["parallel"] == null) null else msg.long("parallel", 2, Protocol.MAX_TURBO_STREAMS.toLong()).toInt()
             val rawRequestId = msg.optString("requestId", 64)
             if (rawRequestId != null && !Protocol.isValidTransferId(rawRequestId)) throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad requestId")
             // Only an answer to a capture request we sent to this very device counts (§9.7).
@@ -369,12 +422,31 @@ class CrossDropServer(
             if (resumeAt.isNotEmpty()) {
                 (accept as MutableMap<String, Any?>)["resume"] = resumeAt.map { (id, offset) -> linkedMapOf("fileId" to id, "offset" to offset) }
             }
-            mapIo { conn.sendControl(accept) }
             val t = IncomingTransfer(transferId, peer, files, conn, kind, requestId, expiresAfter)
+            // Turbo (§9.10): offer extra connections, within the inbound connection limit.
+            if (parallel != null && kind == OfferKind.FILES && files.size >= 2 && turbo()) {
+                val max = minOf(parallel, Protocol.MAX_TURBO_STREAMS, files.size, Protocol.MAX_INBOUND_CONNECTIONS - active.get() + 1)
+                if (max >= 2) {
+                    val g = IncomingTurbo(transferId, peer.deviceId, Turbo.newToken(), max, files, resumeAt, conn, turboGroups)
+                    g.transfer = t
+                    if (turboGroups.register(g)) {
+                        group = g
+                        t.group = g
+                        (accept as MutableMap<String, Any?>)["join"] = linkedMapOf("token" to g.token, "max" to max)
+                    }
+                }
+            }
+            mapIo { conn.sendControl(accept) }
             transfer = t
             events.onTransferStarted(t)
-            if (kind == OfferKind.FILES) receiveFiles(t, resumeAt) else receiveText(t)
+            val g = group
+            when {
+                kind != OfferKind.FILES -> receiveText(t)
+                g != null -> receiveTurbo(g, isMain = true)
+                else -> receiveFiles(t, resumeAt)
+            }
             mapIo { conn.sendControl(Message.build("transfer.complete", "transferId" to transferId)) }
+            g?.complete()
             trust.touch(peer.deviceId, peer.name)
             events.onCompleted(t)
             // Give the sender a moment to read `transfer.complete` and close first.
@@ -418,80 +490,124 @@ class CrossDropServer(
         }
 
         private fun receiveFiles(t: IncomingTransfer, resumeAt: Map<Int, Long>) {
-            var totalReceived = 0L
             for ((index, file) in t.files.withIndex()) {
-                val start = nextStart(t, file)
-                // The sender either continues where we offered (§9.3) or starts from 0.
-                val offset = (start.fields["offset"] as? Long) ?: 0L
-                if (offset != 0L && offset != resumeAt[file.fileId]) throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad offset")
+                receiveOne(t, index, nextStart(t, file), resumeAt, null)
+            }
+        }
 
-                val name = Sanitizer.fileName(file.name)
-                val key = resumeKey(t.peer, file)
-                val p = try {
-                    storage.begin(name, file.mime, file.size, file.path, key, offset)
-                } catch (e: IOException) {
-                    throw ProtocolException(ErrorCode.STORAGE_ERROR, "cannot create file")
-                }
-                partial = p
-                val md = MessageDigest.getInstance("SHA-256")
-                var received = 0L
-                if (offset > 0) {
-                    // Hash the bytes kept from last time, so the check still covers the whole file.
-                    try {
-                        val existing = p.openExisting() ?: throw IOException("nothing to resume")
-                        existing.use { input ->
-                            val buf = ByteArray(Protocol.MAX_DATA_BODY)
-                            while (received < offset) {
-                                val n = input.read(buf, 0, minOf(buf.size.toLong(), offset - received).toInt())
-                                if (n < 0) break
-                                md.update(buf, 0, n)
-                                received += n
-                            }
-                        }
-                    } catch (e: IOException) {
-                        throw ProtocolException(ErrorCode.STORAGE_ERROR, "cannot read kept part")
+        /**
+         * Turbo (§9.10): files arrive on any of the transfer's connections, in any order.
+         * The main session returns once every file is verified; an extra connection returns
+         * once the transfer has ended. Inactivity is judged over all connections together.
+         */
+        private fun receiveTurbo(g: IncomingTurbo, isMain: Boolean) {
+            val t = g.transfer
+            while (!(if (isMain) g.allDone else g.finished)) {
+                val item = try {
+                    conn.next(TURBO_POLL_MS)
+                } catch (e: ProtocolException) {
+                    if (e.code == ErrorCode.TIMEOUT) {
+                        if (System.currentTimeMillis() - g.lastActivity > Protocol.STREAM_IDLE_TIMEOUT_MS) throw e
+                        continue
                     }
-                    if (received != offset) throw ProtocolException(ErrorCode.STORAGE_ERROR, "kept part is shorter")
-                    totalReceived += offset
+                    // Closed because the transfer ended (finished, or failed elsewhere).
+                    if (!isMain && g.finished) return
+                    throw e
                 }
-                var lastProgressAt = 0L
-                while (received < file.size) {
-                    when (val item = conn.next(Protocol.STREAM_IDLE_TIMEOUT_MS)) {
-                        is Connection.Incoming.Data -> {
-                            if (received + item.length > file.size) throw ProtocolException(ErrorCode.BAD_MESSAGE, "more data than announced")
-                            try {
-                                p.output.write(item.buffer, item.offset, item.length)
-                            } catch (e: IOException) {
-                                throw ProtocolException(ErrorCode.STORAGE_ERROR, "write failed")
-                            }
-                            md.update(item.buffer, item.offset, item.length)
-                            received += item.length
-                            totalReceived += item.length
-                            events.onProgress(t, index, received, totalReceived)
-                            val now = System.currentTimeMillis()
-                            if (now - lastProgressAt >= Protocol.PROGRESS_INTERVAL_MS) {
-                                lastProgressAt = now
-                                sendProgress(t, file, received)
-                            }
-                        }
-                        is Connection.Incoming.Control -> Sessions.handleUnexpected(item.message)
-                        else -> throw ProtocolException(ErrorCode.UNEXPECTED_MESSAGE)
+                when (item) {
+                    is Connection.Incoming.Local -> continue
+                    is Connection.Incoming.Control -> {
+                        val start = item.message
+                        if (start.type != "transfer.start") Sessions.handleUnexpected(start)
+                        if (start.transferId() != t.transferId) throw ProtocolException(ErrorCode.BAD_MESSAGE, "wrong transferId")
+                        val index = g.claim(start.long("fileId", 0, Protocol.MAX_FILES.toLong()).toInt())
+                        receiveOne(t, index, start, g.resumeAt, g)
+                        g.fileDone()
                     }
+                    else -> throw ProtocolException(ErrorCode.BAD_MESSAGE, "data outside a file")
                 }
+            }
+            // Completed: let the sender close this extra connection first (it does once it read `transfer.complete`).
+            if (!isMain && g.error == null) runCatching { conn.next(2_000) }
+        }
+
+        /** Receives, verifies and saves file [index] after its `transfer.start`. */
+        private fun receiveOne(t: IncomingTransfer, index: Int, start: Message, resumeAt: Map<Int, Long>, g: IncomingTurbo?) {
+            val file = t.files[index]
+            // The sender either continues where we offered (§9.3) or starts from 0.
+            val offset = (start.fields["offset"] as? Long) ?: 0L
+            if (offset != 0L && offset != resumeAt[file.fileId]) throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad offset")
+
+            val name = Sanitizer.fileName(file.name)
+            val key = resumeKey(t.peer, file)
+            val p = try {
+                storage.begin(name, file.mime, file.size, file.path, key, offset)
+            } catch (e: IOException) {
+                throw ProtocolException(ErrorCode.STORAGE_ERROR, "cannot create file")
+            }
+            partial = p
+            val md = MessageDigest.getInstance("SHA-256")
+            var received = 0L
+            if (offset > 0) {
+                // Hash the bytes kept from last time, so the check still covers the whole file.
                 try {
-                    p.output.close()
+                    val existing = p.openExisting() ?: throw IOException("nothing to resume")
+                    existing.use { input ->
+                        val buf = ByteArray(Protocol.MAX_DATA_BODY)
+                        while (received < offset) {
+                            val n = input.read(buf, 0, minOf(buf.size.toLong(), offset - received).toInt())
+                            if (n < 0) break
+                            md.update(buf, 0, n)
+                            received += n
+                        }
+                    }
                 } catch (e: IOException) {
-                    throw ProtocolException(ErrorCode.STORAGE_ERROR, "close failed")
+                    throw ProtocolException(ErrorCode.STORAGE_ERROR, "cannot read kept part")
                 }
-                if (md.digest().toHex() != file.sha256) throw ProtocolException(ErrorCode.INTEGRITY_FAILED, "sha256 mismatch")
-                val saved = try {
-                    p.commit()
-                } catch (e: IOException) {
-                    throw ProtocolException(ErrorCode.STORAGE_ERROR, "commit failed")
+                if (received != offset) throw ProtocolException(ErrorCode.STORAGE_ERROR, "kept part is shorter")
+                t.received.addAndGet(offset)
+            }
+            var lastProgressAt = 0L
+            while (received < file.size) {
+                when (val item = conn.next(Protocol.STREAM_IDLE_TIMEOUT_MS)) {
+                    is Connection.Incoming.Data -> {
+                        if (received + item.length > file.size) throw ProtocolException(ErrorCode.BAD_MESSAGE, "more data than announced")
+                        try {
+                            p.output.write(item.buffer, item.offset, item.length)
+                        } catch (e: IOException) {
+                            throw ProtocolException(ErrorCode.STORAGE_ERROR, "write failed")
+                        }
+                        md.update(item.buffer, item.offset, item.length)
+                        received += item.length
+                        val total = t.received.addAndGet(item.length.toLong())
+                        g?.touch()
+                        synchronized(t.eventLock) { events.onProgress(t, index, received, total) }
+                        val now = System.currentTimeMillis()
+                        if (now - lastProgressAt >= Protocol.PROGRESS_INTERVAL_MS) {
+                            lastProgressAt = now
+                            sendProgress(t, file, received)
+                        }
+                    }
+                    is Connection.Incoming.Control -> Sessions.handleUnexpected(item.message)
+                    is Connection.Incoming.Local -> continue
+                    else -> throw ProtocolException(ErrorCode.UNEXPECTED_MESSAGE)
                 }
-                partial = null
-                sendProgress(t, file, received)
-                events.onProgress(t, index, received, totalReceived)
+            }
+            try {
+                p.output.close()
+            } catch (e: IOException) {
+                throw ProtocolException(ErrorCode.STORAGE_ERROR, "close failed")
+            }
+            if (md.digest().toHex() != file.sha256) throw ProtocolException(ErrorCode.INTEGRITY_FAILED, "sha256 mismatch")
+            val saved = try {
+                p.commit()
+            } catch (e: IOException) {
+                throw ProtocolException(ErrorCode.STORAGE_ERROR, "commit failed")
+            }
+            partial = null
+            sendProgress(t, file, received)
+            synchronized(t.eventLock) {
+                events.onProgress(t, index, received, t.received.get())
                 events.onFileSaved(t, index, saved)
             }
         }
@@ -514,6 +630,8 @@ class CrossDropServer(
  * directory or follow symlinks; interrupted files are kept for a day to resume (§9.3).
  */
 class DirectoryStorage(private val dir: Path) : ReceiveStorage {
+    private val commitLock = Any()
+
     init {
         Files.createDirectories(dir)
         // Drop kept parts older than the resume window.
@@ -568,7 +686,10 @@ class DirectoryStorage(private val dir: Path) : ReceiveStorage {
 
             override fun openExisting() = if (resumeFrom > 0) Files.newInputStream(temp) else null
 
-            override fun commit(): SavedFile {
+            // Files of one Turbo transfer (§9.10) commit concurrently: pick a free name under a lock.
+            override fun commit(): SavedFile = synchronized(commitLock) { commitUnderLock() }
+
+            private fun commitUnderLock(): SavedFile {
                 val target = folder(path)
                 var n = 0
                 while (true) {
@@ -622,3 +743,6 @@ class DirectoryStorage(private val dir: Path) : ReceiveStorage {
         const val RESUME_PREFIX = ".crossdrop-resume-"
     }
 }
+
+/** How often a Turbo session re-checks the shared transfer state while its connection is quiet (§9.10). */
+private const val TURBO_POLL_MS = 5_000L

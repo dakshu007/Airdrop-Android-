@@ -29,10 +29,12 @@ func usage() -> Never {
                          [--path <a/b>] [--kind link|text --text <s>] [--qr <token>:<fingerprint>]
                          [--die-after <bytes>]                    (exit abruptly mid-transfer)
                          [--expires-after <seconds>] [--room <crossdrop://room URI>] [--request-id <id>]
+                         [--turbo <n>]                            (up to n connections for several files)
       crossdrop-cli capture --host <h> --port <p> --identity <file> --listen <port> --dir <dir> [--kind photo|pick]
     output: SAS <code>, RECEIVED <name> <sha256>, TEXT <kind> <base64>, RESUMED <bytes>,
             COMPLETE <id>, LISTENING <port>, PROMPT <id>, CAPTURE <kind> <requestId>,
-            ACK <requestId>, REPLY <requestId>, EXPIRES <seconds>; errors go to stderr.
+            ACK <requestId>, REPLY <requestId>, EXPIRES <seconds>,
+            STREAMS <n> (connections a --turbo send used); errors go to stderr.
 
     """.utf8))
     exit(2)
@@ -250,11 +252,16 @@ case "send":
         guard let value = Int64(text) else { usage() }
         expiresAfter = value
     }
+    var turbo = 1
+    if let text = options.values["turbo"] {
+        guard let value = Int(text), (1...ProtocolConstants.maxTurboStreams).contains(value) else { usage() }
+        turbo = value
+    }
     let transfer = OutgoingTransfer(endpoint: .hostPort(host: NWEndpoint.Host(host), port: port),
                                     peerName: host, peerId: nil, peerPlatform: nil, files: files,
                                     identity: identity, local: local, trust: trust, delegate: delegate,
                                     kind: kind, qr: qr, requestId: options.values["request-id"],
-                                    expiresAfter: expiresAfter, room: room)
+                                    expiresAfter: expiresAfter, room: room, turbo: turbo)
     if let limit = options.values["die-after"].flatMap(Int64.init) {
         // Simulates a sender that vanishes mid-transfer (resume test).
         transfer.onChunkSent = { sent in if sent >= limit { _exit(3) } }
@@ -263,6 +270,7 @@ case "send":
         let result = await transfer.run()
         if result.resumedBytes > 0 { emit("RESUMED \(result.resumedBytes)") }
         if result.phase == .completed {
+            if options.values["turbo"] != nil { emit("STREAMS \(result.streams)") }
             emit("COMPLETE \(result.id)")
             exit(0)
         }

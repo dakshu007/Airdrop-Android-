@@ -24,15 +24,19 @@ public final class CrossDropServer {
         /// Drip Rooms this device is in (§9.9); pass the same registry to outgoing transfers.
         /// Their hints are advertised (TXT `r`) on the next `start` / `refreshAdvertisement`.
         public var rooms: Rooms
+        /// Turbo (§9.10): let a sender add connections to a multi-file transfer. Read per offer.
+        public var turbo: () -> Bool
 
         public init(identity: DeviceIdentity, local: LocalInfo, trust: TrustProvider, destination: @escaping () -> URL,
-                    privateMode: @escaping () -> Bool = { false }, rooms: Rooms = Rooms()) {
+                    privateMode: @escaping () -> Bool = { false }, rooms: Rooms = Rooms(),
+                    turbo: @escaping () -> Bool = { true }) {
             self.identity = identity
             self.local = local
             self.trust = trust
             self.destination = destination
             self.privateMode = privateMode
             self.rooms = rooms
+            self.turbo = turbo
         }
     }
 
@@ -51,6 +55,8 @@ public final class CrossDropServer {
     private var listener: NWListener?
     private var sessions: [String: IncomingSession] = [:]
     private var running = false
+    /// Turbo transfers that accept extra connections (§9.10).
+    private let turboRegistry = TurboRegistry()
 
     public init(configuration: Configuration) {
         self.configuration = configuration
@@ -185,7 +191,9 @@ public final class CrossDropServer {
                                       destination: config.destination,
                                       isReceiving: { [weak self] in self?.isRunning() ?? false },
                                       privateMode: config.privateMode, pairingTokens: pairingTokens,
-                                      rooms: config.rooms, captureRequests: captureRequests)
+                                      rooms: config.rooms, captureRequests: captureRequests,
+                                      turboRegistry: turboRegistry, turboEnabled: config.turbo,
+                                      activeConnections: { [weak self] in self?.activeConnectionCount ?? 1 })
         lock.lock()
         sessions[session.id] = session
         lock.unlock()

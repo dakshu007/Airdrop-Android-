@@ -143,7 +143,7 @@ final class LoopbackTests: XCTestCase {
         let port: UInt16
     }
 
-    private func makeRig(privateMode: Bool = false) async throws -> Rig {
+    private func makeRig(privateMode: Bool = false, turbo: Bool = true) async throws -> Rig {
         let serverIdentity = DeviceIdentity.generate()
         let serverTrust = InMemoryTrustStore()
         let serverDelegate = TestDelegate()
@@ -151,7 +151,7 @@ final class LoopbackTests: XCTestCase {
         let server = CrossDropServer(configuration: .init(identity: serverIdentity,
                                                           local: LocalInfo(name: "Test Mac", appVersion: "test"),
                                                           trust: serverTrust, destination: { inbox },
-                                                          privateMode: { privateMode }))
+                                                          privateMode: { privateMode }, turbo: { turbo }))
         server.delegate = serverDelegate
         let port = try await startServer(server)
         return Rig(server: server, serverIdentity: serverIdentity, serverTrust: serverTrust,
@@ -164,13 +164,14 @@ final class LoopbackTests: XCTestCase {
     }
 
     private func transfer(_ rig: Rig, outgoing: [OutgoingFile], kind: OfferKind = .files, qr: QrPairing? = nil,
-                          identity: DeviceIdentity? = nil, expiresAfter: Int64? = nil, room: Room? = nil) -> OutgoingTransfer {
+                          identity: DeviceIdentity? = nil, expiresAfter: Int64? = nil, room: Room? = nil,
+                          turbo: Int = 1) -> OutgoingTransfer {
         OutgoingTransfer(endpoint: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: rig.port)!),
                          peerName: "server", peerId: nil, peerPlatform: nil,
                          files: outgoing,
                          identity: identity ?? rig.clientIdentity, local: LocalInfo(name: "Test Client", appVersion: "test"),
                          trust: identity == nil ? rig.clientTrust : InMemoryTrustStore(), delegate: rig.clientDelegate,
-                         kind: kind, qr: qr, expiresAfter: expiresAfter, room: room)
+                         kind: kind, qr: qr, expiresAfter: expiresAfter, room: room, turbo: turbo)
     }
 
     /// The requester's own receiver (same identity and trust as the rig's client), which
@@ -656,5 +657,188 @@ final class LoopbackTests: XCTestCase {
         let result = await transfer(rig, outgoing: [OutgoingFile(url: file)]).run()
         XCTAssertEqual(result.phase, .completed, "error: \(String(describing: result.error))")
         XCTAssertEqual(rig.serverDelegate.seenCodes, [])
+    }
+
+    // MARK: §9.10 Turbo
+
+    /// Thread-safe "only once" switch for callbacks that arrive on background threads.
+    private final class Once {
+        private let lock = NSLock()
+        private var done = false
+
+        func claim() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            if done { return false }
+            done = true
+            return true
+        }
+    }
+
+    private func makeZeroFile(_ name: String, bytes: Int) throws -> URL {
+        let url = workDir.appendingPathComponent("out").appendingPathComponent(name)
+        try Data(count: bytes).write(to: url)
+        return url
+    }
+
+    private func waitForIdle(_ rig: Rig) async throws {
+        for _ in 0..<250 where rig.server.activeConnectionCount > 0 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
+    /// Raw `transfer.join` as the rig's (paired) client; returns the server's answer.
+    private func rawJoin(_ rig: Rig, transferId: String, token: String) async throws -> WireMessage {
+        let transport = NWTransport.connect(to: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: rig.port)!))
+        let channel = SecureChannel(transport: transport)
+        defer { transport.close() }
+        try await transport.start(timeout: 5)
+        _ = try await Handshake.runClient(channel: channel, identity: rig.clientIdentity,
+                                          local: LocalInfo(name: "Test Client", appVersion: "test"), trust: rig.clientTrust)
+        try await channel.sendControl(WireMessage.make("transfer.join", ["transferId": transferId, "token": token]))
+        return try await channel.receiveControl(timeout: 5)
+    }
+
+    func testTurboSpreadsFilesOverThreeConnections() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        let sizes = [0, 1, 700_000, 1_000_003, 900_000]
+        var urls: [URL] = []
+        for (index, size) in sizes.enumerated() {
+            urls.append(try makeFile("turbo-\(index).bin", bytes: size))
+        }
+        let result = await transfer(rig, outgoing: urls.map { OutgoingFile(url: $0) }, turbo: 3).run()
+        XCTAssertEqual(result.phase, .completed, "error: \(String(describing: result.error))")
+        XCTAssertEqual(result.streams, 3)
+        let incoming = try await rig.serverDelegate.waitForFinished()
+        XCTAssertEqual(incoming.phase, .completed)
+        XCTAssertEqual(incoming.streams, 3)
+        XCTAssertEqual(rig.serverDelegate.seenCodes.count, 1, "the first connection pairs as usual")
+        for url in urls {
+            XCTAssertEqual(try Data(contentsOf: inbox.appendingPathComponent(url.lastPathComponent)), try Data(contentsOf: url))
+        }
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: inbox.path).filter { $0.hasSuffix(".partial") }
+        XCTAssertEqual(leftovers, [])
+        try await waitForIdle(rig)
+        XCTAssertEqual(rig.server.activeConnectionCount, 0)
+    }
+
+    func testReceiverWithoutTurboUsesOneConnection() async throws {
+        let rig = try await makeRig(turbo: false)
+        defer { rig.server.stop() }
+        var urls: [URL] = []
+        for index in 1...3 {
+            urls.append(try makeFile("plain-\(index).bin", bytes: 200_000 * index))
+        }
+        let result = await transfer(rig, outgoing: urls.map { OutgoingFile(url: $0) }, turbo: 3).run()
+        XCTAssertEqual(result.phase, .completed, "error: \(String(describing: result.error))")
+        XCTAssertEqual(result.streams, 1)
+        let incoming = try await rig.serverDelegate.waitForFinished()
+        XCTAssertEqual(incoming.streams, 1)
+        for url in urls {
+            XCTAssertEqual(try Data(contentsOf: inbox.appendingPathComponent(url.lastPathComponent)), try Data(contentsOf: url))
+        }
+
+        // `parallel` on the offer and `join` on the accept are validated.
+        let sha = String(repeating: "a", count: 64)
+        func offer(_ parallel: Any?) -> WireMessage {
+            var fields: [String: Any] = [
+                "transferId": "abcdefgh-1234",
+                "files": [["fileId": 0, "name": "a", "size": 1, "sha256": sha],
+                          ["fileId": 1, "name": "b", "size": 1, "sha256": sha]],
+            ]
+            if let parallel = parallel { fields["parallel"] = parallel }
+            return WireMessage(type: "transfer.offer", version: 1, fields: fields)
+        }
+        XCTAssertEqual(try TransferOffer.parse(offer(2)).parallel, 2)
+        XCTAssertNil(try TransferOffer.parse(offer(nil)).parallel)
+        let badValues: [Any] = [1, 5, "3", 2.5]
+        for bad in badValues {
+            XCTAssertThrowsError(try TransferOffer.parse(offer(bad)))
+        }
+        let encoded = TransferOffer(transferId: "abcdefgh-1234", files: [], parallel: 3).toMessage()
+        XCTAssertEqual(encoded["parallel"] as? Int, 3)
+
+        let token = Turbo.newToken()
+        XCTAssertTrue(Turbo.isValidToken(token))
+        func accept(_ join: [String: Any]) -> WireMessage {
+            WireMessage(type: "transfer.accept", version: 1, fields: ["transferId": "abcdefgh-1234", "join": join])
+        }
+        XCTAssertEqual(try Turbo.parseJoin(accept(["token": token, "max": 3]), requested: 3)?.max, 3)
+        XCTAssertNil(try Turbo.parseJoin(accept(["token": token, "max": 3]), requested: nil), "ignored when not asked for")
+        XCTAssertThrowsError(try Turbo.parseJoin(accept(["token": token, "max": 4]), requested: 3))
+        XCTAssertThrowsError(try Turbo.parseJoin(accept(["token": token, "max": 1]), requested: 3))
+        XCTAssertThrowsError(try Turbo.parseJoin(accept(["token": "short", "max": 2]), requested: 3))
+    }
+
+    func testCancelDuringTurboClosesEveryConnection() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        var urls: [URL] = []
+        for index in 1...3 {
+            urls.append(try makeZeroFile("big-\(index).bin", bytes: 16_000_000))
+        }
+        let outgoing = transfer(rig, outgoing: urls.map { OutgoingFile(url: $0) }, turbo: 3)
+        // Slow the stream down so the cancel lands mid-transfer.
+        outgoing.onChunkSent = { _ in _ = usleep(10_000) }
+        let once = Once()
+        rig.clientDelegate.onUpdate = { snapshot in
+            if snapshot.streams == 3, once.claim() {
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { outgoing.cancel() }
+            }
+        }
+        let result = await outgoing.run()
+        XCTAssertEqual(result.phase, .cancelled)
+        XCTAssertEqual(result.streams, 3)
+        let incoming = try await rig.serverDelegate.waitForFinished()
+        XCTAssertTrue(incoming.phase == .cancelled || incoming.phase == .failed, "got \(incoming.phase)")
+        XCTAssertEqual(rig.serverDelegate.finished.count, 1, "reported once")
+        // Every connection of the transfer closes, and no temporary file is left behind.
+        try await waitForIdle(rig)
+        XCTAssertEqual(rig.server.activeConnectionCount, 0)
+        let temporary = try FileManager.default.contentsOfDirectory(atPath: inbox.path)
+            .filter { $0.hasSuffix(".partial") && !$0.hasPrefix(ResumeStore.prefix) }
+        XCTAssertEqual(temporary, [])
+    }
+
+    func testBadJoinIsRefusedAndTheTransferCarriesOn() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        try await pairClientWithServer(rig)
+        try await waitForIdle(rig)
+
+        // No such transfer.
+        let unknown = try await rawJoin(rig, transferId: "no-such-transfer", token: String(repeating: "A", count: 22))
+        XCTAssertEqual(unknown.type, "error")
+        XCTAssertEqual(unknown.string("code"), ErrorCode.unexpectedMessage)
+        try await waitForIdle(rig)
+
+        let first = try makeFile("first.bin", bytes: 2_000_000)
+        let second = try makeFile("second.bin", bytes: 100_000)
+        let outgoing = transfer(rig, outgoing: [OutgoingFile(url: first), OutgoingFile(url: second)], turbo: 2)
+        let gate = DispatchSemaphore(value: 0)
+        outgoing.onChunkSent = { sent in
+            // Hold the big file after its first record until the bad join has been tried.
+            if sent == Int64(ProtocolConstants.maxDataBody) { _ = gate.wait(timeout: .now() + 10) }
+        }
+        let running = Task { await outgoing.run() }
+        for _ in 0..<250 where !(outgoing.snapshot.streams == 2 && rig.server.activeConnectionCount == 2) {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(outgoing.snapshot.streams, 2)
+
+        // Right transfer, wrong token: refused, and the transfer is not affected.
+        let wrong = try await rawJoin(rig, transferId: outgoing.id, token: String(repeating: "B", count: 22))
+        XCTAssertEqual(wrong.type, "error")
+        XCTAssertEqual(wrong.string("code"), ErrorCode.authFailed)
+
+        gate.signal()
+        let result = await running.value
+        XCTAssertEqual(result.phase, .completed, "error: \(String(describing: result.error))")
+        let incoming = try await rig.serverDelegate.waitForFinished(count: 2)
+        XCTAssertEqual(incoming.phase, .completed)
+        XCTAssertEqual(incoming.streams, 2)
+        XCTAssertEqual(try Data(contentsOf: inbox.appendingPathComponent("first.bin")), try Data(contentsOf: first))
+        XCTAssertEqual(try Data(contentsOf: inbox.appendingPathComponent("second.bin")), try Data(contentsOf: second))
     }
 }

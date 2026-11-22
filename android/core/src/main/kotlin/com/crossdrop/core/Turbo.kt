@@ -124,7 +124,10 @@ internal class IncomingTurbo(
         }
     }
 
-    /** Every file is verified and `transfer.complete` went out: release the side connections. */
+    /**
+     * Every file is verified and `transfer.complete` went out: wakes the side sessions, which
+     * give the sender a moment to close each connection first (it does once it read the complete).
+     */
     fun complete() {
         val open = synchronized(lock) {
             if (finished) return
@@ -212,13 +215,16 @@ internal class OutgoingTurbo(val main: Connection, fileCount: Int, sideAttempts:
         settled.await(ms, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 
-    /** Records the first failure, closes the extra connections and wakes the main thread. */
-    fun fail(e: ProtocolException): Boolean {
+    /**
+     * Records the first failure, closes the extra connections and (from another thread)
+     * wakes the main thread, which reports it. False when a failure was already recorded.
+     */
+    fun fail(e: ProtocolException, wakeMain: Boolean = true): Boolean {
         if (!failed.compareAndSet(false, true)) return false
         error = e
         ended = true
         sides.forEach { it.close() }
-        if (!main.tryInject(Turbo.Wake)) main.close()
+        if (wakeMain && !main.tryInject(Turbo.Wake)) main.close()
         return true
     }
 

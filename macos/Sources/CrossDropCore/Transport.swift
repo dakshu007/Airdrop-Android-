@@ -211,6 +211,12 @@ public final class NWTransport {
         lock.unlock()
     }
 
+    /// Counts as activity for the inactivity timeout of a pending read: the connections
+    /// of one Turbo transfer keep each other alive while any of them moves data (§9.10).
+    func keepAlive() {
+        touch()
+    }
+
     private func makeWatchdog(timeout: TimeInterval) -> DispatchSourceTimer {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 0.5, repeating: 0.5)

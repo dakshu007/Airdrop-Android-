@@ -174,14 +174,17 @@ public struct TransferOffer: Equatable {
     public let requestId: String?
     /// Seconds after which the sender asks that the received items be deleted (§9.8).
     public let expiresAfter: Int64?
+    /// Turbo (§9.10): connections the sender would like to use, 2–4; nil = one.
+    public let parallel: Int?
 
     public init(transferId: String, files: [OfferedFile], kind: OfferKind = .files,
-                requestId: String? = nil, expiresAfter: Int64? = nil) {
+                requestId: String? = nil, expiresAfter: Int64? = nil, parallel: Int? = nil) {
         self.transferId = transferId
         self.files = files
         self.kind = kind
         self.requestId = requestId
         self.expiresAfter = expiresAfter
+        self.parallel = parallel
     }
 
     public var totalBytes: Int64 { files.reduce(0) { $0 + $1.size } }
@@ -255,8 +258,16 @@ public struct TransferOffer: Equatable {
             }
             expiresAfter = value
         }
+        var parallel: Int? = nil
+        if let rawParallel = message.fields["parallel"], !(rawParallel is NSNull) {
+            guard let value = JSONValue.int(rawParallel),
+                  value >= 2, value <= Int64(ProtocolConstants.maxTurboStreams) else {
+                throw bad("invalid parallel")
+            }
+            parallel = Int(value)
+        }
         return TransferOffer(transferId: transferId, files: files, kind: kind,
-                             requestId: requestId, expiresAfter: expiresAfter)
+                             requestId: requestId, expiresAfter: expiresAfter, parallel: parallel)
     }
 
     /// Splits a `path` field into folder names (§9.1). Each part is sanitised like a
@@ -289,6 +300,7 @@ public struct TransferOffer: Equatable {
         if kind != .files { fields["kind"] = kind.rawValue }
         if let requestId = requestId { fields["requestId"] = requestId }
         if let expiresAfter = expiresAfter { fields["expiresAfter"] = expiresAfter }
+        if let parallel = parallel { fields["parallel"] = parallel }
         return WireMessage.make("transfer.offer", fields)
     }
 }

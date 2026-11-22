@@ -76,7 +76,7 @@ fail_with_logs() { echo "$1"; for f in "$WORK"/*.log; do echo "--- $f"; cat "$f"
 
 # v1 extensions (docs/protocol-v1.md §9): links, folders, QR pairing with
 # "my devices only", resuming a dropped transfer, capture requests, expiring
-# drops and Drip Rooms.
+# drops, Drip Rooms and Turbo (parallel connections).
 run_extras() {
   local name="$1" receiver="$2" sender="$3" port="$4"
   echo "=== extras $name: $(basename "$sender") -> $(basename "$receiver") ==="
@@ -152,7 +152,21 @@ run_extras() {
   grep -q '^COMPLETE ' "$WORK/$name-room-recv.log" || fail_with_logs "room transfer not received"
   kill "$RPID" 2>/dev/null || true; wait "$RPID" 2>/dev/null || true
 
-  echo "ok: link, folder, QR + my-devices-only, resume ($resumed), capture, expiring drop, room"
+  # Turbo (§9.10): four files over three connections; every file arrives with the sender's hash.
+  start_receiver "$name-turbo" "$receiver" $((port + 8)) --once
+  local turbo_files=("$WORK/in/random 5MB.bin" "$WORK/in/big.bin" "$WORK/in/one-byte.bin" "$WORK/in/empty.txt")
+  "$sender" send --host 127.0.0.1 --port $((port + 8)) --identity "$WORK/$name-turbo.key" --turbo 3 "${turbo_files[@]}" \
+    > "$WORK/$name-turbo-send.log" 2>&1 || fail_with_logs "turbo send failed"
+  wait "$RPID" || fail_with_logs "turbo receiver failed"
+  grep -q '^STREAMS 3$' "$WORK/$name-turbo-send.log" || fail_with_logs "turbo did not use three connections"
+  local turbo_expected; turbo_expected=$(for f in "${turbo_files[@]}"; do shasum -a 256 "$f" | awk '{print $1}'; done | sort)
+  diff <(echo "$turbo_expected") <(grep '^RECEIVED ' "$WORK/$name-turbo-recv.log" | awk '{print $NF}' | sort) \
+    || fail_with_logs "turbo hash mismatch"
+  diff <(echo "$turbo_expected") <(for f in "$WORK/out-$name-turbo"/*; do shasum -a 256 "$f" | awk '{print $1}'; done | sort) \
+    || { ls -la "$WORK/out-$name-turbo"; fail_with_logs "turbo files on disk differ"; }
+  if ls -a "$WORK/out-$name-turbo" | grep -q '\.partial$'; then fail_with_logs "turbo left a partial file"; fi
+
+  echo "ok: link, folder, QR + my-devices-only, resume ($resumed), capture, expiring drop, room, turbo x3"
 }
 
 if [[ "${INTEROP_EXTRAS_ONLY:-}" != "1" ]]; then

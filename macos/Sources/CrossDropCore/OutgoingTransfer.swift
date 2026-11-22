@@ -43,6 +43,9 @@ public final class OutgoingTransfer {
     public let requestId: String?
     /// Asks the receiver to delete what it saved after this many seconds (§9.8).
     public let expiresAfter: Int64?
+    /// Turbo (§9.10): up to this many connections for a multi-file transfer, 1 (off) to 4.
+    /// Used only when the receiver agrees; otherwise the transfer runs on one connection.
+    public let turbo: Int
 
     private let identity: DeviceIdentity
     private let local: LocalInfo
@@ -60,6 +63,11 @@ public final class OutgoingTransfer {
     private let room: Room?
     /// Bytes the receiver already holds per file, from `transfer.accept` (§9.3).
     private var resumeAt: [Int64: Int64] = [:]
+    /// What the receiver granted for Turbo in `transfer.accept` (§9.10).
+    private var turboJoin: Turbo.Join?
+    private var turboGroup: OutgoingTurbo?
+    /// Turbo: receiver-confirmed bytes per file (files arrive out of order).
+    private var confirmed: [Int64: Int64] = [:]
     /// The numeric address that answered, once connected (for "last address that worked", §9.5).
     public private(set) var connectedAddress: (host: String, port: UInt16)?
     /// Test hook: called after each data record with the bytes sent so far for the file.
@@ -69,8 +77,9 @@ public final class OutgoingTransfer {
                 files: [OutgoingFile], identity: DeviceIdentity, local: LocalInfo, trust: TrustProvider,
                 delegate: CrossDropDelegate?, id: String = UUID().uuidString,
                 kind: OfferKind = .files, qr: QrPairing? = nil,
-                requestId: String? = nil, expiresAfter: Int64? = nil, room: Room? = nil) {
+                requestId: String? = nil, expiresAfter: Int64? = nil, room: Room? = nil, turbo: Int = 1) {
         self.id = id
+        self.turbo = turbo
         self.endpoint = endpoint
         self.files = files
         self.kind = kind
@@ -107,8 +116,10 @@ public final class OutgoingTransfer {
         let channel = self.channel
         let decision = pendingDecision
         let notify = offerSent
+        let group = turboGroup
         lock.unlock()
         decision?.resolve(false)
+        group?.cancelSides(transferId: id)
         guard let open = channel else { return }
         Task {
             if notify, open.isEncrypted {
@@ -140,6 +151,9 @@ public final class OutgoingTransfer {
             if let seconds = expiresAfter,
                !(ProtocolConstants.minExpiresAfter...ProtocolConstants.maxExpiresAfter).contains(seconds) {
                 throw CrossDropError.local(ErrorCode.internalError, "expiresAfter out of range")
+            }
+            guard (1...ProtocolConstants.maxTurboStreams).contains(turbo) else {
+                throw CrossDropError.local(ErrorCode.internalError, "turbo out of range")
             }
             let offerFiles = try prepare()
             try checkCancelled()
@@ -173,13 +187,19 @@ public final class OutgoingTransfer {
                 paired = true
             }
 
+            // Turbo (§9.10): ask for extra connections when there is more than one file.
+            let parallel: Int? = (turbo >= 2 && kind == .files && offerFiles.count >= 2) ? min(turbo, offerFiles.count) : nil
             let offer = TransferOffer(transferId: id, files: offerFiles, kind: kind,
-                                      requestId: requestId, expiresAfter: expiresAfter)
+                                      requestId: requestId, expiresAfter: expiresAfter, parallel: parallel)
             try await waitForAcceptance(secure, offer: offer, peer: peer, sas: handshake.sas, alreadyPaired: paired)
             if publisher.current.phase == .rejected { secure.transport.close(); return publisher.current }
 
             publisher.update(force: true) { $0.phase = .transferring }
-            try await stream(secure, offer: offer)
+            if let join = turboJoin {
+                try await streamTurbo(secure, offer: offer, peer: peer, join: join)
+            } else {
+                try await stream(secure, offer: offer)
+            }
             trust.touch(peer: peer)
             publisher.finish(.completed)
         } catch let error as CrossDropError {
@@ -279,6 +299,7 @@ public final class OutgoingTransfer {
                     throw CrossDropError.violation(ErrorCode.unexpectedMessage)
                 }
                 resumeAt = try Self.parseResume(reply, offer: offer)
+                turboJoin = try Turbo.parseJoin(reply, requested: offer.parallel)
                 return
             case "transfer.reject":
                 let reason = reply.string("reason").map { String($0.prefix(64)) } ?? "declined"
@@ -368,56 +389,204 @@ public final class OutgoingTransfer {
     }
 
     private func writeFiles(_ channel: SecureChannel, offer: TransferOffer) async throws {
-        for (index, file) in offer.files.enumerated() {
+        for index in offer.files.indices {
             try checkCancelled()
-            let offset = resumeAt[file.fileId] ?? 0
-            var start: [String: Any] = ["transferId": offer.transferId, "fileId": file.fileId]
-            if offset > 0 { start["offset"] = offset }
-            try await channel.sendControl(WireMessage.make("transfer.start", start))
-            if let data = files[index].data {
-                // Link / text: one small payload from memory.
-                var sent = 0
-                while sent < data.count {
-                    let end = min(sent + ProtocolConstants.maxDataBody, data.count)
-                    try await channel.sendData(data.subdata(in: sent..<end))
-                    sent = end
-                }
-                publisher.update { $0.files[index].bytes = Int64(data.count) }
-                continue
+            try await writeFile(channel, offer: offer, index: index, group: nil)
+        }
+    }
+
+    /// Sends file `index` whole on `channel`: `transfer.start`, then its data records.
+    private func writeFile(_ channel: SecureChannel, offer: TransferOffer, index: Int, group: OutgoingTurbo?) async throws {
+        let file = offer.files[index]
+        let offset = resumeAt[file.fileId] ?? 0
+        var start: [String: Any] = ["transferId": offer.transferId, "fileId": file.fileId]
+        if offset > 0 { start["offset"] = offset }
+        try await channel.sendControl(WireMessage.make("transfer.start", start))
+        if let data = files[index].data {
+            // Link / text: one small payload from memory.
+            var sent = 0
+            while sent < data.count {
+                let end = min(sent + ProtocolConstants.maxDataBody, data.count)
+                try await channel.sendData(data.subdata(in: sent..<end))
+                sent = end
             }
-            let handle: FileHandle
+            publisher.update { $0.files[index].bytes = Int64(data.count) }
+            return
+        }
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: files[index].url)
+            if offset > 0 { try handle.seek(toOffset: UInt64(offset)) }
+        } catch {
+            throw CrossDropError.local(ErrorCode.fileUnreadable)
+        }
+        defer { try? handle.close() }
+        var sent: Int64 = offset
+        if offset > 0 {
+            publisher.update(force: true) { s in
+                s.files[index].bytes = offset
+                s.resumedBytes += offset
+            }
+        }
+        while sent < file.size {
+            try checkCancelled()
+            try group?.checkFailed()
+            let want = Int(min(Int64(ProtocolConstants.maxDataBody), file.size - sent))
+            let chunk: Data
             do {
-                handle = try FileHandle(forReadingFrom: files[index].url)
-                if offset > 0 { try handle.seek(toOffset: UInt64(offset)) }
+                chunk = try autoreleasepool { try handle.read(upToCount: want) } ?? Data()
             } catch {
                 throw CrossDropError.local(ErrorCode.fileUnreadable)
             }
-            defer { try? handle.close() }
-            var sent: Int64 = offset
-            if offset > 0 {
-                publisher.update(force: true) { s in
-                    s.files[index].bytes = offset
-                    s.resumedBytes += offset
-                }
-            }
-            while sent < file.size {
-                try checkCancelled()
-                let want = Int(min(Int64(ProtocolConstants.maxDataBody), file.size - sent))
-                let chunk: Data
-                do {
-                    chunk = try autoreleasepool { try handle.read(upToCount: want) } ?? Data()
-                } catch {
-                    throw CrossDropError.local(ErrorCode.fileUnreadable)
-                }
-                // The file changed since it was hashed.
-                guard !chunk.isEmpty else { throw CrossDropError.local(ErrorCode.fileUnreadable, "file shrank") }
-                try await channel.sendData(chunk)
-                sent += Int64(chunk.count)
-                let progress = sent
-                publisher.update { $0.files[index].bytes = progress }
-                onChunkSent?(progress)
-            }
+            // The file changed since it was hashed.
+            guard !chunk.isEmpty else { throw CrossDropError.local(ErrorCode.fileUnreadable, "file shrank") }
+            try await channel.sendData(chunk)
+            sent += Int64(chunk.count)
+            group?.keepAlive()
+            let progress = sent
+            publisher.update { $0.files[index].bytes = progress }
+            onChunkSent?(progress)
         }
+    }
+
+    // MARK: Turbo (§9.10)
+
+    /// Opens up to `join.max - 1` extra connections to the same receiver. Every connection
+    /// takes the next file from a shared queue and sends it whole; `transfer.complete` still
+    /// arrives on the main connection. The first failure on any connection ends them all.
+    private func streamTurbo(_ main: SecureChannel, offer: TransferOffer, peer: PeerInfo, join: Turbo.Join) async throws {
+        let group = OutgoingTurbo(main: main, fileCount: offer.files.count, sideAttempts: join.max - 1)
+        lock.lock()
+        turboGroup = group
+        let alreadyCancelled = cancelled
+        lock.unlock()
+        defer { group.closeSides() }
+        if alreadyCancelled { throw CrossDropError.local(ErrorCode.cancelled) }
+        // Extra connections go to the address that answered, so they reach the same device.
+        let target = main.transport.connection.currentPath?.remoteEndpoint ?? endpoint
+        for _ in 1..<join.max {
+            Task { await self.runSide(target, offer: offer, peer: peer, join: join, group: group) }
+        }
+        let reader = Task { await self.readTurboReplies(main, group: group, isMain: true) }
+        let worker = Task { await self.workTurbo(main, offer: offer, group: group, isMain: true) }
+        do {
+            try await group.wait()
+        } catch {
+            reader.cancel()
+            worker.cancel()
+            throw error
+        }
+    }
+
+    /// One extra connection: handshake, `transfer.join`, then files from the shared queue.
+    private func runSide(_ target: NWEndpoint, offer: TransferOffer, peer: PeerInfo, join: Turbo.Join,
+                         group: OutgoingTurbo) async {
+        let transport = NWTransport.connect(to: target)
+        let channel = SecureChannel(transport: transport)
+        guard !isCancelled, group.addSide(channel) else {
+            transport.close()
+            group.settle()
+            return
+        }
+        do {
+            try await transport.start(timeout: ProtocolConstants.connectTimeout)
+            let handshake = try await Handshake.runClient(channel: channel, identity: identity, local: local, trust: trust)
+            // The same device, already trusted: no pairing happens on an extra connection.
+            guard handshake.peer.deviceId == peer.deviceId, handshake.peer.identityKey == peer.identityKey,
+                  trust.trustedIdentityKey(for: peer.deviceId) == peer.identityKey else {
+                throw CrossDropError.local(ErrorCode.peerChangedIdentity, "another device")
+            }
+            try await channel.sendControl(WireMessage.make("transfer.join", [
+                "transferId": offer.transferId, "token": join.token,
+            ]))
+            let reply = try await channel.receiveControl(timeout: ProtocolConstants.handshakeTimeout)
+            guard reply.type == "transfer.joined", reply.string("transferId") == offer.transferId else {
+                throw CrossDropError.local(ErrorCode.unexpectedMessage, "join refused")
+            }
+        } catch {
+            // Not joined: its files stay in the queue for the other connections.
+            group.removeSide(channel)
+            transport.close()
+            group.settle()
+            return
+        }
+        let streams = group.joined()
+        publisher.update(force: true) { $0.streams = streams }
+        group.settle()
+        let reader = Task { await self.readTurboReplies(channel, group: group, isMain: false) }
+        await workTurbo(channel, offer: offer, group: group, isMain: false)
+        await reader.value
+    }
+
+    /// Sends files from the shared queue on `channel` until none is left.
+    private func workTurbo(_ channel: SecureChannel, offer: TransferOffer, group: OutgoingTurbo, isMain: Bool) async {
+        // Give the extra connections a moment to join, so the files spread over all of them.
+        if isMain { await group.waitSettled(within: ProtocolConstants.turboJoinWait) }
+        do {
+            while let index = group.next(for: channel) {
+                try checkCancelled()
+                try group.checkFailed()
+                try await writeFile(channel, offer: offer, index: index, group: group)
+                group.fileSent(on: channel)
+            }
+        } catch let error as CrossDropError {
+            if error.code == ErrorCode.fileUnreadable {
+                // As on one connection: tell the receiver why, on the main connection.
+                try? await group.main.sendControl(WireMessage.make("transfer.cancel", [
+                    "transferId": offer.transferId, "reason": "source_unavailable",
+                ]))
+                group.fail(error)
+            } else if error.fromPeer || error.isCancellation || error.peerCode != nil {
+                group.fail(error)
+            }
+            // Otherwise the connection broke: its reader reports what the receiver said, if anything.
+        } catch {
+            group.fail(CrossDropError.local(ErrorCode.internalError, "\(error)"))
+        }
+    }
+
+    /// Reads the receiver's messages on one Turbo connection: progress, and on the main
+    /// connection `transfer.complete`. An idle extra connection that closes loses nothing.
+    private func readTurboReplies(_ channel: SecureChannel, group: OutgoingTurbo, isMain: Bool) async {
+        do {
+            while !group.isEnded {
+                let message = try await channel.receiveControl(timeout: ProtocolConstants.streamTimeout)
+                switch message.type {
+                case "transfer.progress":
+                    recordProgress(message)
+                    group.keepAlive()
+                case "transfer.complete" where isMain:
+                    guard try message.requireString("transferId") == id else {
+                        throw CrossDropError.violation(ErrorCode.unexpectedMessage)
+                    }
+                    group.succeed()
+                    return
+                case "transfer.cancel":
+                    throw CrossDropError.peer(ErrorCode.cancelled)
+                case "error":
+                    throw message.peerError()
+                default:
+                    throw CrossDropError.violation(ErrorCode.unexpectedMessage)
+                }
+            }
+        } catch let error as CrossDropError {
+            if group.isEnded { return }
+            if !isMain && !error.fromPeer && error.peerCode == nil && !group.isBusy(channel) { return }
+            group.fail(error)
+        } catch {
+            group.fail(CrossDropError.local(ErrorCode.internalError, "\(error)"))
+        }
+    }
+
+    /// Receiver progress for one file; the total is the sum over files (they finish out of order).
+    private func recordProgress(_ message: WireMessage) {
+        guard message.string("transferId") == id, let fileId = message.int("fileId"),
+              let bytes = message.int("bytes") else { return }
+        lock.lock()
+        confirmed[fileId] = bytes
+        let total = confirmed.values.reduce(Int64(0), +)
+        lock.unlock()
+        publisher.update { $0.peerConfirmedBytes = total }
     }
 }
 

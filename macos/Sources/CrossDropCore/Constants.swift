@@ -40,6 +40,10 @@ public enum ProtocolConstants {
     public static let roomAnswerWait: TimeInterval = 5
     /// Room hints advertised in one TXT record (§9.9).
     public static let maxRoomHints = 4
+    /// Most connections one Turbo transfer may use, the main one included (§9.10).
+    public static let maxTurboStreams = 4
+    /// How long a Turbo sender gives its extra connections to join before streaming starts (§9.10).
+    public static let turboJoinWait: TimeInterval = 1
 
     public static let recordKindControl: UInt8 = 0x01
     public static let recordKindData: UInt8 = 0x02

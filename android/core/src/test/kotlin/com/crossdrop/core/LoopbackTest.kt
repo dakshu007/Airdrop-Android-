@@ -37,6 +37,7 @@ class LoopbackTest {
     @Volatile var privateMode = false
     @Volatile var receivedText: Pair<OfferKind, String>? = null
     @Volatile var acceptCapture = true
+    @Volatile var turboEnabled = true
     private val captures = Collections.synchronizedList(ArrayList<CaptureRequest>())
     private val finished = Collections.synchronizedList(ArrayList<IncomingTransfer>())
 
@@ -67,6 +68,7 @@ class LoopbackTest {
 
     private val server = CrossDropServer(
         serverIdentity, { LocalInfo("Test Mac", Platform.MACOS, "test") }, serverTrust, DirectoryStorage(dir), events, { privateMode },
+        turbo = { turboEnabled },
     )
     private val port = server.start(0, InetAddress.getLoopbackAddress())
 
@@ -99,9 +101,10 @@ class LoopbackTest {
         room: Room? = null,
         identity: IdentityKey = clientIdentity,
         trust: TrustStore = clientTrust,
+        turbo: Int = 1,
     ) = OutgoingTransfer(
         identity, LocalInfo("Test Phone", Platform.ANDROID, "test"), trust, "127.0.0.1", toPort,
-        serverIdentity.deviceId, files, ev, kind = kind, qr = qr, expiresAfter = expiresAfter, room = room,
+        serverIdentity.deviceId, files, ev, kind = kind, qr = qr, expiresAfter = expiresAfter, room = room, turbo = turbo,
     )
 
     private val clientLocal = LocalInfo("Test Phone", Platform.ANDROID, "test")
@@ -616,5 +619,174 @@ class LoopbackTest {
         transfer(listOf(bytesFile("a.txt", byteArrayOf(1))), noPrompt).run()
         assertTrue(completed.await(5, TimeUnit.SECONDS))
         assertEquals(null, serverSas)
+    }
+
+    // ---- §9.10 Turbo ----
+
+    /**
+     * A file whose first read (hashing) is fast and whose later reads (streaming) pause
+     * [delayMs] per chunk, or wait for [gate], so a transfer lasts long enough to observe.
+     */
+    private fun slowFile(name: String, data: ByteArray, delayMs: Long = 0, gate: CountDownLatch? = null): OutgoingFile {
+        var opens = 0
+        return OutgoingFile(name, data.size.toLong(), null) {
+            opens++
+            if (opens == 1) {
+                ByteArrayInputStream(data)
+            } else {
+                object : java.io.InputStream() {
+                    private val inner = ByteArrayInputStream(data)
+                    override fun read(): Int = inner.read()
+                    override fun read(b: ByteArray, off: Int, len: Int): Int {
+                        gate?.await(20, TimeUnit.SECONDS)
+                        if (delayMs > 0) Thread.sleep(delayMs)
+                        return inner.read(b, off, minOf(len, 64 * 1024))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun zeros(size: Int) = ByteArray(size)
+
+    private fun waitFor(what: String, timeoutMs: Long = 5_000, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (!condition()) {
+            if (System.currentTimeMillis() > deadline) throw AssertionError("timed out waiting for $what")
+            Thread.sleep(20)
+        }
+    }
+
+    /** Raw `transfer.join` as the paired client; returns the server's answer. */
+    private fun rawJoin(transferId: String, token: String): Message {
+        val c = Connection(Socket("127.0.0.1", port))
+        try {
+            Handshake.client(c, clientIdentity, clientLocal, clientTrust)
+            c.sendControl(Message.build("transfer.join", "transferId" to transferId, "token" to token))
+            return (c.next(5_000) as Connection.Incoming.Control).message
+        } finally {
+            c.close()
+        }
+    }
+
+    @Test
+    fun turboSpreadsFilesOverThreeConnectionsAndVerifiesEach() {
+        val rnd = Random(10)
+        val contents = linkedMapOf(
+            "empty.txt" to ByteArray(0),
+            "one.bin" to byteArrayOf(1),
+            "a.bin" to ByteArray(700_000).also(rnd::nextBytes),
+            "b.bin" to ByteArray(1_000_003).also(rnd::nextBytes),
+            "c.bin" to ByteArray(900_000).also(rnd::nextBytes),
+        )
+        val ev = ClientEvents()
+        val t = transfer(contents.map { (name, data) -> slowFile(name, data, delayMs = 5) }, ev, turbo = 3)
+        t.run()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+        assertNotNull(ev.sas, "the first connection pairs as usual")
+        assertEquals(3, t.streams)
+        assertEquals(3, finished.single().streams)
+        assertEquals(contents.keys, saved.map { it.displayName }.toSet())
+        for (f in saved) assertContentEquals(contents.getValue(f.displayName), File(f.location).readBytes())
+        assertTrue(dir.toFile().listFiles()!!.none { it.name.endsWith(".partial") })
+        assertTrue(failures.isEmpty(), "no connection may fail: $failures")
+        waitFor("connections to close") { server.activeConnections == 0 }
+    }
+
+    @Test
+    fun receiverWithoutTurboUsesOneConnection() {
+        turboEnabled = false
+        val rnd = Random(11)
+        val contents = (1..3).associate { "f$it.bin" to ByteArray(200_000 * it).also(rnd::nextBytes) }
+        val t = transfer(contents.map { (name, data) -> bytesFile(name, data) }, turbo = 3)
+        t.run()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+        assertEquals(1, t.streams)
+        assertEquals(1, finished.single().streams)
+        assertEquals(contents.keys.toList(), saved.map { it.displayName })
+        for (f in saved) assertContentEquals(contents.getValue(f.displayName), File(f.location).readBytes())
+
+        // A one-file offer never gets extra connections; a bad `parallel` is bad_message.
+        turboEnabled = true
+        waitFor("connections to close") { server.activeConnections == 0 }
+        val single = rawOffer(mapOf("parallel" to 2))
+        assertEquals("transfer.accept", single.type)
+        assertEquals(null, single.fields["join"])
+        for (bad in listOf<Any>(1L, 5L, "3", 2.5)) {
+            waitFor("connections to close") { server.activeConnections == 0 }
+            val answer = rawOffer(mapOf("parallel" to bad))
+            assertEquals("bad_message", answer.fields["code"], "parallel=$bad")
+        }
+    }
+
+    @Test
+    fun senderCancelDuringTurboClosesEveryConnection() {
+        var started: IncomingTransfer? = null
+        onStarted = { started = it }
+        val files = (1..3).map { slowFile("big$it.bin", zeros(40_000_000), delayMs = 20) }
+        val t = transfer(files, turbo = 3)
+        val outcome = java.util.concurrent.CompletableFuture<Throwable?>()
+        Thread { outcome.complete(runCatching { t.run() }.exceptionOrNull()) }.start()
+        waitFor("three connections") { started?.streams == 3 && server.activeConnections == 3 }
+        Thread.sleep(200)
+        t.cancel()
+        val e = outcome.get(10, TimeUnit.SECONDS)
+        assertTrue(e is ProtocolException && e.code == ErrorCode.CANCELLED, "got $e")
+        assertTrue(failed.await(5, TimeUnit.SECONDS))
+        waitFor("every connection to close") { server.activeConnections == 0 }
+        assertEquals(listOf(ErrorCode.CANCELLED), failures.toList(), "reported once, as cancelled")
+        assertTrue(dir.toFile().listFiles()!!.isEmpty(), "left: " + dir.toFile().listFiles()!!.joinToString { it.name })
+    }
+
+    @Test
+    fun receiverCancelDuringTurboStopsTheSender() {
+        onStarted = { t ->
+            Thread {
+                waitFor("three connections") { t.streams == 3 }
+                Thread.sleep(200)
+                t.cancel()
+            }.start()
+        }
+        val files = (1..3).map { slowFile("big$it.bin", zeros(40_000_000), delayMs = 20) }
+        val t = transfer(files, turbo = 3)
+        val e = assertFailsWith<ProtocolException> { t.run() }
+        assertEquals(ErrorCode.CANCELLED, e.code)
+        assertTrue(failed.await(5, TimeUnit.SECONDS))
+        waitFor("every connection to close") { server.activeConnections == 0 }
+        assertEquals(listOf(ErrorCode.CANCELLED), failures.toList())
+        assertTrue(dir.toFile().listFiles()!!.isEmpty(), "left: " + dir.toFile().listFiles()!!.joinToString { it.name })
+    }
+
+    @Test
+    fun badJoinIsRefusedAndTheTransferCarriesOn() {
+        pairClientWithServer()
+        waitFor("connections to close") { server.activeConnections == 0 }
+        // No such transfer.
+        val unknown = rawJoin("no-such-transfer", "A".repeat(22))
+        assertEquals("error", unknown.type)
+        assertEquals("unexpected_message", unknown.fields["code"])
+
+        var started: IncomingTransfer? = null
+        onStarted = { started = it }
+        val gate = CountDownLatch(1)
+        val first = ByteArray(500_000).also { Random(12).nextBytes(it) }
+        val second = ByteArray(300_000).also { Random(13).nextBytes(it) }
+        val t = transfer(listOf(slowFile("first.bin", first, gate = gate), bytesFile("second.bin", second)), turbo = 2)
+        val outcome = java.util.concurrent.CompletableFuture<Throwable?>()
+        Thread { outcome.complete(runCatching { t.run() }.exceptionOrNull()) }.start()
+        waitFor("the extra connection") { started?.streams == 2 }
+        waitFor("connections to settle") { server.activeConnections == 2 }
+
+        // Right transfer, wrong token: refused, and the transfer is not affected.
+        val wrong = rawJoin(t.transferId, "B".repeat(22))
+        assertEquals("error", wrong.type)
+        assertEquals("auth_failed", wrong.fields["code"])
+
+        gate.countDown()
+        assertEquals(null, outcome.get(20, TimeUnit.SECONDS))
+        waitFor("the transfer to finish") { finished.size == 2 }
+        assertEquals(2, finished.last().streams)
+        assertContentEquals(first, File(saved.single { it.displayName == "first.bin" }.location).readBytes())
+        assertContentEquals(second, File(saved.single { it.displayName == "second.bin" }.location).readBytes())
     }
 }

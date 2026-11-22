@@ -45,13 +45,14 @@ import kotlin.system.exitProcess
  *        [--path <a/b>] [--kind link|text --text <s>] [--qr <token>:<fingerprint>]
  *        [--die-after <bytes>]                   (exit abruptly mid-transfer)
  *        [--expires-after <seconds>] [--room <crossdrop://room URI>] [--request-id <id>]
+ *        [--turbo <n>]                           (up to n connections for several files, §9.10; prints STREAMS <used>)
  *   capture --host <h> --port <p> --identity <file> --listen <port> --dir <dir> [--kind photo|pick]
  *        (asks the receiver for a photo, then waits for the answer on its own listening port)
  * Optional: --platform macos to present as a Mac (the emulator UI run uses it).
  * Output lines: SAS <code>, RECEIVED <name> <sha256>, TEXT <kind> <base64>,
  * RESUMED <bytes>, COMPLETE <id>, LISTENING <port>, PROMPT <id> (an offer asked the user),
  * CAPTURE <kind> <requestId>, ACK <requestId>, REPLY <requestId> (an answer to our request),
- * EXPIRES <seconds>; errors go to stderr.
+ * EXPIRES <seconds>, STREAMS <n> (connections a --turbo send used); errors go to stderr.
  */
 fun main(args: Array<String>) {
     if (args.isEmpty()) usage()
@@ -261,9 +262,11 @@ private fun send(identity: IdentityKey, local: LocalInfo, host: String, port: In
     val transfer = OutgoingTransfer(
         identity, local, InMemoryTrustStore(), host, port, null, files, events, kind = kind, qr = qr,
         requestId = opts["request-id"], expiresAfter = opts["expires-after"]?.toLong(), room = room,
+        turbo = opts["turbo"]?.let { t -> t.toIntOrNull()?.takeIf { it in 1..Protocol.MAX_TURBO_STREAMS } ?: usage() } ?: 1,
     )
     try {
         transfer.run()
+        if (opts.containsKey("turbo")) out("STREAMS ${transfer.streams}")
         out("COMPLETE ${transfer.transferId}")
         exitProcess(0)
     } catch (e: ProtocolException) {
