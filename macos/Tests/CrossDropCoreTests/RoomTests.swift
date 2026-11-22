@@ -34,6 +34,8 @@ final class RoomTests: XCTestCase {
                        "rLFTyt2qSBO6Y4akuh0ZM9XOeQgI+QtvAGidEQFTgGc=")
         XCTAssertEqual(Rooms.parseHints("da19855d5fe9499b, 0011223344556677,zz"), ["da19855d5fe9499b", "0011223344556677"])
         XCTAssertEqual(Rooms.parseHints(nil), [])
+        // Only ASCII spaces around a hint are ignored (identical to the Kotlin core).
+        XCTAssertEqual(Rooms.parseHints("da19855d5fe9499b,\n0011223344556677,\t0011223344556677"), ["da19855d5fe9499b"])
 
         let deviceId = String(repeating: "a", count: 32)
         var expected = Data()
@@ -61,6 +63,8 @@ final class RoomTests: XCTestCase {
             variant("exp=1800000000", "exp=-5"),
             variant("&h=192.168.1.5%2Cfe80%3A%3A1%25en0", ""),
             variant("h=192.168.1.5", "h=192.168.1.5%2F..%2F"),
+            variant("%2Cfe80", "%2C%0Afe80"), // newline before a host: no trimming
+            variant("%2Cfe80", "%2C%20fe80"), // space before a host: no trimming
             variant("p=47100", "p=0"),
             variant("p=47100", "p=70000"),
             variant("fp=\(fp)", "fp=\(fp.uppercased())"),

@@ -145,6 +145,13 @@ final class VectorTests: XCTestCase {
         }
     }
 
+    func testRoomHint() throws {
+        // §9.9: the hint hashes the base64url roomId text, not its decoded bytes.
+        let v = try section("roomHint")
+        let roomId = try XCTUnwrap(v["roomId"] as? String)
+        XCTAssertEqual(Rooms.hint(roomId: roomId), v["hintHex"] as? String)
+    }
+
     func testFrameLimits() throws {
         let v = try section("frames")
         let maxPlain = try XCTUnwrap(v["maxPlaintextPayload"] as? Int)

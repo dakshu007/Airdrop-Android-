@@ -49,6 +49,16 @@ class CaptureRequests {
         pending[requestId] = Entry(deviceId, now + ttlMs)
     }
 
+    /**
+     * True when [requestId] is outstanding for [deviceId], without using it up: the receiver
+     * checks this first and calls [redeem] only once the answer is really accepted, so an
+     * answer refused for a local reason (not receiving, no space) can be sent again.
+     */
+    fun isOutstanding(requestId: String, deviceId: String): Boolean {
+        val entry = pending[requestId] ?: return false
+        return entry.deviceId == deviceId && entry.expiresAt >= System.currentTimeMillis()
+    }
+
     /** Uses up [requestId] if it is outstanding for [deviceId]. A different device never consumes it. */
     fun redeem(requestId: String, deviceId: String): Boolean {
         val entry = pending[requestId] ?: return false

@@ -397,7 +397,7 @@ Then:
 | handshake step timeout | 15 s |
 | human decision timeout | 120 s |
 | stream inactivity timeout | 30 s |
-| progress message rate | ≤ 2 per second per transfer |
+| progress message rate | ≤ 2 per second per connection (one transfer, except Turbo §9.10), plus one per finished file |
 
 ## 8. Versioning
 
@@ -541,8 +541,8 @@ Covers §9.1–§9.10.
 A device can ask a paired device to take a photo (or pick files) and send the
 result back. Typical use: the Mac asks the phone.
 
-* The requester connects as a client, completes the handshake (§4) and, instead
-  of `pair.request` or `transfer.offer`, sends:
+* The requester connects as a client, completes the handshake (§4) and sends
+  (instead of `transfer.offer`):
 
   ```json
   {"type":"capture.request","v":1,"requestId":"<id>","kind":"photo","port":47100}
@@ -555,10 +555,19 @@ result back. Typical use: the Mac asks the phone.
 * The receiver answers `{"type":"capture.ack","v":1,"requestId":"<id>","accepted":true|false}`
   and the connection closes. Its app decides (it may ask the user first; the
   requester waits up to the human decision timeout).
-* No pairing happens in this flow. A client the receiver does not trust gets
+* `capture.request` itself never pairs. The receiver checks trust when the
+  message arrives: a client it does not trust gets
   `error{code:"pairing_required"}` and the connection closes; in "My devices
-  only" mode (§9.5) it gets `not_receiving` as usual. The reference requester
-  also refuses to send a capture request to a device it does not trust itself.
+  only" mode (§9.5) it gets `not_receiving` as usual.
+* A requester that does not trust the other device yet may first send a normal
+  `pair.request` on the same connection (§5, codes compared on both screens, or
+  a QR token / room proof as in §9.4 / §9.9) and then `capture.request` once
+  pairing succeeded; the receiver re-reads its trust store for every message,
+  so the request then counts as coming from a paired device. The reference
+  requesters do this only when the app passes a pairing delegate / listener
+  (`CaptureClient.request(..., pairing:)` in Kotlin, `pairingDelegate:` in
+  Swift); without one they refuse to ask a device they do not trust
+  (`pairing_required`, nothing sent).
 * The answer is a normal transfer (§6) from the phone to the requester, sent to
   the address the request came from (the remote IP of that connection) and
   `port` (or wherever discovery finds the requester when `port` is absent). Its
@@ -569,8 +578,11 @@ result back. Typical use: the Mac asks the phone.
   without a prompt, even when that device is not set to auto-accept. A
   `requestId` that does not match (unknown, expired, used, or presented by a
   different device) is ignored: the offer follows the normal rules. A
-  mismatched presentation does not use the entry up. Apps only see `requestId`
-  on an incoming transfer when it matched.
+  mismatched presentation does not use the entry up, and neither does an offer
+  the requester rejects for a local reason before accepting it
+  (`not_receiving`, `insufficient_storage`): the entry is used up only when the
+  offer is accepted, so the phone can send the answer again. Apps only see
+  `requestId` on an incoming transfer when it matched.
 * An unpaired device still cannot send anything: `transfer.offer` from an
   untrusted client gets `pairing_required` before `requestId` is looked at.
 
@@ -611,13 +623,19 @@ scan it.
   unreserved characters); `+` decodes as a space. Parsers reject: a URI over
   2048 bytes, a duplicate key, a malformed escape, invalid UTF-8, `v` ≠ 1, a bad
   `id`/`k`, `exp` not in the future or more than 4 hours + 5 minutes ahead, a
-  missing or invalid host list (1–8 entries of `[0-9A-Za-z.:%_-]`, 1–64 chars
-  each), a port outside 1–65535, or a bad `fp`. Unknown keys are ignored; a
-  missing name becomes "Room".
+  missing or invalid host list (1–8 comma-separated entries of
+  `[0-9A-Za-z.:%_-]`, 1–64 chars each; entries are not trimmed, so any
+  whitespace makes the code invalid), a port outside 1–65535, or a bad `fp`.
+  Unknown keys are ignored; a missing name becomes "Room".
 * Devices in an active room may advertise
-  `r = hex(SHA-256("CrossDrop/1 room|" || roomId)[0:8])` (16 hex chars, §2).
-  It only helps a joiner pick which room to use with which device; discovery
-  remains a hint.
+  `r = hex(SHA-256("CrossDrop/1 room|" || roomId)[0:8])` (16 hex chars, §2),
+  where `roomId` is the 22-character base64url **text** as ASCII bytes, not the
+  16 bytes it decodes to (shared vector `roomHint` in
+  `protocol/test-vectors/v1.json`: `AAECAwQFBgcICQoLDA0ODw` →
+  `da19855d5fe9499b`). Several hints are comma-separated; parsers ignore ASCII
+  spaces (U+0020 only) around each one and drop entries that are not 16
+  lowercase hex characters. It only helps a joiner pick which room to use with
+  which device; discovery remains a hint.
 * **Pairing by room.** A client that holds the room sends
   `pair.request` with `"room": {"id": "<roomId>", "proof": "<b64>"}` where
   `proof = HMAC-SHA256(roomKey, "CrossDrop/1 room|" || TH)` and `TH` is the
@@ -713,19 +731,34 @@ as in §6.
   connections up to 1 s to join before the first file starts.
 * **Receiving.** The receiver verifies each file's SHA-256 and saves it as
   today (§6.5; parallel saves never overwrite each other). It sends
-  `transfer.progress` on the connection that carries that file, and
+  `transfer.progress` on the connection that carries that file, throttled per
+  connection (≤ 2 per second on each, plus one per finished file, §7), so a
+  Turbo transfer may produce up to 2 × `m` progress messages per second in
+  total, and
   `transfer.complete` on the **main** connection once every file is verified.
   The sender then closes the extra connections; the receiver closes any that
   are still open shortly afterwards. Inactivity (§4.5) is judged over all the
   transfer's connections together: one connection may be idle while another is
   busy.
-* **Failure.** `transfer.cancel` or `error` on any connection, a failed file, or
-  a dropped connection that is carrying a file ends the whole transfer: every
-  one of its connections is closed, and the receiver tells the sender why on
-  the others when it is its own error. Partial files follow §9.3 (kept for a
-  resume only when the reason is a dropped connection or a timeout). An extra
-  connection that drops while it carries nothing loses nothing; the sender
-  ignores it.
+* **Failure.** `transfer.cancel` or `error` on any connection, or a failed file,
+  ends the whole transfer: every one of its connections is closed. When it is
+  the receiver's own error (or cancel) it says so on each connection that is
+  still open (`error`, or `transfer.cancel`); the sender reports its own error
+  on the main connection and closes the others (a cancel goes out on the main
+  connection and on every extra connection that has joined; one still in its
+  handshake or waiting for `transfer.joined` is just closed). Partial files follow
+  §9.3 (kept for a resume only when the reason is a dropped connection or a
+  timeout).
+* **Dropped connections.** The receiver cannot tell whether a file was on its
+  way, so any of the transfer's connections closing before `transfer.complete`
+  ends the transfer there. The sender ends it when a connection drops in the
+  middle of a file (after waiting up to 1 s for the receiver's reason on the
+  other connections, so the user sees the real cause), and ignores an extra
+  connection that drops when it has nothing left to send: the receiver's
+  verdict still arrives on the main connection.
+* **Refused joins** are not failed transfers: the reference receivers do not
+  report them to the app, and the sender carries on with the connections it
+  has.
 * **Security notes.** Every connection is a fully authenticated, encrypted
   session of its own (§4); the token only links it to the transfer and is
   checked against the device that made the offer, so another paired device

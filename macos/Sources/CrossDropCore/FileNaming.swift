@@ -43,9 +43,14 @@ public enum FileNaming {
         return (String(name[..<dot]), String(name[dot...]))
     }
 
+    private static let moveLock = NSLock()
+
     /// Moves `temporary` into `directory` under `name`, adding " (n)" before the
     /// extension instead of ever overwriting an existing item.
     public static func moveToUniqueDestination(_ temporary: URL, directory: URL, name: String) throws -> URL {
+        // Files of one Turbo transfer (§9.10) are saved concurrently: pick a free name under a lock.
+        moveLock.lock()
+        defer { moveLock.unlock() }
         let fm = FileManager.default
         let parts = splitExtension(name)
         for index in 0..<10_000 {

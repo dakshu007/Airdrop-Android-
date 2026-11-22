@@ -140,8 +140,8 @@ public struct RoomInvite: Equatable {
         guard exp > nowSeconds,
               exp <= nowSeconds + ProtocolConstants.roomMaxTTL + ProtocolConstants.roomClockSkew else { return nil }
         guard let hostText = query["h"] else { return nil }
-        let hosts = hostText.split(separator: ",", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+        // No trimming: the strict host pattern rejects any whitespace (identical to the Kotlin core).
+        let hosts = hostText.split(separator: ",", omittingEmptySubsequences: false).map { String($0) }
         guard !hosts.isEmpty, hosts.count <= maxHosts, hosts.allSatisfy({ isValidHost($0) }) else { return nil }
         guard let portText = query["p"], isDigits(portText), let portValue = Int64(portText),
               (1...65535).contains(portValue) else { return nil }
@@ -316,13 +316,16 @@ public final class Rooms {
         Hex.encode(CDCrypto.sha256(Labels.room + Data(roomId.utf8)).prefix(8))
     }
 
-    /// Parses a TXT `r` value: comma-separated hints, invalid ones dropped.
+    /// Parses a TXT `r` value: comma-separated hints (ASCII spaces around each ignored), invalid ones dropped.
     public static func parseHints(_ value: String?) -> [String] {
         guard let value = value else { return [] }
-        let hints = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        let hints = value.split(separator: ",").map { $0.trimmingCharacters(in: Rooms.asciiSpace) }
             .filter { Hex.isLowerHex($0, length: 16) }
         return Array(hints.prefix(ProtocolConstants.maxRoomHints))
     }
+
+    /// Only U+0020, like Kotlin's `trim(' ')`.
+    private static let asciiSpace = CharacterSet(charactersIn: " ")
 
     /// Display name: control characters removed, trimmed, at most 64 scalars, "Room" when empty.
     static func cleanName(_ raw: String?) -> String {

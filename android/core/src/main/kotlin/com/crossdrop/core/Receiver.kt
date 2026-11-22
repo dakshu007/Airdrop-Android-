@@ -210,6 +210,8 @@ class CrossDropServer(
         private var group: IncomingTurbo? = null
         /** The Turbo group this extra connection joined (§9.10). */
         private var joined: IncomingTurbo? = null
+        /** This connection asked to join a Turbo transfer (§9.10): its failures are never reported as a transfer's. */
+        private var sideConnection = false
 
         fun run() {
             try {
@@ -238,8 +240,8 @@ class CrossDropServer(
             if (first && !error.remote && error.code != ErrorCode.CANCELLED && error.code != ErrorCode.CONNECTION_LOST && !conn.isClosed) {
                 conn.sendErrorAndClose(error.code, encrypted)
             }
-            // The main session reports the transfer; an extra connection never does.
-            if (joined == null) events.onFailed(t, peer, error)
+            // The main session reports the transfer; an extra connection (joined or refused) never does.
+            if (!sideConnection) events.onFailed(t, peer, error)
         }
 
         private fun runInner() {
@@ -306,6 +308,7 @@ class CrossDropServer(
                         return
                     }
                     "transfer.join" -> {
+                        sideConnection = true
                         if (untrusted) {
                             if (privateMode()) throw ProtocolException(ErrorCode.NOT_RECEIVING, "paired devices only")
                             // No pairing on an extra connection (§9.10).
@@ -377,9 +380,11 @@ class CrossDropServer(
             val parallel = if (msg.fields["parallel"] == null) null else msg.long("parallel", 2, Protocol.MAX_TURBO_STREAMS.toLong()).toInt()
             val rawRequestId = msg.optString("requestId", 64)
             if (rawRequestId != null && !Protocol.isValidTransferId(rawRequestId)) throw ProtocolException(ErrorCode.BAD_MESSAGE, "bad requestId")
-            // Only an answer to a capture request we sent to this very device counts (§9.7).
-            val requestId = rawRequestId?.takeIf { captureRequests.redeem(it, peer.deviceId) }
-            val offer = IncomingOffer(transferId, peer, files, System.currentTimeMillis() + Protocol.HUMAN_DECISION_TIMEOUT_MS, kind, requestId, expiresAfter)
+            // Only an answer to a capture request we sent to this very device counts (§9.7). It is
+            // used up only once the offer gets past the local checks below, so a retry still counts.
+            val candidate = rawRequestId?.takeIf { captureRequests.isOutstanding(it, peer.deviceId) }
+            val expiresAt = System.currentTimeMillis() + Protocol.HUMAN_DECISION_TIMEOUT_MS
+            var offer = IncomingOffer(transferId, peer, files, expiresAt, kind, candidate, expiresAfter)
 
             if (!events.isReceiving()) {
                 reject(transferId, "not_receiving")
@@ -391,6 +396,9 @@ class CrossDropServer(
                 events.onRejected(offer, "insufficient_storage")
                 return
             }
+            val requestId = candidate?.takeIf { captureRequests.redeem(it, peer.deviceId) }
+            // Another connection used it up in the meantime: a normal offer after all.
+            if (requestId != candidate) offer = IncomingOffer(transferId, peer, files, expiresAt, kind, null, expiresAfter)
 
             val accepted = if (requestId != null || trust.get(peer.deviceId)?.autoAccept == true) {
                 true

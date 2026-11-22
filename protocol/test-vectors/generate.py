@@ -177,6 +177,12 @@ def main() -> None:
             {"utf8": "hello", "hex": hashlib.sha256(b"hello").hexdigest()},
         ],
         "sanitize": [{"input": n, "output": sanitize(n)} for n in sanitize_cases],
+        "roomHint": {
+            "roomId": "AAECAwQFBgcICQoLDA0ODw",
+            "hintHex": hashlib.sha256(b"CrossDrop/1 room|" + b"AAECAwQFBgcICQoLDA0ODw").hexdigest()[:16],
+            "note": "hint = hex(SHA-256(\"CrossDrop/1 room|\" || roomId)[0:8]) where roomId is the 22-character "
+            "base64url text as ASCII, not its decoded bytes",
+        },
         "frames": {
             "maxPlaintextPayload": 65536,
             "maxEncryptedPayload": 262161,

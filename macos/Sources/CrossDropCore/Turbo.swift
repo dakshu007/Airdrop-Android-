@@ -14,7 +14,11 @@ enum Turbo {
     /// 16 random bytes, base64url without padding.
     static func newToken() -> String {
         var bytes = [UInt8](repeating: 0, count: 16)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        if SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) != errSecSuccess {
+            // Never a fixed token: fall back to the system CSPRNG, which cannot fail.
+            var generator = SystemRandomNumberGenerator()
+            for i in 0..<bytes.count { bytes[i] = UInt8.random(in: 0...255, using: &generator) }
+        }
         return Data(bytes).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
@@ -288,6 +292,8 @@ final class OutgoingTurbo {
     private var sides: [SecureChannel] = []
     private var busy: Set<ObjectIdentifier> = []
     private var joinedCount = 0
+    /// Extra connections that got `transfer.joined`: only these are told about a cancel.
+    private var joinedSides: Set<ObjectIdentifier> = []
     private var failure: CrossDropError?
     private var ended = false
     private var succeeded = false
@@ -354,10 +360,11 @@ final class OutgoingTurbo {
         lock.unlock()
     }
 
-    /// An extra connection joined; returns the number of connections now in use.
-    func joined() -> Int {
+    /// `channel` joined the transfer; returns the number of connections now in use.
+    func joined(_ channel: SecureChannel) -> Int {
         lock.lock()
         defer { lock.unlock() }
+        joinedSides.insert(ObjectIdentifier(channel))
         joinedCount += 1
         return 1 + joinedCount
     }
@@ -453,14 +460,17 @@ final class OutgoingTurbo {
         }
     }
 
-    /// The sender cancelled: tells the receiver on every extra connection and closes them.
+    /// The sender cancelled: tells the receiver on every extra connection that joined (the
+    /// others are not part of the transfer yet) and closes them all.
     func cancelSides(transferId: String) {
         lock.lock()
         let open = sides
+        let joinedIds = joinedSides
         lock.unlock()
         for channel in open {
+            let notify = joinedIds.contains(ObjectIdentifier(channel))
             Task {
-                if channel.isEncrypted {
+                if notify, channel.isEncrypted {
                     try? await channel.sendControl(WireMessage.make("transfer.cancel", [
                         "transferId": transferId, "reason": "user",
                     ]))

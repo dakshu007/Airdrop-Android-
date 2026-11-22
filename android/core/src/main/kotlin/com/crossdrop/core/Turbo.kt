@@ -204,9 +204,16 @@ internal class OutgoingTurbo(val main: Connection, fileCount: Int, sideAttempts:
         return true
     }
 
-    fun joined() {
+    /** Connections that sent `transfer.join` and got `transfer.joined`. */
+    private val joinedSides = java.util.concurrent.CopyOnWriteArraySet<Connection>()
+
+    /** [c] joined the transfer: only joined connections are told about a cancel. */
+    fun joined(c: Connection) {
+        joinedSides.add(c)
         joined.incrementAndGet()
     }
+
+    fun hasJoined(c: Connection): Boolean = joinedSides.contains(c)
 
     /** One extra connection finished trying to join, whatever the outcome. */
     fun settle() = settled.countDown()

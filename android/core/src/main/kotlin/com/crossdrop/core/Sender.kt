@@ -101,7 +101,10 @@ class OutgoingTransfer(
         if (!cancelled.compareAndSet(false, true)) return
         group?.let { g ->
             for (side in g.sides) {
-                runCatching { side.sendControl(Message.build("transfer.cancel", "transferId" to transferId, "reason" to "user")) }
+                // Only a connection that joined is part of the transfer (§9.10); the others just close.
+                if (g.hasJoined(side)) {
+                    runCatching { side.sendControl(Message.build("transfer.cancel", "transferId" to transferId, "reason" to "user")) }
+                }
                 side.close()
             }
         }
@@ -279,6 +282,14 @@ class OutgoingTransfer(
 
     /** One extra Turbo connection: handshake, `transfer.join`, then files from the shared queue. */
     private fun sideWorker(g: OutgoingTurbo, address: InetSocketAddress, peer: PeerInfo, join: Turbo.Join, offerFiles: List<OfferFile>) {
+        // Each attempt counts down the main connection's wait exactly once, whatever the outcome.
+        var settled = false
+        fun settleOnce() {
+            if (!settled) {
+                settled = true
+                g.settle()
+            }
+        }
         try {
             if (g.ended || cancelled.get()) return
             val socket = Socket()
@@ -309,24 +320,31 @@ class OutgoingTransfer(
                 if (reply?.type != "transfer.joined" || reply.fields["transferId"] != transferId) {
                     throw ProtocolException(ErrorCode.UNEXPECTED_MESSAGE, "join refused")
                 }
-            } catch (e: ProtocolException) {
-                // Not joined: its files stay in the queue for the other connections.
+            } catch (e: Exception) {
+                // Not joined (refused, or any other failure): its files stay in the queue for the
+                // other connections, and the transfer carries on without it.
                 g.sides.remove(c)
                 c.close()
                 return
             }
-            g.joined()
-            g.settle()
+            g.joined(c)
+            settleOnce()
             try {
                 sendFiles(c, offerFiles, g) { g.next() }
                 idle(c, g)
             } catch (e: ProtocolException) {
-                if (!g.ended && !cancelled.get()) g.fail(e)
+                if (!g.ended && !cancelled.get()) {
+                    // The receiver usually explains a broken connection on the main one: give
+                    // that reason a moment to arrive before reporting a plain connection loss.
+                    if (!e.remote && e.code == ErrorCode.CONNECTION_LOST) Thread.sleep(SIDE_LOSS_GRACE_MS)
+                    if (!g.ended && !cancelled.get()) g.fail(e)
+                }
             }
         } catch (e: Exception) {
             if (!g.ended && !cancelled.get()) g.fail(ProtocolException(ErrorCode.INTERNAL, e.javaClass.simpleName))
         } finally {
-            g.settle()
+            // Releases the main connection's wait if this connection never joined.
+            settleOnce()
         }
     }
 
@@ -529,6 +547,9 @@ class OutgoingTransfer(
 
 /** How often a Turbo connection re-checks the shared transfer state while it waits (§9.10). */
 private const val TURBO_POLL_MS = 5_000L
+
+/** How long a broken extra Turbo connection waits for the receiver's reason on the others (§9.10). */
+private const val SIDE_LOSS_GRACE_MS = 1_000L
 
 /**
  * Pairing driven by a scanned QR code (§9.4): the receiver is only accepted if its

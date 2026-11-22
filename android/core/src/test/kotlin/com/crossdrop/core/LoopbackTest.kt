@@ -120,12 +120,14 @@ class LoopbackTest {
     private inner class Requester {
         val dir: java.nio.file.Path = Files.createTempDirectory("crossdrop-requester")
         @Volatile var acceptOffer = false
+        /** Answers to the next isReceiving() checks (handshake, then offer); empty = receiving. */
+        val receiving = java.util.concurrent.ConcurrentLinkedQueue<Boolean>()
         val prompts = Collections.synchronizedList(ArrayList<IncomingOffer>())
         val done = Collections.synchronizedList(ArrayList<IncomingTransfer>())
         val server = CrossDropServer(
             clientIdentity, { LocalInfo("Test Mac", Platform.MACOS, "test") }, clientTrust, DirectoryStorage(dir),
             object : ReceiverEvents {
-                override fun isReceiving() = true
+                override fun isReceiving() = receiving.poll() ?: true
                 override fun onPairingPrompt(prompt: PairingPrompt) = prompt.respond(true)
                 override fun onPairingClosed(prompt: PairingPrompt, paired: Boolean) {}
                 override fun onOffer(offer: IncomingOffer) {
@@ -490,6 +492,28 @@ class LoopbackTest {
     }
 
     @Test
+    fun captureAnswerRefusedForALocalReasonCanBeSentAgain() {
+        pairClientWithServer()
+        val r = Requester()
+        try {
+            val id = requestCapture(r)
+            // Receiving was switched off between the handshake and the offer: refused, but the
+            // requestId is not used up by that.
+            r.receiving.addAll(listOf(true, false))
+            val e = assertFailsWith<TransferRejectedException> { r.answer(id) }
+            assertEquals("not_receiving", e.reason)
+            assertEquals(1, r.server.captureRequests.outstanding)
+            // The retry is still the answer: accepted without a prompt, and only then used up.
+            r.answer(id)
+            assertTrue(r.prompts.isEmpty())
+            assertEquals(id, r.done.single().requestId)
+            assertEquals(0, r.server.captureRequests.outstanding)
+        } finally {
+            r.close()
+        }
+    }
+
+    @Test
     fun declinedCaptureRequestIsForgotten() {
         pairClientWithServer()
         acceptCapture = false
@@ -529,10 +553,15 @@ class LoopbackTest {
     fun captureRequestsExpireAndAreBoundToOneDevice() {
         val reqs = CaptureRequests()
         reqs.expect("request-0001", "a".repeat(32))
+        // Looking it up does not use it up.
+        assertEquals(true, reqs.isOutstanding("request-0001", "a".repeat(32)))
+        assertEquals(false, reqs.isOutstanding("request-0001", "b".repeat(32)))
         assertEquals(false, reqs.redeem("request-0001", "b".repeat(32)))
         assertEquals(true, reqs.redeem("request-0001", "a".repeat(32)))
         assertEquals(false, reqs.redeem("request-0001", "a".repeat(32)))
+        assertEquals(false, reqs.isOutstanding("request-0001", "a".repeat(32)))
         reqs.expect("request-0002", "a".repeat(32), ttlMs = -1)
+        assertEquals(false, reqs.isOutstanding("request-0002", "a".repeat(32)))
         assertEquals(false, reqs.redeem("request-0002", "a".repeat(32)))
         assertFailsWith<IllegalArgumentException> { reqs.expect("bad id!", "a".repeat(32)) }
     }
@@ -788,5 +817,7 @@ class LoopbackTest {
         assertEquals(2, finished.last().streams)
         assertContentEquals(first, File(saved.single { it.displayName == "first.bin" }.location).readBytes())
         assertContentEquals(second, File(saved.single { it.displayName == "second.bin" }.location).readBytes())
+        // Refused joins are not transfers: nothing was reported as failed.
+        assertTrue(failures.isEmpty(), "refused joins must not be reported: $failures")
     }
 }

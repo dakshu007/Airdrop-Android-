@@ -148,6 +148,11 @@
       "output": "report.final.zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
     }
   ],
+  "roomHint": {
+    "roomId": "AAECAwQFBgcICQoLDA0ODw",
+    "hintHex": "da19855d5fe9499b",
+    "note": "hint = hex(SHA-256(\"CrossDrop/1 room|\" || roomId)[0:8]) where roomId is the 22-character base64url text as ASCII, not its decoded bytes"
+  },
   "frames": {
     "maxPlaintextPayload": 65536,
     "maxEncryptedPayload": 262161,

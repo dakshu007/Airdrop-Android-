@@ -61,6 +61,16 @@ public final class CaptureRequests {
         return true
     }
 
+    /// True when `requestId` is outstanding for `deviceId`, without using it up: the receiver
+    /// checks this first and calls `redeem` only once the answer is really accepted, so an
+    /// answer refused for a local reason (not receiving, no space) can be sent again.
+    public func isOutstanding(_ requestId: String, deviceId: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = pending[requestId], entry.deviceId == deviceId else { return false }
+        return entry.expires >= Date()
+    }
+
     /// Uses up `requestId` if it is outstanding for `deviceId`. A different device never consumes it.
     public func redeem(_ requestId: String, deviceId: String) -> Bool {
         lock.lock()

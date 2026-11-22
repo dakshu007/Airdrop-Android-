@@ -117,6 +117,13 @@ class VectorsTest {
     }
 
     @Test
+    fun roomHint() {
+        // §9.9: the hint hashes the base64url roomId text, not its decoded bytes.
+        val r = v["roomHint"] as Map<String, String>
+        assertEquals(r["hintHex"], Rooms.hint(r["roomId"]!!))
+    }
+
+    @Test
     fun invalidPointsRejected() {
         val good = id["clientIdentityPubHex"]!!.hexToBytes()
         val offCurve = good.copyOf().also { it[64] = (it[64].toInt() xor 1).toByte() }

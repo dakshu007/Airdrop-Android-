@@ -510,7 +510,7 @@ public final class OutgoingTransfer {
             group.settle()
             return
         }
-        let streams = group.joined()
+        let streams = group.joined(channel)
         publisher.update(force: true) { $0.streams = streams }
         group.settle()
         let reader = Task { await self.readTurboReplies(channel, group: group, isMain: false) }
@@ -538,8 +538,12 @@ public final class OutgoingTransfer {
                 group.fail(error)
             } else if error.fromPeer || error.isCancellation || error.peerCode != nil {
                 group.fail(error)
+            } else {
+                // The connection broke in the middle of a file. A reader usually reports what the
+                // receiver said first; otherwise the loss itself ends the transfer.
+                try? await Task.sleep(nanoseconds: Self.lossGraceNanoseconds)
+                group.fail(error)
             }
-            // Otherwise the connection broke: its reader reports what the receiver said, if anything.
         } catch {
             group.fail(CrossDropError.local(ErrorCode.internalError, "\(error)"))
         }
@@ -571,12 +575,20 @@ public final class OutgoingTransfer {
             }
         } catch let error as CrossDropError {
             if group.isEnded { return }
-            if !isMain && !error.fromPeer && error.peerCode == nil && !group.isBusy(channel) { return }
+            if !isMain && !error.fromPeer && error.peerCode == nil {
+                // An idle extra connection that closes loses nothing.
+                if !group.isBusy(channel) { return }
+                // One carrying a file: the receiver usually explains why on the main connection.
+                try? await Task.sleep(nanoseconds: Self.lossGraceNanoseconds)
+            }
             group.fail(error)
         } catch {
             group.fail(CrossDropError.local(ErrorCode.internalError, "\(error)"))
         }
     }
+
+    /// How long a broken Turbo connection waits for the receiver's reason on the others (§9.10).
+    static let lossGraceNanoseconds: UInt64 = 1_000_000_000
 
     /// Receiver progress for one file; the total is the sum over files (they finish out of order).
     private func recordProgress(_ message: WireMessage) {

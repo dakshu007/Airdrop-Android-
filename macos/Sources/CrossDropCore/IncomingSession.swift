@@ -329,7 +329,8 @@ final class IncomingSession {
                 let record: SecureChannel.Record
                 if let task = pending {
                     pending = nil
-                    record = .control(try await task.value)
+                    let message = try await task.value
+                    record = .control(message)
                 } else {
                     record = try await channel.receiveRecord(timeout: ProtocolConstants.streamTimeout)
                 }
@@ -359,8 +360,8 @@ final class IncomingSession {
     }
 
     private func receiveTurboFile(_ start: WireMessage, group: IncomingTurbo) async throws {
-        guard try start.requireString("transferId") == group.transferId else {
-            throw CrossDropError.violation(ErrorCode.unexpectedMessage, "wrong transfer")
+        guard try start.requireString("transferId", maxBytes: 64) == group.transferId else {
+            throw CrossDropError.violation(ErrorCode.badMessage, "wrong transfer")
         }
         let index = try group.claim(try start.requireInt("fileId"))
         let file = group.offer.files[index]
@@ -392,8 +393,9 @@ final class IncomingSession {
 
     private func handleOffer(_ message: WireMessage, peer: PeerInfo) async throws {
         let offer = try TransferOffer.parse(message)
-        // Only an answer to a capture request we sent to this very device counts (§9.7).
-        let requestId = offer.requestId.flatMap { captureRequests.redeem($0, deviceId: peer.deviceId) ? $0 : nil }
+        // Only an answer to a capture request we sent to this very device counts (§9.7). It is
+        // used up only once the offer gets past the local checks below, so a retry still counts.
+        let requestCandidate = offer.requestId.flatMap { captureRequests.isOutstanding($0, deviceId: peer.deviceId) ? $0 : nil }
         let directory = destination()
         let snapshot = TransferSnapshot(
             id: offer.transferId, direction: .incoming, peerId: peer.deviceId, peerName: peer.name,
@@ -401,7 +403,7 @@ final class IncomingSession {
             files: offer.files.map { TransferFileState(name: $0.displayPath, size: $0.size, mime: $0.mime, sha256: $0.sha256) })
         var initial = snapshot
         initial.kind = offer.kind
-        initial.requestId = requestId
+        initial.requestId = requestCandidate
         initial.expiresAfter = offer.expiresAfter
         let publisher = SnapshotPublisher(initial, delegate: delegate)
         lock.lock()
@@ -438,7 +440,9 @@ final class IncomingSession {
                 return
             }
         }
-        publisher.update(force: true) { _ in }
+        let requestId = requestCandidate.flatMap { captureRequests.redeem($0, deviceId: peer.deviceId) ? $0 : nil }
+        // Another connection may have used it up in the meantime: then it is a normal offer.
+        publisher.update(force: true) { $0.requestId = requestId }
 
         var nextMessage: Task<WireMessage, Error>? = nil
         let outcome: Decision.Outcome

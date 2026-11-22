@@ -113,7 +113,8 @@ data class RoomInvite(
             val key = q["k"]?.takeIf { KEY.matches(it) }?.let { Rooms.b64urlDecode(it) }?.takeIf { it.size == 32 } ?: return null
             val exp = q["exp"]?.takeIf { DIGITS.matches(it) }?.toLong() ?: return null
             if (exp <= nowSeconds || exp > nowSeconds + Protocol.ROOM_MAX_TTL_S + Protocol.ROOM_CLOCK_SKEW_S) return null
-            val hosts = (q["h"] ?: return null).split(',').map { it.trim() }
+            // No trimming: the strict host pattern rejects any whitespace (identical to the Swift core).
+            val hosts = (q["h"] ?: return null).split(',')
             if (hosts.isEmpty() || hosts.size > MAX_HOSTS || !hosts.all { HOST.matches(it) }) return null
             val port = q["p"]?.takeIf { DIGITS.matches(it) }?.toLong()?.takeIf { it in 1..65535 }?.toInt() ?: return null
             val fp = q["fp"]?.takeIf { HEX64.matches(it) } ?: return null
@@ -230,9 +231,9 @@ class Rooms {
         fun hint(roomId: String): String =
             Hashing.sha256(Protocol.LABEL_ROOM, roomId.toByteArray(Charsets.US_ASCII)).copyOfRange(0, 8).toHex()
 
-        /** Parses a TXT `r` value: comma-separated hints, invalid ones dropped. */
+        /** Parses a TXT `r` value: comma-separated hints (ASCII spaces around each ignored), invalid ones dropped. */
         fun parseHints(value: String?): List<String> =
-            value?.split(',')?.map { it.trim() }?.filter { HINT.matches(it) }?.take(Protocol.MAX_ROOM_HINTS) ?: emptyList()
+            value?.split(',')?.map { it.trim(' ') }?.filter { HINT.matches(it) }?.take(Protocol.MAX_ROOM_HINTS) ?: emptyList()
 
         internal fun cleanName(raw: String?): String {
             val noControls = (raw ?: "").filter { !(it.code <= 0x1f || it.code in 0x7f..0x9f) }.trim()

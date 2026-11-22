@@ -207,12 +207,17 @@ final class LoopbackTests: XCTestCase {
     private func answer(_ rig: Rig, _ requester: Requester, requestId: String?,
                         identity: DeviceIdentity? = nil, trust: InMemoryTrustStore? = nil) async throws -> TransferSnapshot {
         let file = try makeFile("photo-\(UUID().uuidString.prefix(6)).jpg", bytes: 3)
-        return await OutgoingTransfer(endpoint: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: requester.port)!),
-                                      peerName: "requester", peerId: nil, peerPlatform: nil,
-                                      files: [OutgoingFile(url: file)],
-                                      identity: identity ?? rig.serverIdentity, local: LocalInfo(name: "Phone", platform: "android", appVersion: "test"),
-                                      trust: trust ?? rig.serverTrust, delegate: TestDelegate(),
-                                      requestId: requestId).run()
+        // OutgoingTransfer holds its delegate weakly: keep this one alive for the whole run, or a
+        // pairing prompt (first contact from another device) would never be answered.
+        let delegate = TestDelegate()
+        let result = await OutgoingTransfer(endpoint: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: requester.port)!),
+                                            peerName: "requester", peerId: nil, peerPlatform: nil,
+                                            files: [OutgoingFile(url: file)],
+                                            identity: identity ?? rig.serverIdentity, local: LocalInfo(name: "Phone", platform: "android", appVersion: "test"),
+                                            trust: trust ?? rig.serverTrust, delegate: delegate,
+                                            requestId: requestId).run()
+        _ = delegate.seenCodes // a real use after the run, so the delegate cannot be released early
+        return result
     }
 
     private func pairClientWithServer(_ rig: Rig) async throws {
@@ -534,10 +539,15 @@ final class LoopbackTests: XCTestCase {
         let a = String(repeating: "a", count: 32)
         let b = String(repeating: "b", count: 32)
         XCTAssertTrue(requests.expect("request-0001", deviceId: a))
+        // Looking it up does not use it up.
+        XCTAssertTrue(requests.isOutstanding("request-0001", deviceId: a))
+        XCTAssertFalse(requests.isOutstanding("request-0001", deviceId: b))
         XCTAssertFalse(requests.redeem("request-0001", deviceId: b))
         XCTAssertTrue(requests.redeem("request-0001", deviceId: a))
         XCTAssertFalse(requests.redeem("request-0001", deviceId: a))
+        XCTAssertFalse(requests.isOutstanding("request-0001", deviceId: a))
         XCTAssertTrue(requests.expect("request-0002", deviceId: a, ttl: -1))
+        XCTAssertFalse(requests.isOutstanding("request-0002", deviceId: a))
         XCTAssertFalse(requests.redeem("request-0002", deviceId: a))
         XCTAssertFalse(requests.expect("bad id!", deviceId: a))
     }
@@ -801,6 +811,38 @@ final class LoopbackTests: XCTestCase {
         XCTAssertEqual(temporary, [])
     }
 
+    func testReceiverCancelDuringTurboStopsTheSender() async throws {
+        let rig = try await makeRig()
+        defer { rig.server.stop() }
+        var urls: [URL] = []
+        for index in 1...3 {
+            urls.append(try makeZeroFile("recv-cancel-\(index).bin", bytes: 16_000_000))
+        }
+        let outgoing = transfer(rig, outgoing: urls.map { OutgoingFile(url: $0) }, turbo: 3)
+        // Slow the stream down so the cancel lands mid-transfer.
+        outgoing.onChunkSent = { _ in _ = usleep(10_000) }
+        let once = Once()
+        let server = rig.server
+        rig.serverDelegate.onUpdate = { snapshot in
+            if snapshot.direction == .incoming, snapshot.streams == 3, once.claim() {
+                let id = snapshot.id
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { server.cancelTransfer(id: id) }
+            }
+        }
+        let result = await outgoing.run()
+        XCTAssertEqual(result.phase, .cancelled, "error: \(String(describing: result.error))")
+        let incoming = try await rig.serverDelegate.waitForFinished()
+        XCTAssertEqual(incoming.phase, .cancelled)
+        XCTAssertEqual(incoming.streams, 3)
+        // Every connection of the transfer closes, it is reported once, and no temporary file is left behind.
+        try await waitForIdle(rig)
+        XCTAssertEqual(rig.server.activeConnectionCount, 0)
+        XCTAssertEqual(rig.serverDelegate.finished.count, 1, "reported once")
+        let temporary = try FileManager.default.contentsOfDirectory(atPath: inbox.path)
+            .filter { $0.hasSuffix(".partial") }
+        XCTAssertEqual(temporary, [])
+    }
+
     func testBadJoinIsRefusedAndTheTransferCarriesOn() async throws {
         let rig = try await makeRig()
         defer { rig.server.stop() }
@@ -840,5 +882,8 @@ final class LoopbackTests: XCTestCase {
         XCTAssertEqual(incoming.streams, 2)
         XCTAssertEqual(try Data(contentsOf: inbox.appendingPathComponent("first.bin")), try Data(contentsOf: first))
         XCTAssertEqual(try Data(contentsOf: inbox.appendingPathComponent("second.bin")), try Data(contentsOf: second))
+        // Refused joins are not transfers: only the warm-up and the Turbo transfer were reported.
+        try await waitForIdle(rig)
+        XCTAssertEqual(rig.serverDelegate.finished.count, 2, "refused joins must not be reported")
     }
 }
