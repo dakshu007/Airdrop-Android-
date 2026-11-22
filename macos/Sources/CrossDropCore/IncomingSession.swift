@@ -82,13 +82,22 @@ final class IncomingSession {
             decision.resolve(false)
             return
         }
-        // A Turbo transfer ends on every connection (§9.10).
-        group?.fail(CrossDropError.local(ErrorCode.cancelled), origin: channel)
         Task {
             if self.channel.isEncrypted, let id = self.transferId {
+                // Tell the sender on the main connection first: ending the Turbo group below can
+                // wake this session's loop, which then closes the main connection.
                 try? await self.channel.sendControl(WireMessage.make("transfer.cancel", [
                     "transferId": id, "reason": "user",
                 ]))
+            }
+            // A Turbo transfer ends on every connection (§9.10).
+            group?.fail(CrossDropError.local(ErrorCode.cancelled), origin: self.channel)
+            if self.channel.isEncrypted, self.transferId != nil {
+                // The sender may still be streaming. Closing now would make TCP send a reset,
+                // which can discard our cancel before the sender reads it (it would then report
+                // a lost connection). The session loop keeps reading meanwhile; the sender
+                // closes as soon as it sees the cancel, which ends the loop.
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
             self.channel.transport.close()
         }
